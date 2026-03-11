@@ -13,7 +13,7 @@ dotenv.config();
 const server = http.createServer();
 const client_domain = process.env.NGROK_DOMAIN
     ? `https://${process.env.NGROK_DOMAIN}`
-    : "http://localhost:5173";";
+    : "http://localhost:5173";
 
 /**
  * HTTP server for handling HTTP requests from Recall.ai
