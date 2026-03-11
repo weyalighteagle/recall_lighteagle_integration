@@ -181,7 +181,7 @@ export async function schedule_bot_for_calendar_event(args: {
         body: JSON.stringify({
             deduplication_key,
             bot_config: {
-                bot_name: `${calendar.platform_email}'s notetaker'`,
+                bot_name: `WEYA by Light Eagle'`,
                 // meeting_url and start_time is autoamtically updated by Recall when we call the schedule bot for calendar event endpoint.
             },
         }),
