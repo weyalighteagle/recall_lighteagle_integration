@@ -6,7 +6,7 @@ import { calendar_oauth } from "./handlers/calendar_oauth";
 import { calendar_oauth_callback } from "./handlers/calendar_oauth_callback";
 import { calendars_delete } from "./handlers/calendars_delete";
 import { calendars_list } from "./handlers/calendars_list";
-import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event } from "./handlers/recall_webhook";
+import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event, get_meeting_data, list_meeting_data } from "./handlers/recall_webhook";
 
 dotenv.config();
 
@@ -66,7 +66,7 @@ body=${JSON.stringify(body)}
                 return;
             }
 
-            /** Webhoook endpoints */
+            /** Webhook endpoints */
             case "/api/recall/webhook": {
                 if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
 
@@ -75,6 +75,34 @@ body=${JSON.stringify(body)}
 
                 res.writeHead(200, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({ message: "Recall webhook received" }));
+                return;
+            }
+
+            /** Meeting transcript endpoints */
+            case "/api/meetings": {
+                if (req.method?.toUpperCase() !== "GET") throw new Error(`Method not allowed: ${req.method}`);
+
+                const meetings = list_meeting_data();
+                console.log(`Listed meetings: ${meetings.length}`);
+
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify(meetings));
+                return;
+            }
+            case "/api/meetings/transcript": {
+                if (req.method?.toUpperCase() !== "GET") throw new Error(`Method not allowed: ${req.method}`);
+                if (!search_params.bot_id) throw new Error("bot_id is required");
+
+                const data = get_meeting_data(search_params.bot_id);
+                if (!data) {
+                    res.writeHead(404, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "Transcript not found for this bot" }));
+                    return;
+                }
+
+                console.log(`Retrieved transcript for bot: ${search_params.bot_id}`);
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify(data));
                 return;
             }
 
@@ -128,7 +156,7 @@ body=${JSON.stringify(body)}
             }
             case "/api/calendar/events/bot": {
                 switch (req.method?.toUpperCase()) {
-                    // Scheudle a bot for a given calendar event.
+                    // Schedule a bot for a given calendar event.
                     case "POST": {
                         if (!search_params.calendar_event_id) throw new Error("calendar_event_id is required");
 
