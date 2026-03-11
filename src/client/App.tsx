@@ -31,6 +31,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/Tabs";
 import { useCalendar } from "./hooks/use-calendar";
 import { useCalendarEvents } from "./hooks/use-calendar-events";
 import { useDeleteCalendar } from "./hooks/use-delete-calendar";
+import { useToggleRecording } from "./hooks/use-toggle-recording";
 
 function App() {
     const [searchParams] = useSearchParams();
@@ -452,8 +453,28 @@ function CalendarEventCard({
     formatTime: (dateString: string) => string;
     getEventTitle: (event: CalendarEventType) => string;
 }) {
+    const { scheduleRecording, unscheduleRecording, isPending } =
+        useToggleRecording({
+            calendarId,
+            calendarEventId: event.id,
+        });
+
     const isInFuture = new Date(event.start_time) > new Date();
     const hasMeetingUrl = !!event.meeting_url;
+    const canToggleRecording = isInFuture && hasMeetingUrl;
+
+    const hasScheduledRecording = event.bots.some(
+        (bot) => new Date(bot.start_time) > new Date(),
+    );
+
+    const handleToggle = () => {
+        if (isPending) return;
+        if (hasScheduledRecording) {
+            unscheduleRecording();
+        } else {
+            scheduleRecording();
+        }
+    };
 
     return (
         <div className="flex flex-col gap-1.5 p-4 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
@@ -462,17 +483,50 @@ function CalendarEventCard({
                     {getEventTitle(event)}
                 </h4>
 
-                {isInFuture && hasMeetingUrl ? (
-                    <span className="shrink-0 text-xs text-green-600 font-medium">
-                        Will record
-                    </span>
+                {/* Recording toggle switch */}
+                {canToggleRecording ? (
+                    <button
+                        onClick={handleToggle}
+                        disabled={isPending}
+                        className="shrink-0 flex items-center gap-2 group"
+                        title={
+                            hasScheduledRecording
+                                ? "Turn off recording"
+                                : "Turn on recording"
+                        }
+                    >
+                        <span className="text-xs text-gray-500 group-hover:text-gray-700">
+                            {"Will record"}
+                        </span>
+                        <span className="min-w-9 min-h-5 flex items-center justify-center">
+                            {isPending ? (
+                                <Loader2 className="size-4 animate-spin text-gray-400" />
+                            ) : (
+                                <div
+                                    className={`relative w-9 h-5 rounded-full transition-colors ${
+                                        hasScheduledRecording
+                                            ? "bg-red-500"
+                                            : "bg-gray-300"
+                                    }`}
+                                >
+                                    <div
+                                        className={`absolute top-0.5 size-4 bg-white rounded-full shadow transition-transform ${
+                                            hasScheduledRecording
+                                                ? "translate-x-4"
+                                                : "translate-x-0.5"
+                                        }`}
+                                    />
+                                </div>
+                            )}
+                        </span>
+                    </button>
                 ) : !hasMeetingUrl ? (
                     <span className="shrink-0 text-xs text-gray-400">
                         No meeting link
                     </span>
-                ) : (
+                ) : !isInFuture ? (
                     <span className="shrink-0 text-xs text-gray-400">Past</span>
-                )}
+                ) : null}
             </div>
 
             <div className="flex flex-col gap-1 text-xs text-gray-500">
