@@ -1,6 +1,3 @@
-import path from "path";
-import fs from "fs";
-import { fileURLToPath } from "url";
 import http from "http";
 import dotenv from "dotenv";
 import { env } from "./config/env";
@@ -14,9 +11,7 @@ import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bo
 dotenv.config();
 
 const server = http.createServer();
-const client_domain = process.env.NGROK_DOMAIN
-    ? `https://${process.env.NGROK_DOMAIN}`
-    : "http://localhost:5173";
+const client_domain = "http://localhost:5173";
 
 /**
  * HTTP server for handling HTTP requests from Recall.ai
@@ -133,7 +128,7 @@ body=${JSON.stringify(body)}
             }
             case "/api/calendar/events/bot": {
                 switch (req.method?.toUpperCase()) {
-                    // Schedule a bot for a given calendar event.
+                    // Scheudle a bot for a given calendar event.
                     case "POST": {
                         if (!search_params.calendar_event_id) throw new Error("calendar_event_id is required");
 
@@ -173,36 +168,13 @@ body=${JSON.stringify(body)}
                 }
             }
 
-            /** Default endpoints - serve frontend in production */
+            /** Default endpoints */
             default: {
                 if (url.pathname.startsWith("/api/")) {
                     throw new Error(`Endpoint not found: ${req.method} ${url.pathname}`);
                 } else {
-                    const __dirname = path.dirname(fileURLToPath(import.meta.url));
-                    const distPath = path.resolve(__dirname, "../../dist/client");
-                    let filePath = path.join(distPath, url.pathname);
-
-                    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
-                        filePath = path.join(distPath, "index.html");
-                    }
-
-                    if (fs.existsSync(filePath)) {
-                        const ext = path.extname(filePath);
-                        const contentTypes: Record<string, string> = {
-                            ".html": "text/html",
-                            ".js": "application/javascript",
-                            ".css": "text/css",
-                            ".svg": "image/svg+xml",
-                            ".png": "image/png",
-                            ".jpg": "image/jpeg",
-                            ".json": "application/json",
-                        };
-                        res.writeHead(200, { "Content-Type": contentTypes[ext] || "application/octet-stream" });
-                        res.end(fs.readFileSync(filePath));
-                    } else {
-                        res.writeHead(404, { "Content-Type": "text/plain" });
-                        res.end("Not found");
-                    }
+                    res.writeHead(404, { "Content-Type": "text/plain" });
+                    res.end(Buffer.from(""));
                     return;
                 }
             }
@@ -219,7 +191,16 @@ body=${JSON.stringify(body)}
  */
 server.listen(env.PORT, "0.0.0.0", () => {
     console.log(`
-Server running on port ${env.PORT}
-Domain: ${client_domain}
+
+To get started:
+- Open an ngrok tunnel to the server on port ${env.PORT}
+- Open the following URL in your browser: ${client_domain}
+
+To access the OAuth URLs directly:
+- Google: https://${process.env.NGROK_DOMAIN ?? "NGROK_DOMAIN"}/api/calendar/oauth?platform=google_calendar
+- Outlook: https://${process.env.NGROK_DOMAIN ?? "NGROK_DOMAIN"}/api/calendar/oauth?platform=microsoft_outlook
+
+Ensure that:
+- The redirect URI in your Google/Outlook Calendar OAuth is set to: https://${process.env.NGROK_DOMAIN ?? "NGROK_DOMAIN"}/api/calendar/oauth/callback
     `);
 });

@@ -4,12 +4,12 @@
     "description": "Connect a calendar and schedule bots for calendar events",
     "type": "module",
     "scripts": {
-    "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:client\"",
-    "dev:server": "tsx watch src/api/index.ts",
-    "dev:client": "vite",
-    "build": "tsc && vite build",
-    "start": "node dist/api/index.js"
-  },
+        "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:client\"",
+        "dev:server": "tsx watch src/api/index.ts",
+        "dev:client": "vite",
+        "build": "vite build",
+        "start": "node dist/api/index.js"
+    },
     "author": "Gerry Saporito",
     "license": "MIT",
     "devDependencies": {
