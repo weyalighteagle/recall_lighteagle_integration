@@ -1,0 +1,11 @@
+{
+  "buildCommand": "npx vite build",
+  "outputDirectory": "dist/client",
+  "framework": "vite",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://lighteaglecalendar-production.up.railway.app/api/:path*"
+    }
+  ]
+}
