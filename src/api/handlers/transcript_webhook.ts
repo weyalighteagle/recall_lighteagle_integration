@@ -14,50 +14,83 @@ export async function handleTranscriptWebhook(body: any): Promise<{ status: numb
     }
 
     if (event === "transcript.data") {
-        const words = body?.data?.data?.words ?? [];
-        const speaker = body?.data?.data?.participant?.name ?? "Unknown";
+        const rawData = body?.data?.data;
+        const words = rawData?.words ?? [];
+        const speaker = rawData?.participant?.name ?? "Unknown";
 
-        console.log("Parsed webhook:", { event, botId, speaker, words });
+        console.log("Parsed webhook:", { event, botId, speaker, wordCount: words.length });
 
-        // Upsert meeting row so we don't fail if it already exists
-        const { data: meetingData, error: meetingError } = await supabase
-            .from("meetings")
-            .upsert({ bot_id: botId, done: false }, { onConflict: "bot_id", ignoreDuplicates: true });
+        // Step 1: upsert meeting row — independent of utterance insert
+        try {
+            const { data: meetingData, error: meetingError } = await supabase
+                .from("meetings")
+                .upsert({ bot_id: botId, done: false }, { onConflict: "bot_id", ignoreDuplicates: true });
 
-        console.log("Supabase meetings upsert:", { data: meetingData, error: meetingError });
-
-        if (meetingError) {
-            console.error(`Error upserting meeting for bot ${botId}:`, meetingError);
-            return { status: 500 };
+            if (meetingError) {
+                console.error("Supabase meetings upsert failed:", {
+                    bot_id: botId,
+                    event,
+                    error: meetingError,
+                });
+            } else {
+                console.log("Supabase meetings upsert ok:", { bot_id: botId, data: meetingData });
+            }
+        } catch (err) {
+            console.error("Unexpected error in meetings upsert:", { bot_id: botId, event, err });
         }
 
-        // Insert utterance
-        const { data: utteranceData, error: utteranceError } = await supabase
-            .from("utterances")
-            .insert({ bot_id: botId, speaker, words });
+        // Step 2: insert utterance — runs regardless of step 1 outcome
+        try {
+            const { data: utteranceData, error: utteranceError } = await supabase
+                .from("utterances")
+                .insert({ bot_id: botId, speaker, words });
 
-        console.log("Supabase utterances insert:", { data: utteranceData, error: utteranceError });
-
-        if (utteranceError) {
-            console.error(`Error inserting utterance for bot ${botId}:`, utteranceError);
-            return { status: 500 };
+            if (utteranceError) {
+                console.error("Supabase utterances insert failed:", {
+                    bot_id: botId,
+                    event,
+                    error: utteranceError,
+                    raw_data: rawData,
+                });
+            } else {
+                console.log("Supabase utterances insert ok:", {
+                    bot_id: botId,
+                    speaker,
+                    wordCount: words.length,
+                    data: utteranceData,
+                });
+            }
+        } catch (err) {
+            console.error("Unexpected error in utterances insert:", {
+                bot_id: botId,
+                event,
+                err,
+                raw_data: rawData,
+            });
         }
 
-        console.log(`Transcript data received for bot ${botId}: ${words.length} words from ${speaker}`);
+        // Always return 200 — Recall must not retry transcript.data events on DB failures
+        return { status: 200 };
     }
 
     if (event === "transcript.done") {
-        const { error } = await supabase
-            .from("meetings")
-            .update({ done: true })
-            .eq("bot_id", botId);
+        try {
+            const { error } = await supabase
+                .from("meetings")
+                .update({ done: true })
+                .eq("bot_id", botId);
 
-        if (error) {
-            console.error(`Error marking transcript done for bot ${botId}:`, error);
-            return { status: 500 };
+            if (error) {
+                console.error("Supabase meetings update (done) failed:", { bot_id: botId, event, error });
+            } else {
+                console.log(`Transcript done marked for bot ${botId}`);
+            }
+        } catch (err) {
+            console.error("Unexpected error marking transcript done:", { bot_id: botId, event, err });
         }
 
-        console.log(`Transcript done for bot ${botId}`);
+        // Always return 200 — Recall must not retry transcript.done events on DB failures
+        return { status: 200 };
     }
 
     return { status: 200 };
@@ -92,7 +125,7 @@ export async function handleGetTranscript(botId: string): Promise<{ utterances: 
     }
 
     // Map DB column `speaker` back to `participant` to match the frontend's expected shape
-    const utterances = (utterancesResult.data ?? []).map((row) => ({
+    const utterances = (utterancesResult.data ?? []).map((row: { speaker: string; words: unknown; timestamp: string }) => ({
         participant: row.speaker,
         words: row.words,
         timestamp: row.timestamp,
