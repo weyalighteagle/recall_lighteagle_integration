@@ -192,7 +192,7 @@ export async function schedule_bot_for_calendar_event(args: {
                 // meeting_url and start_time is automatically updated by Recall when we call the schedule bot for calendar event endpoint.
                 recording_config: {
                     transcript: {
-                        provider: { recallai_streaming: { mode: "prioritize_low_latency" } },
+                        provider: { recallai_streaming: {} },
                     },
                     realtime_endpoints: [
                         {
