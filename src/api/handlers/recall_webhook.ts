@@ -5,8 +5,15 @@ import { CalendarSyncEventsEventSchema } from "../../schemas/CalendarSyncEventsE
 import { CalendarUpdateEventSchema } from "../../schemas/CalendarUpdateEventSchema";
 import { env } from "../config/env";
 import { fetch_with_retry } from "../fetch_with_retry";
+import { handleTranscriptWebhook } from "./transcript_webhook";
 
 export async function recall_webhook(payload: any): Promise<void> {
+    // Route transcript events to the transcript webhook handler
+    if (payload?.event === "transcript.data" || payload?.event === "transcript.done") {
+        await handleTranscriptWebhook(payload);
+        return;
+    }
+
     const result = z.discriminatedUnion("event", [
         CalendarUpdateEventSchema,
         CalendarSyncEventsEventSchema,

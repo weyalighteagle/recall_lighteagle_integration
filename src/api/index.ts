@@ -82,7 +82,7 @@ body=${JSON.stringify(body)}
                 if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
 
                 console.log(`Transcript webhook received: ${JSON.stringify(body)}`);
-                const transcriptResult = handleTranscriptWebhook(body);
+                const transcriptResult = await handleTranscriptWebhook(body);
 
                 res.writeHead(transcriptResult.status, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({ message: "Transcript webhook received" }));
@@ -186,7 +186,7 @@ body=${JSON.stringify(body)}
                     const botId = pathname.replace("/api/transcripts/", "");
                     if (!botId) throw new Error("botId is required");
 
-                    const transcript = handleGetTranscript(botId);
+                    const transcript = await handleGetTranscript(botId);
                     console.log(`Retrieved transcript for bot ${botId}: ${transcript.utterances.length} utterances`);
 
                     res.writeHead(200, {

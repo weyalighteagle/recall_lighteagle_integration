@@ -13,4 +13,7 @@ export const EnvSchema = z.object({
     OUTLOOK_OAUTH_CLIENT_ID: z.string().optional(),
     OUTLOOK_OAUTH_CLIENT_SECRET: z.string().optional(),
     OUTLOOK_OAUTH_REDIRECT_URI: z.string().optional(),
+
+    SUPABASE_URL: z.string(),
+    SUPABASE_SERVICE_KEY: z.string(),
 });
