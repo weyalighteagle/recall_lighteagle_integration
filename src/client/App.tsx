@@ -1,12 +1,13 @@
 import {
     Calendar as CalendarIcon,
     Clock,
+    FileText,
     Video,
     Trash2,
     Loader2,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import type { CalendarType } from "../schemas/CalendarArtifactSchema";
 import type { CalendarEventType } from "../schemas/CalendarEventArtifactSchema";
 import { Button } from "./components/ui/Button";
@@ -459,6 +460,8 @@ function CalendarEventCard({
             calendarEventId: event.id,
         });
 
+    const navigate = useNavigate();
+
     const isInFuture = new Date(event.start_time) > new Date();
     const hasMeetingUrl = !!event.meeting_url;
     const canToggleRecording = isInFuture && hasMeetingUrl;
@@ -547,6 +550,19 @@ function CalendarEventCard({
                     </a>
                 )}
             </div>
+
+            {/* View Notes button — show when event has at least one bot */}
+            {event.bots.length > 0 && (
+                <div className="mt-1">
+                    <button
+                        onClick={() => navigate(`/dashboard/notes/${event.bots[0].bot_id}`)}
+                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                    >
+                        <FileText className="size-3" />
+                        View Notes
+                    </button>
+                </div>
+            )}
         </div>
     );
 }

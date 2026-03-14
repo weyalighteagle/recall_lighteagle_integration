@@ -3,6 +3,7 @@ import { z } from "zod";
 export const EnvSchema = z.object({
     PORT: z.coerce.number().default(4000),
     RECALL_REGION: z.string(),
+    RAILWAY_DOMAIN: z.string(),
     RECALL_API_KEY: z.string(),
 
     GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),

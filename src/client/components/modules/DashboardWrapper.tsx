@@ -18,7 +18,7 @@ const SidebarItems = [
   { icon: Home, label: "Dashboard", href: "#sample-link" },
   { icon: Calendar, label: "Calendars", href: "/dashboard/calendar" },
   { icon: Video, label: "Meetings", href: "#sample-link-meetings" },
-  { icon: FileText, label: "Notes", href: "#sample-link-notes" },
+  { icon: FileText, label: "Notes", href: "/dashboard/notes" },
   { icon: Users, label: "Contacts", href: "#sample-link-contacts" },
   { icon: Settings, label: "Settings", href: "#sample-link-settings" },
 ];

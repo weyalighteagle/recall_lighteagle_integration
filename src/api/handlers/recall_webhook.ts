@@ -182,7 +182,19 @@ export async function schedule_bot_for_calendar_event(args: {
             deduplication_key,
             bot_config: {
                 bot_name: `WEYA by Light Eagle`,
-                // meeting_url and start_time is autoamtically updated by Recall when we call the schedule bot for calendar event endpoint.
+                // meeting_url and start_time is automatically updated by Recall when we call the schedule bot for calendar event endpoint.
+                recording_config: {
+                    transcript: {
+                        provider: { recallai_streaming: {} },
+                    },
+                    realtime_endpoints: [
+                        {
+                            type: "webhook",
+                            url: `https://${env.RAILWAY_DOMAIN}/api/webhooks/transcript`,
+                            events: ["transcript.data", "transcript.partial_data"],
+                        },
+                    ],
+                },
             },
         }),
     });

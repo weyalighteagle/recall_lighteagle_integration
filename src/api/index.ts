@@ -7,6 +7,7 @@ import { calendar_oauth_callback } from "./handlers/calendar_oauth_callback";
 import { calendars_delete } from "./handlers/calendars_delete";
 import { calendars_list } from "./handlers/calendars_list";
 import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event } from "./handlers/recall_webhook";
+import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
 
 dotenv.config();
 
@@ -66,7 +67,7 @@ body=${JSON.stringify(body)}
                 return;
             }
 
-            /** Webhoook endpoints */
+            /** Webhook endpoints */
             case "/api/recall/webhook": {
                 if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
 
@@ -75,6 +76,16 @@ body=${JSON.stringify(body)}
 
                 res.writeHead(200, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({ message: "Recall webhook received" }));
+                return;
+            }
+            case "/api/webhooks/transcript": {
+                if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
+
+                console.log(`Transcript webhook received: ${JSON.stringify(body)}`);
+                const transcriptResult = handleTranscriptWebhook(body);
+
+                res.writeHead(transcriptResult.status, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ message: "Transcript webhook received" }));
                 return;
             }
 
@@ -170,6 +181,22 @@ body=${JSON.stringify(body)}
 
             /** Default endpoints */
             default: {
+                // GET /api/transcripts/:botId
+                if (pathname.startsWith("/api/transcripts/") && req.method?.toUpperCase() === "GET") {
+                    const botId = pathname.replace("/api/transcripts/", "");
+                    if (!botId) throw new Error("botId is required");
+
+                    const transcript = handleGetTranscript(botId);
+                    console.log(`Retrieved transcript for bot ${botId}: ${transcript.utterances.length} utterances`);
+
+                    res.writeHead(200, {
+                        "Content-Type": "application/json",
+                        "Access-Control-Allow-Origin": "*",
+                    });
+                    res.end(JSON.stringify(transcript));
+                    return;
+                }
+
                 if (url.pathname.startsWith("/api/")) {
                     throw new Error(`Endpoint not found: ${req.method} ${url.pathname}`);
                 } else {
@@ -190,17 +217,18 @@ body=${JSON.stringify(body)}
  * Start the server
  */
 server.listen(env.PORT, "0.0.0.0", () => {
+    const domain = env.RAILWAY_DOMAIN;
     console.log(`
 
-To get started:
-- Open an ngrok tunnel to the server on port ${env.PORT}
-- Open the following URL in your browser: ${client_domain}
+Server running on port ${env.PORT}
+Backend URL: https://${domain}
+Frontend URL: ${client_domain}
 
-To access the OAuth URLs directly:
-- Google: https://${process.env.NGROK_DOMAIN ?? "NGROK_DOMAIN"}/api/calendar/oauth?platform=google_calendar
-- Outlook: https://${process.env.NGROK_DOMAIN ?? "NGROK_DOMAIN"}/api/calendar/oauth?platform=microsoft_outlook
+OAuth URLs:
+- Google: https://${domain}/api/calendar/oauth?platform=google_calendar
+- Outlook: https://${domain}/api/calendar/oauth?platform=microsoft_outlook
 
 Ensure that:
-- The redirect URI in your Google/Outlook Calendar OAuth is set to: https://${process.env.NGROK_DOMAIN ?? "NGROK_DOMAIN"}/api/calendar/oauth/callback
+- The redirect URI in your Google/Outlook Calendar OAuth is set to: https://${domain}/api/calendar/oauth/callback
     `);
 });
