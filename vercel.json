@@ -5,7 +5,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://lighteaglecalendar-production.up.railway.app/api/:path*"
+      "destination": "https://recalllighteagleintegration-production.up.railway.app/api/:path*"
     },
     {
       "source": "/:path*",
