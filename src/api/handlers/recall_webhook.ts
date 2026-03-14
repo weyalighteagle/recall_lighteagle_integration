@@ -121,6 +121,7 @@ async function handleBotDone(body: any): Promise<void> {
     }
 
     // Step 2: Download the full transcript JSON
+    // Expected shape: [{ "speaker": "Name", "words": [{text, start_timestamp, end_timestamp}] }]
     type TranscriptSegment = { speaker: string; words: unknown[] };
     let segments: TranscriptSegment[] = [];
 
@@ -131,8 +132,18 @@ async function handleBotDone(body: any): Promise<void> {
                 console.error(`Failed to download transcript for bot ${botId}:`,
                     await transcriptResponse.text());
             } else {
-                segments = (await transcriptResponse.json()) as TranscriptSegment[];
-                console.log(`Downloaded transcript for bot ${botId}: ${segments.length} segments`);
+                const rawJson: unknown = await transcriptResponse.json();
+
+                // Guard: transcript download must be a top-level array
+                if (!Array.isArray(rawJson)) {
+                    console.error(`Transcript for bot ${botId} is not an array — actual shape:`,
+                        JSON.stringify(rawJson));
+                } else {
+                    segments = rawJson as TranscriptSegment[];
+                    // Log the first segment so Railway shows the exact field names coming from Recall
+                    console.log(`Downloaded transcript for bot ${botId}: ${segments.length} segments. First segment:`,
+                        JSON.stringify(segments[0] ?? null));
+                }
             }
         } catch (err) {
             console.error(`Unexpected error downloading transcript for bot ${botId}:`, err);
@@ -160,11 +171,17 @@ async function handleBotDone(body: any): Promise<void> {
 
         // 3b: Insert final utterances
         try {
-            const rows = segments.map((seg) => ({
-                bot_id: botId,
-                speaker: seg.speaker,
-                words: seg.words,
-            }));
+            const rows = segments.map((seg) => {
+                if (!seg.speaker) {
+                    console.warn(`Segment missing speaker for bot ${botId} — raw segment:`,
+                        JSON.stringify(seg));
+                }
+                return {
+                    bot_id: botId,
+                    speaker: seg.speaker,
+                    words: seg.words,
+                };
+            });
 
             const { error: insertError } = await supabase
                 .from("utterances")
