@@ -122,7 +122,7 @@ async function handleBotDone(body: any): Promise<void> {
 
     // Step 2: Download the full transcript JSON
     // Expected shape: [{ "speaker": "Name", "words": [{text, start_timestamp, end_timestamp}] }]
-    type TranscriptSegment = { speaker: string; words: unknown[] };
+    type TranscriptSegment = { speaker?: string; participant?: { name?: string }; words: unknown[] };
     let segments: TranscriptSegment[] = [];
 
     if (downloadUrl) {
@@ -172,13 +172,14 @@ async function handleBotDone(body: any): Promise<void> {
         // 3b: Insert final utterances
         try {
             const rows = segments.map((seg) => {
-                if (!seg.speaker) {
+                const speaker = seg.participant?.name ?? seg.speaker ?? "Unknown";
+                if (speaker === "Unknown") {
                     console.warn(`Segment missing speaker for bot ${botId} — raw segment:`,
                         JSON.stringify(seg));
                 }
                 return {
                     bot_id: botId,
-                    speaker: seg.speaker,
+                    speaker,
                     words: seg.words,
                 };
             });
