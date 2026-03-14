@@ -21,8 +21,10 @@ export function useCalendar(props: { email: string | null }) {
                     .parse(await res.json());
 
                 if (data.calendars[0]?.platform_email) {
+                    const platformEmail = data.calendars[0].platform_email;
+                    localStorage.setItem("weya_platform_email", platformEmail);
                     const newUrl = new URL(window.location.href);
-                    newUrl.searchParams.set("platform_email", data.calendars[0].platform_email);
+                    newUrl.searchParams.set("platform_email", platformEmail);
                     window.history.pushState({}, "", newUrl.toString());
                 }
 
@@ -32,7 +34,7 @@ export function useCalendar(props: { email: string | null }) {
                 toast.error("Failed to fetch calendars. See console for details.");
             }
         },
-        enabled: !!email,
+        enabled: true,
     });
 
     return { calendars: results?.calendars ?? [], isPending };

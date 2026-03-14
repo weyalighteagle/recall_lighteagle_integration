@@ -5,6 +5,7 @@ import {
     Video,
     Trash2,
     Loader2,
+    RefreshCw,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
@@ -36,8 +37,21 @@ import { useToggleRecording } from "./hooks/use-toggle-recording";
 
 function App() {
     const [searchParams] = useSearchParams();
-    const email = searchParams.get("platform_email");
-    const { calendars } = useCalendar({ email });
+    const email =
+        searchParams.get("platform_email") ??
+        localStorage.getItem("weya_platform_email");
+    const { calendars, isPending } = useCalendar({ email });
+
+    if (isPending) {
+        return (
+            <div className="flex items-center justify-center min-h-[60vh]">
+                <div className="flex flex-col items-center gap-3 text-gray-500">
+                    <RefreshCw className="size-6 animate-spin" />
+                    <p className="text-sm">Loading calendars…</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <>

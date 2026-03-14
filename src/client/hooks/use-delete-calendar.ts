@@ -22,6 +22,7 @@ export function useDeleteCalendar(props: { calendarId: string | null }) {
             return { isDeleted: true };
         },
         onSuccess: () => {
+            localStorage.removeItem("weya_platform_email");
             toast.success("Calendar disconnected successfully");
             void queryClient.invalidateQueries({ queryKey: ["calendars"] });
         },
