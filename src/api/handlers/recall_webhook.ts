@@ -5,12 +5,19 @@ import { CalendarSyncEventsEventSchema } from "../../schemas/CalendarSyncEventsE
 import { CalendarUpdateEventSchema } from "../../schemas/CalendarUpdateEventSchema";
 import { env } from "../config/env";
 import { fetch_with_retry } from "../fetch_with_retry";
+import { supabase } from "../config/supabase";
 import { handleTranscriptWebhook } from "./transcript_webhook";
 
 export async function recall_webhook(payload: any): Promise<void> {
     // Route transcript events to the transcript webhook handler
     if (payload?.event === "transcript.data" || payload?.event === "transcript.done") {
         await handleTranscriptWebhook(payload);
+        return;
+    }
+
+    // Route bot.done events to the full-transcript handler
+    if (payload?.event === "bot.done") {
+        await handleBotDone(payload);
         return;
     }
 
@@ -64,6 +71,132 @@ export async function recall_webhook(payload: any): Promise<void> {
     }
 
     return;
+}
+
+/**
+ * Handle bot.done webhook: fetch the complete post-meeting transcript from Recall,
+ * replace all real-time utterances in Supabase, and mark the meeting as done.
+ * Always resolves without throwing so the caller always returns 200 to Recall.
+ */
+async function handleBotDone(body: any): Promise<void> {
+    const botId: string | undefined = body?.data?.bot?.id;
+
+    if (!botId) {
+        console.error("bot.done received without bot_id:", JSON.stringify(body));
+        return;
+    }
+
+    console.log(`bot.done received for bot ${botId} — fetching full transcript`);
+
+    // Step 1: Fetch bot details from Recall v1 API to get the transcript download URL
+    let downloadUrl: string | null = null;
+    try {
+        const botResponse = await fetch_with_retry(
+            `https://${env.RECALL_REGION}.recall.ai/api/v1/bot/${botId}/`,
+            {
+                method: "GET",
+                headers: {
+                    "Authorization": `${env.RECALL_API_KEY}`,
+                    "Content-Type": "application/json",
+                },
+            },
+        );
+
+        if (!botResponse.ok) {
+            console.error(`Failed to fetch bot details for ${botId}:`, await botResponse.text());
+        } else {
+            const botData = await botResponse.json();
+            downloadUrl =
+                botData?.recordings?.[0]?.media_shortcuts?.transcript?.data?.download_url ?? null;
+
+            if (downloadUrl) {
+                console.log(`Got transcript download URL for bot ${botId}`);
+            } else {
+                console.log(`No transcript download URL for bot ${botId}. media_shortcuts:`,
+                    JSON.stringify(botData?.recordings?.[0]?.media_shortcuts ?? null));
+            }
+        }
+    } catch (err) {
+        console.error(`Unexpected error fetching bot details for ${botId}:`, err);
+    }
+
+    // Step 2: Download the full transcript JSON
+    type TranscriptSegment = { speaker: string; words: unknown[] };
+    let segments: TranscriptSegment[] = [];
+
+    if (downloadUrl) {
+        try {
+            const transcriptResponse = await fetch(downloadUrl);
+            if (!transcriptResponse.ok) {
+                console.error(`Failed to download transcript for bot ${botId}:`,
+                    await transcriptResponse.text());
+            } else {
+                segments = (await transcriptResponse.json()) as TranscriptSegment[];
+                console.log(`Downloaded transcript for bot ${botId}: ${segments.length} segments`);
+            }
+        } catch (err) {
+            console.error(`Unexpected error downloading transcript for bot ${botId}:`, err);
+        }
+    }
+
+    // Step 3: Replace real-time utterances with the complete transcript
+    if (segments.length > 0) {
+        // 3a: Delete existing utterances
+        try {
+            const { error: deleteError } = await supabase
+                .from("utterances")
+                .delete()
+                .eq("bot_id", botId);
+
+            if (deleteError) {
+                console.error(`Failed to delete existing utterances for bot ${botId}:`,
+                    { bot_id: botId, error: deleteError });
+            } else {
+                console.log(`Deleted existing utterances for bot ${botId}`);
+            }
+        } catch (err) {
+            console.error(`Unexpected error deleting utterances for bot ${botId}:`, err);
+        }
+
+        // 3b: Insert final utterances
+        try {
+            const rows = segments.map((seg) => ({
+                bot_id: botId,
+                speaker: seg.speaker,
+                words: seg.words,
+            }));
+
+            const { error: insertError } = await supabase
+                .from("utterances")
+                .insert(rows);
+
+            if (insertError) {
+                console.error(`Failed to insert final utterances for bot ${botId}:`,
+                    { bot_id: botId, error: insertError, segmentCount: rows.length });
+            } else {
+                console.log(`Inserted ${rows.length} final utterances for bot ${botId}`);
+            }
+        } catch (err) {
+            console.error(`Unexpected error inserting final utterances for bot ${botId}:`, err);
+        }
+    }
+
+    // Step 4: Mark the meeting as done (runs regardless of transcript availability)
+    try {
+        const { error: doneError } = await supabase
+            .from("meetings")
+            .update({ done: true })
+            .eq("bot_id", botId);
+
+        if (doneError) {
+            console.error(`Failed to mark meeting done for bot ${botId}:`,
+                { bot_id: botId, error: doneError });
+        } else {
+            console.log(`Marked meeting done for bot ${botId}`);
+        }
+    } catch (err) {
+        console.error(`Unexpected error marking meeting done for bot ${botId}:`, err);
+    }
 }
 
 /**
