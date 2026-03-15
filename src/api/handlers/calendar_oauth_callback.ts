@@ -79,7 +79,7 @@ export async function calendar_oauth_callback(args: {
         platform: platform,
     });
     const calendar = calendars.calendars[0];
-    const latest_status = calendar?.status_changes.at(-1)?.status;
+    const latest_status = calendar?.status_changes.at(0)?.status;
     switch (latest_status) {
         // If no calendar is found, create a new one.
         case undefined: {
