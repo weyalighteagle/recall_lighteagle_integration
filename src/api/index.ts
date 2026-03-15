@@ -94,8 +94,6 @@ body=${JSON.stringify(body)}
                 switch (req.method?.toUpperCase()) {
                     /** List calendars */
                     case "GET": {
-                        if (!search_params.platform_email) throw new Error("platform_email is required");
-
                         const results = await calendars_list(search_params);
                         console.log(`Listed Calendars: ${JSON.stringify(results)}`);
 

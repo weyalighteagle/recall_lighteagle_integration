@@ -36,11 +36,7 @@ import { useDeleteCalendar } from "./hooks/use-delete-calendar";
 import { useToggleRecording } from "./hooks/use-toggle-recording";
 
 function App() {
-    const [searchParams] = useSearchParams();
-    const email =
-        searchParams.get("platform_email") ??
-        localStorage.getItem("weya_platform_email");
-    const { calendars, isPending } = useCalendar({ email });
+    const { calendars, isPending } = useCalendar({ email: null }); // email artık önemli değil
 
     if (isPending) {
         return (

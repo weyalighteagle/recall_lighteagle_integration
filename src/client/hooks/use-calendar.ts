@@ -7,11 +7,11 @@ export function useCalendar(props: { email: string | null }) {
     const { email } = z.object({ email: z.string().nullable() }).parse(props);
 
     const { data: results, isPending } = useQuery({
-        queryKey: ["calendars", email],
+        queryKey: ["calendars"], // email'i key'den çıkar — her zaman tümünü getir
         queryFn: async () => {
             try {
                 const url = new URL("/api/calendar", window.location.origin);
-                if (email) url.searchParams.set("platform_email", email);
+                // email parametresini GÖNDERME — tüm calendarsları getir
 
                 const res = await fetch(url.toString());
                 if (!res.ok) throw new Error(await res.text());
@@ -20,12 +20,14 @@ export function useCalendar(props: { email: string | null }) {
                     .object({ calendars: CalendarSchema.array() })
                     .parse(await res.json());
 
-                if (data.calendars[0]?.platform_email) {
-                    const platformEmail = data.calendars[0].platform_email;
-                    localStorage.setItem("weya_platform_email", platformEmail);
-                    const newUrl = new URL(window.location.href);
-                    newUrl.searchParams.set("platform_email", platformEmail);
-                    window.history.pushState({}, "", newUrl.toString());
+                // localStorage'ı güncelle (geriye dönük uyumluluk için ilkini sakla)
+                if (data.calendars.length > 0) {
+                    const firstEmail = data.calendars[0].platform_email;
+                    if (firstEmail) {
+                        localStorage.setItem("weya_platform_email", firstEmail);
+                    }
+                } else {
+                    localStorage.removeItem("weya_platform_email");
                 }
 
                 return data;
