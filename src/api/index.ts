@@ -9,6 +9,7 @@ import { calendars_list } from "./handlers/calendars_list";
 import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event } from "./handlers/recall_webhook";
 import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
 import { bot_join } from "./handlers/bot_join";
+import { supabase } from "./config/supabase";
 
 dotenv.config();
 
@@ -203,6 +204,21 @@ body=${JSON.stringify(body)}
 
             /** Default endpoints */
             default: {
+                // GET /api/transcripts — all meetings
+                if (pathname === "/api/transcripts" && req.method?.toUpperCase() === "GET") {
+                    const { data } = await supabase
+                        .from("meetings")
+                        .select("bot_id, done, created_at")
+                        .order("created_at", { ascending: false });
+
+                    res.writeHead(200, {
+                        "Content-Type": "application/json",
+                        "Access-Control-Allow-Origin": "*",
+                    });
+                    res.end(JSON.stringify({ meetings: data ?? [] }));
+                    return;
+                }
+
                 // GET /api/transcripts/:botId
                 if (pathname.startsWith("/api/transcripts/") && req.method?.toUpperCase() === "GET") {
                     const botId = pathname.replace("/api/transcripts/", "");

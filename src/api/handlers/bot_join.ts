@@ -47,10 +47,10 @@ export async function bot_join(args: {
     const bot = await response.json();
 
     // Supabase'de meeting kaydı oluştur (transcript takibi için)
-    await supabase.from("meetings").insert({
-        bot_id: bot.id,
-        done: false,
-    });
+    await supabase.from("meetings").upsert(
+        { bot_id: bot.id, done: false },
+        { onConflict: "bot_id", ignoreDuplicates: true },
+    );
 
     return {
         bot_id: bot.id,

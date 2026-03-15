@@ -4,6 +4,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import App from "./App";
 import TranscriptView from "./pages/TranscriptView";
+import NotesList from "./pages/NotesList";
 import "./index.css";
 import DashboardWrapper from "./components/modules/DashboardWrapper";
 import { Toaster } from "./components/ui/Sonner";
@@ -32,6 +33,7 @@ function DashboardRoutes() {
     <DashboardWrapper>
       <Routes>
         <Route path="calendar" element={<App />} />
+        <Route path="notes" element={<NotesList />} />
         <Route path="notes/:botId" element={<TranscriptView />} />
         <Route
           path="*"
