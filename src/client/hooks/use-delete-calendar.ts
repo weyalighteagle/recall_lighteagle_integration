@@ -22,9 +22,6 @@ export function useDeleteCalendar(props: { calendarId: string | null }) {
             return { isDeleted: true };
         },
         onSuccess: () => {
-            // Tüm calendarsları yeniden fetch edince localStorage otomatik güncellenir
-            // Sadece cache'i invalidate etmek yeterli
-            localStorage.removeItem("weya_platform_email");
             toast.success("Calendar disconnected successfully");
             void queryClient.invalidateQueries({ queryKey: ["calendars"] });
         },

@@ -6,6 +6,7 @@ import {
     Trash2,
     Loader2,
     RefreshCw,
+    Plus,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
@@ -36,7 +37,7 @@ import { useDeleteCalendar } from "./hooks/use-delete-calendar";
 import { useToggleRecording } from "./hooks/use-toggle-recording";
 
 function App() {
-    const { calendars, isPending } = useCalendar({ email: null }); // email artık önemli değil
+    const { calendars, isPending } = useCalendar();
 
     if (isPending) {
         return (
@@ -106,51 +107,95 @@ function ConnectCalendar() {
 }
 
 function CalendarList({ calendars }: { calendars: CalendarType[] }) {
-    const googleCalendars = calendars.filter(
-        (c) => c.platform === "google_calendar",
-    );
-    const outlookCalendars = calendars.filter(
-        (c) => c.platform === "microsoft_outlook",
-    );
+    const [showConnectDialog, setShowConnectDialog] = useState(false);
 
-    const platforms = [
-        {
-            id: "google_calendar",
-            label: "Google Calendar",
-            calendars: googleCalendars,
-        },
-        {
-            id: "microsoft_outlook",
-            label: "Microsoft Outlook",
-            calendars: outlookCalendars,
-        },
-    ].filter((p) => p.calendars.length > 0);
+    // Her email adresi için ayrı tab
+    const calendarsByEmail = useMemo(() => {
+        const map = new Map<string, CalendarType[]>();
+        for (const cal of calendars) {
+            const key = cal.platform_email || cal.id;
+            const existing = map.get(key) || [];
+            existing.push(cal);
+            map.set(key, existing);
+        }
+        return Array.from(map.entries()).map(([email, cals]) => ({
+            email,
+            calendars: cals,
+            platform: cals[0].platform,
+        }));
+    }, [calendars]);
 
-    const defaultTab = platforms[0]?.id || "google_calendar";
+    const defaultTab = calendarsByEmail[0]?.email || "";
 
     return (
-        <Tabs defaultValue={defaultTab} className="w-full">
-            <TabsList>
-                {platforms.map((platform) => (
-                    <TabsTrigger key={platform.id} value={platform.id}>
-                        {platform.label}
-                    </TabsTrigger>
-                ))}
-            </TabsList>
+        <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+                <h1 className="text-lg font-semibold">Your Calendars</h1>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowConnectDialog(true)}
+                    className="flex items-center gap-1"
+                >
+                    <Plus className="size-4" />
+                    Add Calendar
+                </Button>
 
-            {platforms.map((platform) => (
-                <TabsContent key={platform.id} value={platform.id}>
-                    <div className="flex flex-col gap-6 mt-4">
-                        {platform.calendars.map((calendar) => (
-                            <CalendarDetails
-                                key={calendar.id}
-                                calendar={calendar}
-                            />
-                        ))}
-                    </div>
-                </TabsContent>
-            ))}
-        </Tabs>
+                <Dialog open={showConnectDialog} onOpenChange={setShowConnectDialog}>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>Connect Another Calendar</DialogTitle>
+                            <DialogDescription>
+                                Choose which calendar provider to connect.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="flex flex-col gap-2">
+                            <Button
+                                variant="outline"
+                                onClick={() => {
+                                    window.location.href =
+                                        "/api/calendar/oauth?platform=google_calendar";
+                                }}
+                            >
+                                Connect Google Calendar
+                            </Button>
+                            <Button
+                                variant="outline"
+                                onClick={() => {
+                                    window.location.href =
+                                        "/api/calendar/oauth?platform=microsoft_outlook";
+                                }}
+                            >
+                                Connect Microsoft Outlook
+                            </Button>
+                        </div>
+                    </DialogContent>
+                </Dialog>
+            </div>
+
+            <Tabs defaultValue={defaultTab} className="w-full">
+                <TabsList>
+                    {calendarsByEmail.map((entry) => (
+                        <TabsTrigger key={entry.email} value={entry.email}>
+                            {entry.email}
+                        </TabsTrigger>
+                    ))}
+                </TabsList>
+
+                {calendarsByEmail.map((entry) => (
+                    <TabsContent key={entry.email} value={entry.email}>
+                        <div className="flex flex-col gap-6 mt-4">
+                            {entry.calendars.map((calendar) => (
+                                <CalendarDetails
+                                    key={calendar.id}
+                                    calendar={calendar}
+                                />
+                            ))}
+                        </div>
+                    </TabsContent>
+                ))}
+            </Tabs>
+        </div>
     );
 }
 

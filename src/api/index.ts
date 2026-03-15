@@ -62,7 +62,7 @@ body=${JSON.stringify(body)}
                 const { calendar } = await calendar_oauth_callback(search_params);
                 console.log(`Created Calendar: ${JSON.stringify(calendar)}`);
 
-                res.writeHead(302, { Location: `${client_domain}/dashboard/calendar?platform_email=${calendar.platform_email}` });
+                res.writeHead(302, { Location: `${client_domain}/dashboard/calendar` });
                 res.end();
                 return;
             }
@@ -94,6 +94,7 @@ body=${JSON.stringify(body)}
                 switch (req.method?.toUpperCase()) {
                     /** List calendars */
                     case "GET": {
+                        // platform_email artık opsiyonel — verilmezse tüm takvimler döner
                         const results = await calendars_list(search_params);
                         console.log(`Listed Calendars: ${JSON.stringify(results)}`);
 

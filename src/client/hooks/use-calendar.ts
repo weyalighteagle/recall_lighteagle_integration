@@ -3,15 +3,16 @@ import { toast } from "sonner";
 import { z } from "zod";
 import { CalendarSchema } from "../../schemas/CalendarArtifactSchema";
 
-export function useCalendar(props: { email: string | null }) {
-    const { email } = z.object({ email: z.string().nullable() }).parse(props);
+export function useCalendar(props?: { email?: string | null }) {
+    const email = props?.email ?? null;
 
     const { data: results, isPending } = useQuery({
-        queryKey: ["calendars"], // email'i key'den çıkar — her zaman tümünü getir
+        queryKey: ["calendars", email ?? "all"],
         queryFn: async () => {
             try {
                 const url = new URL("/api/calendar", window.location.origin);
-                // email parametresini GÖNDERME — tüm calendarsları getir
+                // Sadece email verilmişse filtrele, yoksa hepsini getir
+                if (email) url.searchParams.set("platform_email", email);
 
                 const res = await fetch(url.toString());
                 if (!res.ok) throw new Error(await res.text());
@@ -20,16 +21,7 @@ export function useCalendar(props: { email: string | null }) {
                     .object({ calendars: CalendarSchema.array() })
                     .parse(await res.json());
 
-                // localStorage'ı güncelle (geriye dönük uyumluluk için ilkini sakla)
-                if (data.calendars.length > 0) {
-                    const firstEmail = data.calendars[0].platform_email;
-                    if (firstEmail) {
-                        localStorage.setItem("weya_platform_email", firstEmail);
-                    }
-                } else {
-                    localStorage.removeItem("weya_platform_email");
-                }
-
+                // localStorage ve URL manipülasyonu KALDIRILDI
                 return data;
             } catch (error) {
                 console.error("Error fetching calendars:", error);
