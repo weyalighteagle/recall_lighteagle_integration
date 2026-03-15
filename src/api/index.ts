@@ -44,6 +44,17 @@ search_params=${JSON.stringify(search_params)}
 body=${JSON.stringify(body)}
         `);
 
+        // Handle CORS preflight requests
+        if (req.method === "OPTIONS") {
+            res.writeHead(204, {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            });
+            res.end();
+            return;
+        }
+
         switch (pathname) {
             /** OAuth endpoints */
             case "/api/calendar/oauth": {

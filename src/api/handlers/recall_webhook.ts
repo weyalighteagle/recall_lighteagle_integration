@@ -59,8 +59,13 @@ export async function recall_webhook(payload: any): Promise<void> {
                     if (new Date(calendar_event.start_time) <= new Date()) continue;
 
                     // Schedule a bot for the calendar event if it doesn't already have one.
-                    await schedule_bot_for_calendar_event({ calendar_event, calendar });
-                    console.log(`Scheduled bot for calendar event: ${calendar_event.id}`);
+                    try {
+                        await schedule_bot_for_calendar_event({ calendar_event, calendar });
+                        console.log(`Scheduled bot for calendar event: ${calendar_event.id}`);
+                    } catch (err) {
+                        console.error(`Failed to schedule bot for calendar event ${calendar_event.id}:`, err);
+                        continue;
+                    }
                 }
                 next = new_next;
             } while (next);
@@ -284,7 +289,7 @@ export async function calendar_event_retrieve(args: {
             "Content-Type": "application/json",
         },
     });
-    if (!response.ok) throw new Error(await response.json());
+    if (!response.ok) throw new Error(await response.text());
 
     return CalendarEventSchema.parse(await response.json());
 }
