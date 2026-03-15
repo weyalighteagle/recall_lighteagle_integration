@@ -8,6 +8,7 @@ import { calendars_delete } from "./handlers/calendars_delete";
 import { calendars_list } from "./handlers/calendars_list";
 import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event } from "./handlers/recall_webhook";
 import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
+import { bot_join } from "./handlers/bot_join";
 
 dotenv.config();
 
@@ -135,6 +136,17 @@ body=${JSON.stringify(body)}
                         throw new Error(`Method not allowed: ${req.method}`);
                     }
                 }
+            }
+            case "/api/bot/join": {
+                if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
+                if (!body?.meeting_url) throw new Error("meeting_url is required");
+
+                const result = await bot_join(body);
+                console.log(`Ad-hoc bot created: ${JSON.stringify(result)}`);
+
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify(result));
+                return;
             }
             case "/api/calendar/events/bot": {
                 switch (req.method?.toUpperCase()) {
