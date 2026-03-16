@@ -137,6 +137,12 @@ async function handleBotDone(body: any): Promise<void> {
         console.error(`Unexpected error fetching bot details for ${botId}:`, err);
     }
 
+    if (!downloadUrl) {
+        console.warn(`[bot.done] No transcript download URL for bot ${botId} — skipping transcript fetch`);
+        await supabase.from("meetings").update({ done: true }).eq("bot_id", botId);
+        return;
+    }
+
     // Step 2: Download the full transcript JSON
     // Expected shape: [{ "speaker": "Name", "words": [{text, start_timestamp, end_timestamp}] }]
     type TranscriptSegment = { speaker?: string; participant?: { name?: string }; words: unknown[] };
@@ -374,6 +380,11 @@ export async function schedule_bot_for_calendar_event(args: {
 
         bot_config = {
             bot_name: "WEYA Voice Agent",
+            variant: {
+                zoom: "web_4_core",
+                google_meet: "web_4_core",
+                microsoft_teams: "web_4_core",
+            },
             output_media: {
                 camera: {
                     kind: "webpage",
@@ -382,10 +393,22 @@ export async function schedule_bot_for_calendar_event(args: {
                     },
                 },
             },
-            variant: {
-                zoom: "web_4_core",
-                google_meet: "web_4_core",
-                microsoft_teams: "web_4_core",
+            recording_config: {
+                transcript: {
+                    provider: {
+                        recallai_streaming: {},
+                    },
+                },
+                realtime_endpoints: [
+                    {
+                        type: "webhook",
+                        url: `https://${env.RAILWAY_DOMAIN}/api/webhooks/transcript`,
+                        events: ["transcript.data", "transcript.partial_data"],
+                    },
+                ],
+                include_bot_in_recording: {
+                    audio: true,
+                },
             },
         };
     } else {

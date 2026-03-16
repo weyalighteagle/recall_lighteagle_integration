@@ -5,15 +5,90 @@ import { supabase } from "../config/supabase";
 /**
  * Doğrudan meeting URL'si ile ad-hoc bot gönder.
  * Takvim event'i gerekmez — URL yeter.
+ *
+ * @param bot_type - "recording" (default) sends a standard transcript bot.
+ *                   "voice_agent" sends an Output Media bot that renders a webpage
+ *                   via VOICE_AGENT_PAGE_URL/VOICE_AGENT_WSS_URL and also captures
+ *                   transcript via recallai_streaming. Requires both env vars to be set.
  */
 export async function bot_join(args: {
     meeting_url: string;
     bot_name?: string;
+    bot_type?: "recording" | "voice_agent";
 }) {
     const { meeting_url, bot_name } = z.object({
         meeting_url: z.string().url(),
         bot_name: z.string().optional(),
     }).parse(args);
+
+    const botType: "recording" | "voice_agent" = args.bot_type ?? "recording";
+
+    if (botType === "voice_agent") {
+        if (!env.VOICE_AGENT_PAGE_URL || !env.VOICE_AGENT_WSS_URL) {
+            throw Object.assign(
+                new Error("Voice agent not configured — VOICE_AGENT_PAGE_URL and VOICE_AGENT_WSS_URL must be set"),
+                { statusCode: 400 },
+            );
+        }
+    }
+
+    let payload: Record<string, any>;
+
+    if (botType === "voice_agent") {
+        const output_media_url = `${env.VOICE_AGENT_PAGE_URL}?wss=${encodeURIComponent(env.VOICE_AGENT_WSS_URL!)}`;
+
+        payload = {
+            meeting_url,
+            bot_name: bot_name || "WEYA Voice Agent",
+            variant: {
+                zoom: "web_4_core",
+                google_meet: "web_4_core",
+                microsoft_teams: "web_4_core",
+            },
+            output_media: {
+                camera: {
+                    kind: "webpage",
+                    config: {
+                        url: output_media_url,
+                    },
+                },
+            },
+            recording_config: {
+                transcript: {
+                    provider: {
+                        recallai_streaming: {},
+                    },
+                },
+                realtime_endpoints: [
+                    {
+                        type: "webhook",
+                        url: `https://${env.RAILWAY_DOMAIN}/api/webhooks/transcript`,
+                        events: ["transcript.data", "transcript.partial_data"],
+                    },
+                ],
+                include_bot_in_recording: {
+                    audio: true,
+                },
+            },
+        };
+    } else {
+        payload = {
+            meeting_url,
+            bot_name: bot_name || "WEYA by Light Eagle",
+            recording_config: {
+                transcript: {
+                    provider: { recallai_streaming: {} },
+                },
+                realtime_endpoints: [
+                    {
+                        type: "webhook",
+                        url: `https://${env.RAILWAY_DOMAIN}/api/webhooks/transcript`,
+                        events: ["transcript.data", "transcript.partial_data"],
+                    },
+                ],
+            },
+        };
+    }
 
     const response = await fetch(
         `https://${env.RECALL_REGION}.recall.ai/api/v1/bot/`,
@@ -23,22 +98,7 @@ export async function bot_join(args: {
                 "Authorization": `${env.RECALL_API_KEY}`,
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({
-                meeting_url,
-                bot_name: bot_name || "WEYA by Light Eagle",
-                recording_config: {
-                    transcript: {
-                        provider: { recallai_streaming: {} },
-                    },
-                    realtime_endpoints: [
-                        {
-                            type: "webhook",
-                            url: `https://${env.RAILWAY_DOMAIN}/api/webhooks/transcript`,
-                            events: ["transcript.data", "transcript.partial_data"],
-                        },
-                    ],
-                },
-            }),
+            body: JSON.stringify(payload),
         }
     );
 
@@ -46,9 +106,9 @@ export async function bot_join(args: {
 
     const bot = await response.json();
 
-    // Supabase'de meeting kaydı oluştur (transcript takibi için)
+    // Supabase'de meeting kaydı oluştur (transcript takibi için) — hem recording hem voice_agent için
     await supabase.from("meetings").upsert(
-        { bot_id: bot.id, done: false },
+        { bot_id: bot.id, done: false, created_at: new Date().toISOString() },
         { onConflict: "bot_id", ignoreDuplicates: true },
     );
 

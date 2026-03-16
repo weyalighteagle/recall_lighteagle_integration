@@ -9,6 +9,7 @@ import { calendars_list } from "./handlers/calendars_list";
 import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event } from "./handlers/recall_webhook";
 import { kb_list, kb_create, kb_delete, kb_toggle } from "./handlers/knowledge_base";
 import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
+import { handleVoiceAgentStatus } from "./handlers/voice_agent_status";
 import { bot_join } from "./handlers/bot_join";
 import { supabase } from "./config/supabase";
 
@@ -182,6 +183,12 @@ body=${JSON.stringify(body)}
                     default:
                         throw new Error(`Method not allowed: ${req.method}`);
                 }
+            }
+            case "/api/voice-agent/status": {
+                if (req.method?.toUpperCase() !== "GET") throw new Error(`Method not allowed: ${req.method}`);
+
+                handleVoiceAgentStatus(req, res);
+                return;
             }
             case "/api/bot/join": {
                 if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
