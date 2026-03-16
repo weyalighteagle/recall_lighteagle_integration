@@ -101,8 +101,8 @@ export async function calendar_oauth_callback(args: {
             console.log(`${platform} Calendar already exists and is ${latest_status}`);
             return {
                 calendar: {
-                    ...calendar,
-                    platform_email: calendar.platform_email || calendar_config.platform_email,
+                    ...calendar!,
+                    platform_email: calendar!.platform_email || calendar_config.platform_email,
                 },
             };
         }
