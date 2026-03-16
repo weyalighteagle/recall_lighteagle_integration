@@ -37,6 +37,7 @@ function DashboardRoutes() {
       <Routes>
         <Route path="/" element={<Navigate replace to="/dashboard/calendar" />} />
         <Route path="calendar" element={<App />} />
+        <Route path="notes" element={<NotesList />} />
         <Route path="notes/:botId" element={<TranscriptView />} />
         <Route path="knowledge-base" element={<KnowledgeBase />} />
         <Route path="transcripts" element={<NotesList />} />
