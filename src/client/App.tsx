@@ -2,6 +2,7 @@ import {
     Calendar as CalendarIcon,
     Clock,
     FileText,
+    Mic,
     Video,
     Trash2,
     Loader2,
@@ -509,30 +510,105 @@ function CalendarEventCard({
     formatTime: (dateString: string) => string;
     getEventTitle: (event: CalendarEventType) => string;
 }) {
-    const { scheduleRecording, unscheduleRecording, isPending } =
-        useToggleRecording({
-            calendarId,
-            calendarEventId: event.id,
-        });
+    // Recording bot toggle hook
+    const {
+        scheduleRecording,
+        unscheduleRecording,
+        isPending: isRecordingPending,
+    } = useToggleRecording({
+        calendarId,
+        calendarEventId: event.id,
+        botType: "recording",
+    });
+
+    // Voice agent bot toggle hook
+    const {
+        scheduleRecording: scheduleVoiceAgent,
+        unscheduleRecording: unscheduleVoiceAgent,
+        isPending: isVoiceAgentPending,
+    } = useToggleRecording({
+        calendarId,
+        calendarEventId: event.id,
+        botType: "voice_agent",
+    });
 
     const navigate = useNavigate();
 
     const isInFuture = new Date(event.start_time) > new Date();
     const hasMeetingUrl = !!event.meeting_url;
-    const canToggleRecording = isInFuture && hasMeetingUrl;
+    const canToggle = isInFuture && hasMeetingUrl;
 
-    const hasScheduledRecording = event.bots.some(
-        (bot) => new Date(bot.start_time) > new Date(),
+    // Dedup key prefix'ine bakarak bot tipini tespit et
+    const hasRecordingBot = event.bots.some(
+        (bot) => bot.deduplication_key.startsWith("rec-") && new Date(bot.start_time) > new Date(),
+    );
+    const hasVoiceAgentBot = event.bots.some(
+        (bot) => bot.deduplication_key.startsWith("va-") && new Date(bot.start_time) > new Date(),
     );
 
-    const handleToggle = () => {
-        if (isPending) return;
-        if (hasScheduledRecording) {
+    // Geriye uyumluluk: eski format prefix'siz dedup key'ler recording sayılır
+    const hasLegacyBot = event.bots.some(
+        (bot) =>
+            !bot.deduplication_key.startsWith("rec-") &&
+            !bot.deduplication_key.startsWith("va-") &&
+            new Date(bot.start_time) > new Date(),
+    );
+    const isRecordingScheduled = hasRecordingBot || hasLegacyBot;
+
+    const handleRecordingToggle = () => {
+        if (isRecordingPending) return;
+        if (isRecordingScheduled) {
             unscheduleRecording();
         } else {
             scheduleRecording();
         }
     };
+
+    const handleVoiceAgentToggle = () => {
+        if (isVoiceAgentPending) return;
+        if (hasVoiceAgentBot) {
+            unscheduleVoiceAgent();
+        } else {
+            scheduleVoiceAgent();
+        }
+    };
+
+    // Tek toggle satırı render eden yardımcı
+    const renderToggle = (
+        label: string,
+        isActive: boolean,
+        isPending: boolean,
+        onToggle: () => void,
+        activeColor: string,  // tailwind renk sınıfı, ör: "bg-red-500"
+    ) => (
+        <button
+            onClick={onToggle}
+            disabled={isPending}
+            className="shrink-0 flex items-center gap-2 group"
+            title={isActive ? `Turn off ${label}` : `Turn on ${label}`}
+        >
+            <span className="text-xs text-gray-500 group-hover:text-gray-700">
+                {label}
+            </span>
+            <span className="min-w-9 min-h-5 flex items-center justify-center">
+                {isPending ? (
+                    <Loader2 className="size-4 animate-spin text-gray-400" />
+                ) : (
+                    <div
+                        className={`relative w-9 h-5 rounded-full transition-colors ${
+                            isActive ? activeColor : "bg-gray-300"
+                        }`}
+                    >
+                        <div
+                            className={`absolute top-0.5 size-4 bg-white rounded-full shadow transition-transform ${
+                                isActive ? "translate-x-4" : "translate-x-0.5"
+                            }`}
+                        />
+                    </div>
+                )}
+            </span>
+        </button>
+    );
 
     return (
         <div className="flex flex-col gap-1.5 p-4 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
@@ -541,43 +617,12 @@ function CalendarEventCard({
                     {getEventTitle(event)}
                 </h4>
 
-                {/* Recording toggle switch */}
-                {canToggleRecording ? (
-                    <button
-                        onClick={handleToggle}
-                        disabled={isPending}
-                        className="shrink-0 flex items-center gap-2 group"
-                        title={
-                            hasScheduledRecording
-                                ? "Turn off recording"
-                                : "Turn on recording"
-                        }
-                    >
-                        <span className="text-xs text-gray-500 group-hover:text-gray-700">
-                            {"Will record"}
-                        </span>
-                        <span className="min-w-9 min-h-5 flex items-center justify-center">
-                            {isPending ? (
-                                <Loader2 className="size-4 animate-spin text-gray-400" />
-                            ) : (
-                                <div
-                                    className={`relative w-9 h-5 rounded-full transition-colors ${
-                                        hasScheduledRecording
-                                            ? "bg-red-500"
-                                            : "bg-gray-300"
-                                    }`}
-                                >
-                                    <div
-                                        className={`absolute top-0.5 size-4 bg-white rounded-full shadow transition-transform ${
-                                            hasScheduledRecording
-                                                ? "translate-x-4"
-                                                : "translate-x-0.5"
-                                        }`}
-                                    />
-                                </div>
-                            )}
-                        </span>
-                    </button>
+                {/* Toggle'lar — sağ üst köşe */}
+                {canToggle ? (
+                    <div className="flex flex-col gap-1.5 shrink-0 items-end">
+                        {renderToggle("Record", isRecordingScheduled, isRecordingPending, handleRecordingToggle, "bg-red-500")}
+                        {renderToggle("Voice Agent", hasVoiceAgentBot, isVoiceAgentPending, handleVoiceAgentToggle, "bg-purple-500")}
+                    </div>
                 ) : !hasMeetingUrl ? (
                     <span className="shrink-0 text-xs text-gray-400">
                         No meeting link
@@ -606,9 +651,19 @@ function CalendarEventCard({
                 )}
             </div>
 
-            {/* View Notes button — show when event has at least one bot */}
+            {/* Bot status badges + View Notes */}
             {event.bots.length > 0 && (
-                <div className="mt-1">
+                <div className="mt-1 flex items-center gap-2 flex-wrap">
+                    {(isRecordingScheduled) && (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700">
+                            <Video className="size-3" /> Recording
+                        </span>
+                    )}
+                    {hasVoiceAgentBot && (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700">
+                            <Mic className="size-3" /> Voice Agent
+                        </span>
+                    )}
                     <button
                         onClick={() => navigate(`/dashboard/notes/${event.bots[0].bot_id}`)}
                         className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:underline"

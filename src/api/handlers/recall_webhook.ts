@@ -8,6 +8,9 @@ import { fetch_with_retry } from "../fetch_with_retry";
 import { supabase } from "../config/supabase";
 import { handleTranscriptWebhook } from "./transcript_webhook";
 
+// ─── Bot Type ───────────────────────────────────────────────
+type BotType = "recording" | "voice_agent";
+
 export async function recall_webhook(payload: any): Promise<void> {
     // Route transcript events to the transcript webhook handler
     if (payload?.event === "transcript.data" || payload?.event === "transcript.done") {
@@ -58,13 +61,22 @@ export async function recall_webhook(payload: any): Promise<void> {
                     // Skip calendar events that have already passed.
                     if (new Date(calendar_event.start_time) <= new Date()) continue;
 
-                    // Schedule a bot for the calendar event if it doesn't already have one.
+                    // Schedule recording bot
                     try {
-                        await schedule_bot_for_calendar_event({ calendar_event, calendar });
-                        console.log(`Scheduled bot for calendar event: ${calendar_event.id}`);
+                        await schedule_bot_for_calendar_event({ calendar_event, calendar, bot_type: "recording" });
+                        console.log(`Scheduled recording bot for calendar event: ${calendar_event.id}`);
                     } catch (err) {
-                        console.error(`Failed to schedule bot for calendar event ${calendar_event.id}:`, err);
-                        continue;
+                        console.error(`Failed to schedule recording bot for calendar event ${calendar_event.id}:`, err);
+                    }
+
+                    // Schedule voice agent bot (if configured)
+                    if (env.VOICE_AGENT_PAGE_URL && env.VOICE_AGENT_WSS_URL) {
+                        try {
+                            await schedule_bot_for_calendar_event({ calendar_event, calendar, bot_type: "voice_agent" });
+                            console.log(`Scheduled voice agent bot for calendar event: ${calendar_event.id}`);
+                        } catch (err) {
+                            console.error(`Failed to schedule voice agent bot for calendar event ${calendar_event.id}:`, err);
+                        }
                     }
                 }
                 next = new_next;
@@ -299,18 +311,28 @@ export async function calendar_event_retrieve(args: {
  */
 export async function unschedule_bot_for_calendar_event(args: {
     calendar_event_id: string,
+    deduplication_key?: string,
 }) {
     const { calendar_event_id } = z.object({
         calendar_event_id: z.string(),
     }).parse(args);
 
-    const response = await fetch_with_retry(`https://${env.RECALL_REGION}.recall.ai/api/v2/calendar-events/${calendar_event_id}/bot`, {
-        method: "DELETE",
-        headers: {
-            "Authorization": `${env.RECALL_API_KEY}`,
-            "Content-Type": "application/json",
+    const body: Record<string, any> = {};
+    if (args.deduplication_key) {
+        body.deduplication_key = args.deduplication_key;
+    }
+
+    const response = await fetch_with_retry(
+        `https://${env.RECALL_REGION}.recall.ai/api/v2/calendar-events/${calendar_event_id}/bot`,
+        {
+            method: "DELETE",
+            headers: {
+                "Authorization": `${env.RECALL_API_KEY}`,
+                "Content-Type": "application/json",
+            },
+            body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
         },
-    });
+    );
     if (!response.ok) throw new Error(await response.text());
     return CalendarEventSchema.parse(await response.json());
 }
@@ -322,45 +344,84 @@ export async function unschedule_bot_for_calendar_event(args: {
 export async function schedule_bot_for_calendar_event(args: {
     calendar: CalendarType,
     calendar_event: CalendarEventType,
+    bot_type?: BotType,
 }) {
     const { calendar, calendar_event } = z.object({
         calendar: CalendarSchema,
         calendar_event: CalendarEventSchema,
     }).parse(args);
 
+    const bot_type: BotType = args.bot_type ?? "recording";
+
     const { deduplication_key } = generate_bot_deduplication_key({
         one_bot_per: "meeting",
         email: calendar.platform_email!,
         meeting_url: calendar_event.meeting_url!,
         meeting_start_timestamp: calendar_event.start_time,
+        bot_type,
     });
 
-    const response = await fetch_with_retry(`https://${env.RECALL_REGION}.recall.ai/api/v2/calendar-events/${calendar_event.id}/bot`, {
-        method: "POST",
-        headers: {
-            "Authorization": `${env.RECALL_API_KEY}`,
-            "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-            deduplication_key,
-            bot_config: {
-                bot_name: `WEYA by Light Eagle`,
-                // meeting_url and start_time is automatically updated by Recall when we call the schedule bot for calendar event endpoint.
-                recording_config: {
-                    transcript: {
-                        provider: { recallai_streaming: {} },
+    // Bot tipine göre config oluştur
+    let bot_config: Record<string, any>;
+
+    if (bot_type === "voice_agent") {
+        // Voice Agent: Output Media ile web sayfası render eder
+        if (!env.VOICE_AGENT_PAGE_URL || !env.VOICE_AGENT_WSS_URL) {
+            throw new Error("Voice agent environment variables (VOICE_AGENT_PAGE_URL, VOICE_AGENT_WSS_URL) are not configured");
+        }
+
+        const output_media_url = `${env.VOICE_AGENT_PAGE_URL}?wss=${encodeURIComponent(env.VOICE_AGENT_WSS_URL)}`;
+
+        bot_config = {
+            bot_name: "WEYA Voice Agent",
+            output_media: {
+                camera: {
+                    kind: "webpage",
+                    config: {
+                        url: output_media_url,
                     },
-                    realtime_endpoints: [
-                        {
-                            type: "webhook",
-                            url: `https://${env.RAILWAY_DOMAIN}/api/webhooks/transcript`,
-                            events: ["transcript.data", "transcript.partial_data"],
-                        },
-                    ],
                 },
             },
-        }),
-    });
+            variant: {
+                zoom: "web_4_core",
+                google_meet: "web_4_core",
+                microsoft_teams: "web_4_core",
+            },
+        };
+    } else {
+        // Recording Bot: Mevcut config — transcript + realtime webhook
+        bot_config = {
+            bot_name: `WEYA by Light Eagle`,
+            // meeting_url and start_time is automatically updated by Recall when we call the schedule bot for calendar event endpoint.
+            recording_config: {
+                transcript: {
+                    provider: { recallai_streaming: {} },
+                },
+                realtime_endpoints: [
+                    {
+                        type: "webhook",
+                        url: `https://${env.RAILWAY_DOMAIN}/api/webhooks/transcript`,
+                        events: ["transcript.data", "transcript.partial_data"],
+                    },
+                ],
+            },
+        };
+    }
+
+    const response = await fetch_with_retry(
+        `https://${env.RECALL_REGION}.recall.ai/api/v2/calendar-events/${calendar_event.id}/bot`,
+        {
+            method: "POST",
+            headers: {
+                "Authorization": `${env.RECALL_API_KEY}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                deduplication_key,
+                bot_config,
+            }),
+        },
+    );
     if (!response.ok) throw new Error(await response.text());
 
     return CalendarEventSchema.parse(await response.json());
@@ -374,26 +435,31 @@ function generate_bot_deduplication_key(args: {
     email: string,
     meeting_url: string,
     meeting_start_timestamp: string,
+    bot_type: BotType,
 }) {
-    const { one_bot_per, email, meeting_url, meeting_start_timestamp } = z.object({
+    const { one_bot_per, email, meeting_url, meeting_start_timestamp, bot_type } = z.object({
         one_bot_per: z.enum(["user", "email_domain", "meeting"]),
         email: z.string(),
         meeting_url: z.string(),
         meeting_start_timestamp: z.string(),
+        bot_type: z.enum(["recording", "voice_agent"]),
     }).parse(args);
+
+    // Prefix: "rec" veya "va" — aynı event'e 2 farklı bot gidebilsin
+    const prefix = bot_type === "recording" ? "rec" : "va";
 
     switch (one_bot_per) {
         case "user": {
             // Deduplicate at user level: every user who has a bot scheduled will get their own bot.
-            return { deduplication_key: `${email}-${meeting_url}-${meeting_start_timestamp}` };
+            return { deduplication_key: `${prefix}-${email}-${meeting_url}-${meeting_start_timestamp}` };
         }
         case "email_domain": {
             // Deduplicate at company/domain level: one shared bot for everyone from that domain on this meeting occurrence.
-            return { deduplication_key: `${email.split("@")[1]}-${meeting_url}-${meeting_start_timestamp}` };
+            return { deduplication_key: `${prefix}-${email.split("@")[1]}-${meeting_url}-${meeting_start_timestamp}` };
         }
         case "meeting": {
             // Deduplicate at meeting level: one bot for the entire meeting regardless of who scheduled it.
-            return { deduplication_key: `${meeting_url}-${meeting_start_timestamp}` };
+            return { deduplication_key: `${prefix}-${meeting_url}-${meeting_start_timestamp}` };
         }
     }
 }

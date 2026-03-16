@@ -5,36 +5,38 @@ import { z } from "zod";
 export function useToggleRecording(props: {
     calendarId: string;
     calendarEventId: string;
+    botType?: "recording" | "voice_agent";
 }) {
     const { calendarId: _calendarId, calendarEventId } = z.object({
         calendarId: z.string(),
         calendarEventId: z.string(),
     }).parse(props);
 
+    const botType = props.botType ?? "recording";
     const queryClient = useQueryClient();
+
+    const label = botType === "voice_agent" ? "Voice agent" : "Recording";
 
     const { mutate: scheduleRecording, isPending: isScheduling } = useMutation({
         mutationFn: async () => {
             const url = new URL("/api/calendar/events/bot", window.location.origin);
             url.searchParams.set("calendar_event_id", calendarEventId);
+            url.searchParams.set("bot_type", botType);
 
             const res = await fetch(url.toString(), {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
+                headers: { "Content-Type": "application/json" },
             });
             if (!res.ok) throw new Error(await res.text());
-
             return { isScheduled: true };
         },
         onSuccess: () => {
-            toast.success("Recording scheduled");
+            toast.success(`${label} scheduled`);
             void queryClient.invalidateQueries({ queryKey: ["calendar_events"] });
         },
         onError: (error) => {
-            console.error("Error scheduling recording:", error);
-            toast.error("Failed to schedule recording. See console for details.");
+            console.error(`Error scheduling ${label}:`, error);
+            toast.error(`Failed to schedule ${label}. See console for details.`);
         },
     });
 
@@ -42,24 +44,22 @@ export function useToggleRecording(props: {
         mutationFn: async () => {
             const url = new URL("/api/calendar/events/bot", window.location.origin);
             url.searchParams.set("calendar_event_id", calendarEventId);
+            url.searchParams.set("bot_type", botType);
 
             const res = await fetch(url.toString(), {
                 method: "DELETE",
-                headers: {
-                    "Content-Type": "application/json",
-                },
+                headers: { "Content-Type": "application/json" },
             });
             if (!res.ok) throw new Error(await res.text());
-
             return { isUnscheduled: true };
         },
         onSuccess: () => {
-            toast.success("Recording cancelled");
+            toast.success(`${label} cancelled`);
             void queryClient.invalidateQueries({ queryKey: ["calendar_events"] });
         },
         onError: (error) => {
-            console.error("Error cancelling recording:", error);
-            toast.error("Failed to cancel recording. See console for details.");
+            console.error(`Error cancelling ${label}:`, error);
+            toast.error(`Failed to cancel ${label}. See console for details.`);
         },
     });
 
@@ -71,4 +71,3 @@ export function useToggleRecording(props: {
         isPending: isScheduling || isUnscheduling,
     };
 }
-

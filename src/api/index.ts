@@ -166,13 +166,15 @@ body=${JSON.stringify(body)}
                     case "POST": {
                         if (!search_params.calendar_event_id) throw new Error("calendar_event_id is required");
 
+                        const bot_type = (search_params.bot_type === "voice_agent") ? "voice_agent" : "recording";
+
                         const calendar_event = await calendar_event_retrieve({ calendar_event_id: search_params.calendar_event_id });
                         if (!calendar_event) throw new Error("Calendar event not found");
 
                         const calendar = await calendar_retrieve({ calendar_id: calendar_event.calendar_id });
                         if (!calendar) throw new Error("Calendar not found");
 
-                        const results = await schedule_bot_for_calendar_event({ calendar, calendar_event });
+                        const results = await schedule_bot_for_calendar_event({ calendar, calendar_event, bot_type });
                         console.log(`Scheduled Bot for Calendar Event: ${JSON.stringify(results)}`);
 
                         res.writeHead(200, { "Content-Type": "application/json" });
@@ -183,13 +185,22 @@ body=${JSON.stringify(body)}
                     case "DELETE": {
                         if (!search_params.calendar_event_id) throw new Error("calendar_event_id is required");
 
+                        const bot_type = (search_params.bot_type === "voice_agent") ? "voice_agent" : "recording";
+
                         const calendar_event = await calendar_event_retrieve({ calendar_event_id: search_params.calendar_event_id });
                         if (!calendar_event) throw new Error("Calendar event not found");
 
                         const calendar = await calendar_retrieve({ calendar_id: calendar_event.calendar_id });
                         if (!calendar) throw new Error("Calendar not found");
 
-                        const results = await unschedule_bot_for_calendar_event(search_params);
+                        // İlgili bot'un dedup key'ini bul — bots[] array'inden prefix'e göre eşleştir
+                        const dedup_prefix = bot_type === "voice_agent" ? "va-" : "rec-";
+                        const target_bot = calendar_event.bots.find(b => b.deduplication_key.startsWith(dedup_prefix));
+
+                        const results = await unschedule_bot_for_calendar_event({
+                            calendar_event_id: search_params.calendar_event_id,
+                            deduplication_key: target_bot?.deduplication_key,
+                        });
                         console.log(`Unscheduled Bot for Calendar Event: ${JSON.stringify(results)}`);
 
                         res.writeHead(200, { "Content-Type": "application/json" });
