@@ -20,4 +20,5 @@ export const EnvSchema = z.object({
     // Voice Agent configuration
     VOICE_AGENT_PAGE_URL: z.string().optional(),
     VOICE_AGENT_WSS_URL: z.string().optional(),
+    OPENAI_API_KEY: z.string().optional(),
 });

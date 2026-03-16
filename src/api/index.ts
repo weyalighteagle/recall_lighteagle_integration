@@ -7,6 +7,7 @@ import { calendar_oauth_callback } from "./handlers/calendar_oauth_callback";
 import { calendars_delete } from "./handlers/calendars_delete";
 import { calendars_list } from "./handlers/calendars_list";
 import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event } from "./handlers/recall_webhook";
+import { kb_list, kb_create, kb_delete, kb_toggle } from "./handlers/knowledge_base";
 import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
 import { bot_join } from "./handlers/bot_join";
 import { supabase } from "./config/supabase";
@@ -147,6 +148,39 @@ body=${JSON.stringify(body)}
                     default: {
                         throw new Error(`Method not allowed: ${req.method}`);
                     }
+                }
+            }
+            case "/api/kb": {
+                switch (req.method?.toUpperCase()) {
+                    case "GET": {
+                        const results = await kb_list();
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify(results));
+                        return;
+                    }
+                    case "POST": {
+                        if (!body?.title || !body?.content) throw new Error("title and content are required");
+                        const result = await kb_create(body);
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify(result));
+                        return;
+                    }
+                    case "DELETE": {
+                        if (!search_params.id) throw new Error("id is required");
+                        await kb_delete({ id: search_params.id });
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ message: "Document deleted" }));
+                        return;
+                    }
+                    case "PATCH": {
+                        if (!search_params.id) throw new Error("id is required");
+                        await kb_toggle({ id: search_params.id, is_active: body?.is_active ?? true });
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ message: "Document updated" }));
+                        return;
+                    }
+                    default:
+                        throw new Error(`Method not allowed: ${req.method}`);
                 }
             }
             case "/api/bot/join": {

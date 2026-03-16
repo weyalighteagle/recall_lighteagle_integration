@@ -20,7 +20,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/dashboard/*" element={<DashboardRoutes />} />
           <Route
             path="*"
-            element={<Navigate replace to="/dashboard/calendar" />}
+            element={<Navigate replace to="/dashboard/" />}
           />
         </Routes>
       </BrowserRouter>
@@ -32,13 +32,12 @@ function DashboardRoutes() {
   return (
     <DashboardWrapper>
       <Routes>
-        <Route path="calendar" element={<App />} />
-        <Route path="notes" element={<NotesList />} />
-        <Route path="notes/:botId" element={<TranscriptView />} />
-        <Route
-          path="*"
-          element={<Navigate replace to="/dashboard/calendar" />}
-        />
+        <Route path="/" element={<App />} />
+        <Route path="notes/:botId" element={<TranscriptPage />} />
+        <Route path="knowledge-base" element={<KnowledgeBase />} />
+        <Route path="transcripts" element={<TranscriptsPage />} />
+        <Route path="voice-agent" element={<VoiceAgentPage />} />
+        <Route path="settings" element={<SettingsPage />} />
       </Routes>
     </DashboardWrapper>
   );

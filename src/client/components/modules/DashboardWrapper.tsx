@@ -1,5 +1,6 @@
 import {
   Bell,
+  BookOpen,
   Calendar,
   FileText,
   Home,
@@ -21,6 +22,7 @@ const SidebarItems = [
   { icon: Calendar, label: "Calendars", href: "/dashboard/calendar" },
   { icon: Video, label: "Meetings", href: "#sample-link-meetings" },
   { icon: FileText, label: "Notes", href: "/dashboard/notes" },
+  { icon: BookOpen, label: "Knowledge Base", href: "/dashboard/knowledge-base" },
   { icon: Users, label: "Contacts", href: "#sample-link-contacts" },
   { icon: Settings, label: "Settings", href: "#sample-link-settings" },
 ];
