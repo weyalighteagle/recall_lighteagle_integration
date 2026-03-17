@@ -7,6 +7,7 @@ import { env } from "../config/env";
 import { fetch_with_retry } from "../fetch_with_retry";
 import { supabase } from "../config/supabase";
 import { handleTranscriptWebhook } from "./transcript_webhook";
+import { bot_settings_get } from "./bot_settings";
 
 // ─── Bot Type ───────────────────────────────────────────────
 type BotType = "recording" | "voice_agent";
@@ -43,6 +44,10 @@ export async function recall_webhook(payload: any): Promise<void> {
             break;
         }
         case "calendar.sync_events": {
+            // Read global bot_settings once before processing the event batch
+            const botSettings = await bot_settings_get();
+            console.log(`[calendar.sync_events] bot_mode=${botSettings.bot_mode}`);
+
             let next: string | null = null;
             do {
 
@@ -61,7 +66,7 @@ export async function recall_webhook(payload: any): Promise<void> {
                     // Skip calendar events that have already passed.
                     if (new Date(calendar_event.start_time) <= new Date()) continue;
 
-                    // Schedule recording bot
+                    // Always schedule the recording bot (transcription)
                     try {
                         await schedule_bot_for_calendar_event({ calendar_event, calendar, bot_type: "recording" });
                         console.log(`Scheduled recording bot for calendar event: ${calendar_event.id}`);
@@ -69,13 +74,17 @@ export async function recall_webhook(payload: any): Promise<void> {
                         console.error(`Failed to schedule recording bot for calendar event ${calendar_event.id}:`, err);
                     }
 
-                    // Schedule voice agent bot (if configured)
-                    if (env.VOICE_AGENT_PAGE_URL && env.VOICE_AGENT_WSS_URL) {
-                        try {
-                            await schedule_bot_for_calendar_event({ calendar_event, calendar, bot_type: "voice_agent" });
-                            console.log(`Scheduled voice agent bot for calendar event: ${calendar_event.id}`);
-                        } catch (err) {
-                            console.error(`Failed to schedule voice agent bot for calendar event ${calendar_event.id}:`, err);
+                    // Schedule voice agent only when mode is voice_agent
+                    if (botSettings.bot_mode === "voice_agent") {
+                        if (env.VOICE_AGENT_PAGE_URL && env.VOICE_AGENT_WSS_URL) {
+                            try {
+                                await schedule_bot_for_calendar_event({ calendar_event, calendar, bot_type: "voice_agent" });
+                                console.log(`Scheduled voice agent bot for calendar event: ${calendar_event.id}`);
+                            } catch (err) {
+                                console.error(`Failed to schedule voice agent bot for calendar event ${calendar_event.id}:`, err);
+                            }
+                        } else {
+                            console.warn(`[bot_settings] Mode is voice_agent but VOICE_AGENT_PAGE_URL/VOICE_AGENT_WSS_URL are not configured — skipping voice agent scheduling`);
                         }
                     }
                 }

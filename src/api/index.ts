@@ -11,6 +11,8 @@ import { kb_list, kb_create, kb_delete, kb_toggle } from "./handlers/knowledge_b
 import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
 import { handleVoiceAgentStatus } from "./handlers/voice_agent_status";
 import { bot_join } from "./handlers/bot_join";
+import { bot_settings_get, bot_settings_update } from "./handlers/bot_settings";
+import { knowledge_bases_list, knowledge_base_by_slug } from "./handlers/knowledge_bases";
 import { supabase } from "./config/supabase";
 
 dotenv.config();
@@ -190,11 +192,36 @@ body=${JSON.stringify(body)}
                 handleVoiceAgentStatus(req, res);
                 return;
             }
+            case "/api/bot-settings": {
+                switch (req.method?.toUpperCase()) {
+                    case "GET": {
+                        const settings = await bot_settings_get();
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify(settings));
+                        return;
+                    }
+                    case "PATCH": {
+                        const updated = await bot_settings_update(body ?? {});
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify(updated));
+                        return;
+                    }
+                    default:
+                        throw new Error(`Method not allowed: ${req.method}`);
+                }
+            }
             case "/api/bot/join": {
                 if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
                 if (!body?.meeting_url) throw new Error("meeting_url is required");
 
-                const result = await bot_join(body);
+                // Use persisted bot_type from settings when caller doesn't specify one
+                let bot_type = body.bot_type;
+                if (!bot_type) {
+                    const settings = await bot_settings_get();
+                    bot_type = settings.bot_mode === "voice_agent" ? "voice_agent" : "recording";
+                }
+
+                const result = await bot_join({ ...body, bot_type });
                 console.log(`Ad-hoc bot created: ${JSON.stringify(result)}`);
 
                 res.writeHead(200, { "Content-Type": "application/json" });
@@ -256,6 +283,43 @@ body=${JSON.stringify(body)}
 
             /** Default endpoints */
             default: {
+                // GET /api/knowledge-bases — list active knowledge bases (summary fields only)
+                if (pathname === "/api/knowledge-bases" && req.method?.toUpperCase() === "GET") {
+                    const result = await knowledge_bases_list();
+                    console.log(`Listed Knowledge Bases: ${result.knowledge_bases.length}`);
+
+                    res.writeHead(200, {
+                        "Content-Type": "application/json",
+                        "Access-Control-Allow-Origin": "*",
+                    });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // GET /api/knowledge-bases/:slug — full knowledge base by slug
+                if (pathname.startsWith("/api/knowledge-bases/") && req.method?.toUpperCase() === "GET") {
+                    const slug = pathname.replace("/api/knowledge-bases/", "");
+                    if (!slug) throw new Error("slug is required");
+
+                    const kb = await knowledge_base_by_slug(slug);
+                    if (!kb) {
+                        res.writeHead(404, {
+                            "Content-Type": "application/json",
+                            "Access-Control-Allow-Origin": "*",
+                        });
+                        res.end(JSON.stringify({ error: "Knowledge base not found" }));
+                        return;
+                    }
+
+                    console.log(`Retrieved Knowledge Base: ${kb.name}`);
+                    res.writeHead(200, {
+                        "Content-Type": "application/json",
+                        "Access-Control-Allow-Origin": "*",
+                    });
+                    res.end(JSON.stringify(kb));
+                    return;
+                }
+
                 // GET /api/transcripts — all meetings
                 if (pathname === "/api/transcripts" && req.method?.toUpperCase() === "GET") {
                     const { data } = await supabase
