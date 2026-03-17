@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, FileText, Loader2, MessageSquare, User } from "lucide-react";
+import { ArrowLeft, Download, FileText, Loader2, MessageSquare, User } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import {
     Card,
@@ -39,6 +39,25 @@ function TranscriptView() {
     const utterances = data?.utterances ?? [];
     const isDone = data?.done ?? false;
 
+    const handleExportTranscript = () => {
+        if (utterances.length === 0) return;
+        const lines = utterances.map((u) => {
+            const time = new Date(u.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+            const text = u.words.map((w) => w.text).join(" ");
+            return `[${time}] ${u.participant}: ${text}`;
+        });
+        const content = lines.join("\n");
+        const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `transcript-${botId}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
     return (
         <div className="flex flex-col gap-4 max-w-3xl mx-auto">
             {/* Header */}
@@ -52,6 +71,17 @@ function TranscriptView() {
                     <ArrowLeft className="size-4" />
                     Back to Calendar
                 </Button>
+                {utterances.length > 0 && (
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleExportTranscript}
+                        className="flex items-center gap-1 ml-auto"
+                    >
+                        <Download className="size-4" />
+                        Export Transcript
+                    </Button>
+                )}
             </div>
 
             <Card>
