@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Loader2 } from "lucide-react";
+import { Download, FileText, Loader2 } from "lucide-react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
@@ -16,6 +17,7 @@ interface MeetingsResponse {
 
 function NotesList() {
     const navigate = useNavigate();
+    const [exportingBotId, setExportingBotId] = useState<string | null>(null);
 
     const { data, isPending } = useQuery<MeetingsResponse>({
         queryKey: ["meetings"],
@@ -27,6 +29,36 @@ function NotesList() {
     });
 
     const meetings = data?.meetings ?? [];
+
+    const handleExportTranscript = async (botId: string) => {
+        setExportingBotId(botId);
+        try {
+            const res = await fetch(`/api/transcripts/${botId}`);
+            if (!res.ok) throw new Error(await res.text());
+            const data: { utterances: { participant: string; words: { text: string }[]; timestamp: string }[]; done: boolean } = await res.json();
+
+            const lines = data.utterances.map((u) => {
+                const time = new Date(u.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                const text = u.words.map((w) => w.text).join(" ");
+                return `[${time}] ${u.participant}: ${text}`;
+            });
+
+            const content = lines.join("\n");
+            const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `transcript-${botId}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error("Failed to export transcript:", err);
+        } finally {
+            setExportingBotId(null);
+        }
+    };
 
     return (
         <div className="flex flex-col gap-4 max-w-3xl mx-auto">
@@ -79,6 +111,19 @@ function NotesList() {
                                         >
                                             {meeting.done ? "Complete" : "Processing"}
                                         </span>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={exportingBotId === meeting.bot_id}
+                                            onClick={() => handleExportTranscript(meeting.bot_id)}
+                                        >
+                                            {exportingBotId === meeting.bot_id ? (
+                                                <Loader2 className="size-4 animate-spin mr-1" />
+                                            ) : (
+                                                <Download className="size-4 mr-1" />
+                                            )}
+                                            Export
+                                        </Button>
                                         <Button
                                             size="sm"
                                             variant="outline"
