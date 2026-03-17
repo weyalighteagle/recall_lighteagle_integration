@@ -1,6 +1,7 @@
 import {
     Calendar as CalendarIcon,
     Clock,
+    Download,
     FileText,
     Mic,
     Video,
@@ -533,6 +534,35 @@ function CalendarEventCard({
     });
 
     const navigate = useNavigate();
+    const [isExporting, setIsExporting] = useState(false);
+
+    const handleExportTranscript = async (botId: string) => {
+        setIsExporting(true);
+        try {
+            const res = await fetch(`/api/transcripts/${botId}`);
+            if (!res.ok) throw new Error(await res.text());
+            const data: { utterances: { participant: string; words: { text: string }[]; timestamp: string }[]; done: boolean } = await res.json();
+            const lines = data.utterances.map((u) => {
+                const time = new Date(u.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                const text = u.words.map((w) => w.text).join(" ");
+                return `[${time}] ${u.participant}: ${text}`;
+            });
+            const content = lines.join("\n");
+            const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `transcript-${botId}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            console.error("Failed to export transcript:", err);
+        } finally {
+            setIsExporting(false);
+        }
+    };
 
     const isInFuture = new Date(event.start_time) > new Date();
     const hasMeetingUrl = !!event.meeting_url;
@@ -670,6 +700,18 @@ function CalendarEventCard({
                     >
                         <FileText className="size-3" />
                         View Notes
+                    </button>
+                    <button
+                        onClick={() => handleExportTranscript(event.bots[0].bot_id)}
+                        disabled={isExporting}
+                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50"
+                    >
+                        {isExporting ? (
+                            <Loader2 className="size-3 animate-spin" />
+                        ) : (
+                            <Download className="size-3" />
+                        )}
+                        Export
                     </button>
                 </div>
             )}
