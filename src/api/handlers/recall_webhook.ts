@@ -114,8 +114,8 @@ async function handleBotDone(body: any): Promise<void> {
 
     console.log(`bot.done received for bot ${botId} — fetching full transcript`);
 
-    // Step 1: Fetch bot details from Recall v1 API to get the transcript download URL
-    let downloadUrl: string | null = null;
+    // Step 1: Fetch bot details from Recall v1 API to get transcript download URLs
+    let downloadUrls: string[] = [];
     try {
         const botResponse = await fetch_with_retry(
             `https://${env.RECALL_REGION}.recall.ai/api/v1/bot/${botId}/`,
@@ -132,15 +132,21 @@ async function handleBotDone(body: any): Promise<void> {
             console.error(`Failed to fetch bot details for ${botId}:`, await botResponse.text());
         } else {
             const botData = await botResponse.json();
-            downloadUrl =
-                botData?.recordings?.[0]?.media_shortcuts?.transcript?.data?.download_url ?? null;
 
-            if (downloadUrl) {
-                console.log(`Got transcript download URL for bot ${botId}`);
-            } else {
-                console.log(`No transcript download URL for bot ${botId}. media_shortcuts:`,
-                    JSON.stringify(botData?.recordings?.[0]?.media_shortcuts ?? null));
-            }
+            // Collect transcript download URLs from ALL recordings entries.
+            // When include_bot_in_recording.audio is true, Recall creates a separate recordings
+            // entry for the bot's own output audio stream in addition to the participant stream.
+            // Hardcoding recordings[0] would miss the bot's utterances entirely.
+            const recordings: any[] = Array.isArray(botData?.recordings) ? botData.recordings : [];
+            downloadUrls = recordings
+                .map((r: any, i: number) => {
+                    const url = r?.media_shortcuts?.transcript?.data?.download_url ?? null;
+                    console.log(`[bot.done] recordings[${i}] transcript URL: ${url ?? "none"} | media_shortcuts: ${JSON.stringify(r?.media_shortcuts ?? null)}`);
+                    return url;
+                })
+                .filter((u: string | null): u is string => !!u);
+
+            console.log(`[bot.done] bot ${botId}: ${recordings.length} recording(s), ${downloadUrls.length} transcript URL(s)`);
 
             // Backfill meeting_url, bot_type, and bot_name — important for calendar-scheduled bots
             // where these fields weren't available when the meetings row was first created.
@@ -161,41 +167,44 @@ async function handleBotDone(body: any): Promise<void> {
         console.error(`Unexpected error fetching bot details for ${botId}:`, err);
     }
 
-    if (!downloadUrl) {
-        console.warn(`[bot.done] No transcript download URL for bot ${botId} — skipping transcript fetch`);
+    if (downloadUrls.length === 0) {
+        console.warn(`[bot.done] No transcript download URLs for bot ${botId} — skipping transcript fetch`);
         await supabase.from("meetings").update({ done: true }).eq("bot_id", botId);
         return;
     }
 
-    // Step 2: Download the full transcript JSON
-    // Expected shape: [{ "speaker": "Name", "words": [{text, start_timestamp, end_timestamp}] }]
+    // Step 2: Download and merge transcripts from all recordings entries.
+    // Each entry is an array of segments: [{ speaker, words: [{text, start_timestamp, end_timestamp}] }]
+    // Multiple entries occur when include_bot_in_recording.audio is true (bot audio = separate stream).
     type TranscriptSegment = { speaker?: string; participant?: { name?: string }; words: unknown[] };
     let segments: TranscriptSegment[] = [];
 
-    if (downloadUrl) {
+    for (const url of downloadUrls) {
         try {
-            const transcriptResponse = await fetch(downloadUrl);
+            const transcriptResponse = await fetch(url);
             if (!transcriptResponse.ok) {
-                console.error(`Failed to download transcript for bot ${botId}:`,
+                console.error(`Failed to download transcript for bot ${botId} (url=${url}):`,
                     await transcriptResponse.text());
-            } else {
-                const rawJson: unknown = await transcriptResponse.json();
+                continue;
+            }
+            const rawJson: unknown = await transcriptResponse.json();
 
-                // Guard: transcript download must be a top-level array
-                if (!Array.isArray(rawJson)) {
-                    console.error(`Transcript for bot ${botId} is not an array — actual shape:`,
-                        JSON.stringify(rawJson));
-                } else {
-                    segments = rawJson as TranscriptSegment[];
-                    // Log the first segment so Railway shows the exact field names coming from Recall
-                    console.log(`Downloaded transcript for bot ${botId}: ${segments.length} segments. First segment:`,
-                        JSON.stringify(segments[0] ?? null));
-                }
+            // Guard: transcript download must be a top-level array
+            if (!Array.isArray(rawJson)) {
+                console.error(`Transcript for bot ${botId} is not an array — actual shape:`,
+                    JSON.stringify(rawJson));
+            } else {
+                const incoming = rawJson as TranscriptSegment[];
+                // Log first segment per URL so Railway logs show exact field names from Recall
+                console.log(`Downloaded ${incoming.length} segments from ${url}. First segment:`,
+                    JSON.stringify(incoming[0] ?? null));
+                segments.push(...incoming);
             }
         } catch (err) {
-            console.error(`Unexpected error downloading transcript for bot ${botId}:`, err);
+            console.error(`Unexpected error downloading transcript for bot ${botId} (url=${url}):`, err);
         }
     }
+    console.log(`[bot.done] bot ${botId}: merged ${segments.length} total segments from ${downloadUrls.length} recording(s)`);
 
     // Step 3: Replace real-time utterances with the complete transcript
     if (segments.length > 0) {
