@@ -19,21 +19,11 @@ export async function recall_webhook(payload: any): Promise<void> {
         return;
     }
 
-    // Route bot status change events to the full-transcript handler.
-    // Recall sends "bot.status_change" (NOT "bot.done") with data.status.code === "done".
-    // We also guard "bot.done" in case Recall ever uses that alias.
-    const isBotDone =
-        (payload?.event === "bot.status_change" && payload?.data?.status?.code === "done") ||
-        payload?.event === "bot.done";
-    if (isBotDone) {
-        console.log(`[recall_webhook] bot.done triggered — event="${payload?.event}" code="${payload?.data?.status?.code}" bot_id="${payload?.data?.bot?.id}"`);
+    // Recall sends "bot.done" when the bot has fully shut down and recordings are available.
+    // Payload: { event: "bot.done", data: { bot: { id }, data: { code, sub_code, updated_at } } }
+    if (payload?.event === "bot.done") {
+        console.log(`[recall_webhook] bot.done received — bot_id="${payload?.data?.bot?.id}" code="${payload?.data?.data?.code}"`);
         await handleBotDone(payload);
-        return;
-    }
-
-    // Log every unrecognised status change so we can see what Recall actually sends
-    if (payload?.event === "bot.status_change") {
-        console.log(`[recall_webhook] bot.status_change (not done) — code="${payload?.data?.status?.code}" bot_id="${payload?.data?.bot?.id}"`);
         return;
     }
 
