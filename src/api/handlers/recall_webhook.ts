@@ -253,10 +253,11 @@ async function handleBotDone(body: any): Promise<void> {
         // 3b: Insert final utterances
         try {
             const rows = segments.map((seg) => {
-                const speaker = seg.participant?.name ?? seg.speaker ?? "Unknown";
-                if (speaker === "Unknown") {
-                    console.warn(`Segment missing speaker for bot ${botId} — raw segment:`,
-                        JSON.stringify(seg));
+                const raw = seg.participant?.name ?? seg.speaker ?? "";
+                const isFallback = !raw || raw === "Unknown";
+                const speaker = isFallback ? (botName || "WEYA Voice Agent") : raw;
+                if (isFallback) {
+                    console.log(`[handleBotDone] speaker normalized: "${raw}" → "${speaker}"`);
                 }
                 return {
                     bot_id: botId,
