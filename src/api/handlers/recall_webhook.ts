@@ -19,9 +19,21 @@ export async function recall_webhook(payload: any): Promise<void> {
         return;
     }
 
-    // Route bot.done events to the full-transcript handler
-    if (payload?.event === "bot.done") {
+    // Route bot status change events to the full-transcript handler.
+    // Recall sends "bot.status_change" (NOT "bot.done") with data.status.code === "done".
+    // We also guard "bot.done" in case Recall ever uses that alias.
+    const isBotDone =
+        (payload?.event === "bot.status_change" && payload?.data?.status?.code === "done") ||
+        payload?.event === "bot.done";
+    if (isBotDone) {
+        console.log(`[recall_webhook] bot.done triggered — event="${payload?.event}" code="${payload?.data?.status?.code}" bot_id="${payload?.data?.bot?.id}"`);
         await handleBotDone(payload);
+        return;
+    }
+
+    // Log every unrecognised status change so we can see what Recall actually sends
+    if (payload?.event === "bot.status_change") {
+        console.log(`[recall_webhook] bot.status_change (not done) — code="${payload?.data?.status?.code}" bot_id="${payload?.data?.bot?.id}"`);
         return;
     }
 
@@ -108,11 +120,11 @@ async function handleBotDone(body: any): Promise<void> {
     const botId: string | undefined = body?.data?.bot?.id;
 
     if (!botId) {
-        console.error("bot.done received without bot_id:", JSON.stringify(body));
+        console.error("[handleBotDone] received without bot_id. Full payload:", JSON.stringify(body));
         return;
     }
 
-    console.log(`bot.done received for bot ${botId} — fetching full transcript`);
+    console.log(`[handleBotDone] ── START bot_id=${botId} ─────────────────────────────`);
 
     // Step 1: Fetch bot details from Recall v1 API to get transcript download URLs
     let downloadUrls: string[] = [];
@@ -129,24 +141,31 @@ async function handleBotDone(body: any): Promise<void> {
         );
 
         if (!botResponse.ok) {
-            console.error(`Failed to fetch bot details for ${botId}:`, await botResponse.text());
+            console.error(`[handleBotDone] Recall API fetch failed for bot ${botId}:`, await botResponse.text());
         } else {
             const botData = await botResponse.json();
+
+            // ── STEP 1 DIAGNOSTICS ──────────────────────────────────────────────────
+            console.log(`[handleBotDone] bot_name="${botData?.bot_name}" meeting_url="${botData?.meeting_url}" status="${botData?.status_changes?.at(-1)?.code}"`);
+            const recordings: any[] = Array.isArray(botData?.recordings) ? botData.recordings : [];
+            console.log(`[handleBotDone] recordings[] count: ${recordings.length}`);
+            recordings.forEach((r: any, i: number) => {
+                console.log(`[handleBotDone] recordings[${i}] full media_shortcuts:`, JSON.stringify(r?.media_shortcuts ?? null));
+            });
 
             // Collect transcript download URLs from ALL recordings entries.
             // When include_bot_in_recording.audio is true, Recall creates a separate recordings
             // entry for the bot's own output audio stream in addition to the participant stream.
             // Hardcoding recordings[0] would miss the bot's utterances entirely.
-            const recordings: any[] = Array.isArray(botData?.recordings) ? botData.recordings : [];
             downloadUrls = recordings
                 .map((r: any, i: number) => {
                     const url = r?.media_shortcuts?.transcript?.data?.download_url ?? null;
-                    console.log(`[bot.done] recordings[${i}] transcript URL: ${url ?? "none"} | media_shortcuts: ${JSON.stringify(r?.media_shortcuts ?? null)}`);
+                    console.log(`[handleBotDone] recordings[${i}] transcript download_url: ${url ?? "NONE"}`);
                     return url;
                 })
                 .filter((u: string | null): u is string => !!u);
 
-            console.log(`[bot.done] bot ${botId}: ${recordings.length} recording(s), ${downloadUrls.length} transcript URL(s)`);
+            console.log(`[handleBotDone] transcript URLs found: ${downloadUrls.length} / ${recordings.length} recordings`);
 
             // Backfill meeting_url, bot_type, and bot_name — important for calendar-scheduled bots
             // where these fields weren't available when the meetings row was first created.
@@ -168,7 +187,7 @@ async function handleBotDone(body: any): Promise<void> {
     }
 
     if (downloadUrls.length === 0) {
-        console.warn(`[bot.done] No transcript download URLs for bot ${botId} — skipping transcript fetch`);
+        console.warn(`[handleBotDone] No transcript URLs for bot ${botId} — marking done and exiting`);
         await supabase.from("meetings").update({ done: true }).eq("bot_id", botId);
         return;
     }
@@ -179,32 +198,38 @@ async function handleBotDone(body: any): Promise<void> {
     type TranscriptSegment = { speaker?: string; participant?: { name?: string }; words: unknown[] };
     let segments: TranscriptSegment[] = [];
 
-    for (const url of downloadUrls) {
+    for (const [urlIndex, url] of downloadUrls.entries()) {
+        console.log(`[handleBotDone] ── downloading transcript ${urlIndex + 1}/${downloadUrls.length}: ${url}`);
         try {
             const transcriptResponse = await fetch(url);
             if (!transcriptResponse.ok) {
-                console.error(`Failed to download transcript for bot ${botId} (url=${url}):`,
+                console.error(`[handleBotDone] download failed (${transcriptResponse.status}) for url=${url}:`,
                     await transcriptResponse.text());
                 continue;
             }
-            const rawJson: unknown = await transcriptResponse.json();
+            const rawText = await transcriptResponse.text();
+            console.log(`[handleBotDone] raw transcript (first 500 chars): ${rawText.slice(0, 500)}`);
+
+            let rawJson: unknown;
+            try { rawJson = JSON.parse(rawText); } catch (e) {
+                console.error(`[handleBotDone] JSON parse failed for url=${url}:`, e);
+                continue;
+            }
 
             // Guard: transcript download must be a top-level array
             if (!Array.isArray(rawJson)) {
-                console.error(`Transcript for bot ${botId} is not an array — actual shape:`,
-                    JSON.stringify(rawJson));
+                console.error(`[handleBotDone] transcript is not an array — shape:`, JSON.stringify(rawJson).slice(0, 300));
             } else {
                 const incoming = rawJson as TranscriptSegment[];
-                // Log first segment per URL so Railway logs show exact field names from Recall
-                console.log(`Downloaded ${incoming.length} segments from ${url}. First segment:`,
-                    JSON.stringify(incoming[0] ?? null));
+                const speakers = [...new Set(incoming.map(s => s.participant?.name ?? s.speaker ?? "Unknown"))];
+                console.log(`[handleBotDone] transcript ${urlIndex + 1}: ${incoming.length} segments, speakers: ${JSON.stringify(speakers)}`);
                 segments.push(...incoming);
             }
         } catch (err) {
-            console.error(`Unexpected error downloading transcript for bot ${botId} (url=${url}):`, err);
+            console.error(`[handleBotDone] unexpected error for url=${url}:`, err);
         }
     }
-    console.log(`[bot.done] bot ${botId}: merged ${segments.length} total segments from ${downloadUrls.length} recording(s)`);
+    console.log(`[handleBotDone] merged total: ${segments.length} segments from ${downloadUrls.length} URL(s)`);
 
     // Step 3: Replace real-time utterances with the complete transcript
     if (segments.length > 0) {
@@ -240,15 +265,19 @@ async function handleBotDone(body: any): Promise<void> {
                 };
             });
 
-            const { error: insertError } = await supabase
+            const speakers = [...new Set(rows.map(r => r.speaker))];
+            console.log(`[handleBotDone] inserting ${rows.length} utterances — speakers: ${JSON.stringify(speakers)}`);
+
+            const { error: insertError, data: insertData } = await supabase
                 .from("utterances")
-                .insert(rows);
+                .insert(rows)
+                .select("id");
 
             if (insertError) {
-                console.error(`Failed to insert final utterances for bot ${botId}:`,
-                    { bot_id: botId, error: insertError, segmentCount: rows.length });
+                console.error(`[handleBotDone] Supabase insert FAILED for bot ${botId}:`,
+                    { error: insertError, segmentCount: rows.length });
             } else {
-                console.log(`Inserted ${rows.length} final utterances for bot ${botId}`);
+                console.log(`[handleBotDone] Supabase insert OK — ${insertData?.length ?? rows.length} rows written for bot ${botId}`);
             }
         } catch (err) {
             console.error(`Unexpected error inserting final utterances for bot ${botId}:`, err);
@@ -266,11 +295,12 @@ async function handleBotDone(body: any): Promise<void> {
             console.error(`Failed to mark meeting done for bot ${botId}:`,
                 { bot_id: botId, error: doneError });
         } else {
-            console.log(`Marked meeting done for bot ${botId}`);
+            console.log(`[handleBotDone] meeting marked done for bot ${botId}`);
         }
     } catch (err) {
-        console.error(`Unexpected error marking meeting done for bot ${botId}:`, err);
+        console.error(`[handleBotDone] unexpected error marking done for bot ${botId}:`, err);
     }
+    console.log(`[handleBotDone] ── END bot_id=${botId} ───────────────────────────────`);
 }
 
 /**
@@ -431,12 +461,20 @@ export async function schedule_bot_for_calendar_event(args: {
                     provider: {
                         recallai_streaming: {},
                     },
+                    diarization: {
+                        use_separate_streams_when_available: true,
+                    },
                 },
                 realtime_endpoints: [
                     {
                         type: "webhook",
                         url: `https://${env.RAILWAY_DOMAIN}/api/webhooks/transcript`,
                         events: ["transcript.data", "transcript.partial_data"],
+                    },
+                    {
+                        type: "webhook",
+                        url: `https://${env.RAILWAY_DOMAIN}/api/recall/webhook`,
+                        events: ["bot.status_change"],
                     },
                 ],
                 include_bot_in_recording: {
@@ -458,6 +496,11 @@ export async function schedule_bot_for_calendar_event(args: {
                         type: "webhook",
                         url: `https://${env.RAILWAY_DOMAIN}/api/webhooks/transcript`,
                         events: ["transcript.data", "transcript.partial_data"],
+                    },
+                    {
+                        type: "webhook",
+                        url: `https://${env.RAILWAY_DOMAIN}/api/recall/webhook`,
+                        events: ["bot.status_change"],
                     },
                 ],
             },
