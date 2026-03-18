@@ -7,7 +7,7 @@ import { calendar_oauth_callback } from "./handlers/calendar_oauth_callback";
 import { calendars_delete } from "./handlers/calendars_delete";
 import { calendars_list } from "./handlers/calendars_list";
 import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event } from "./handlers/recall_webhook";
-import { kb_list, kb_create, kb_delete, kb_toggle } from "./handlers/knowledge_base";
+import { kb_list, kb_create, kb_delete, kb_toggle, kb_get, kb_update } from "./handlers/knowledge_base";
 import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
 import { handleVoiceAgentStatus } from "./handlers/voice_agent_status";
 import { bot_join } from "./handlers/bot_join";
@@ -302,6 +302,37 @@ body=${JSON.stringify(body)}
 
             /** Default endpoints */
             default: {
+                // ── Single KB Document routes: /api/kb/:id ────────────────────
+                if (pathname.startsWith("/api/kb/") && pathname !== "/api/kb/") {
+                    const docId = pathname.replace("/api/kb/", "");
+
+                    switch (req.method?.toUpperCase()) {
+                        case "GET": {
+                            const doc = await kb_get({ id: docId });
+                            res.writeHead(200, {
+                                "Content-Type": "application/json",
+                                "Access-Control-Allow-Origin": "*",
+                            });
+                            res.end(JSON.stringify(doc));
+                            return;
+                        }
+                        case "PUT": {
+                            if (!body?.title || !body?.content || !body?.category) {
+                                throw new Error("title, category, and content are required");
+                            }
+                            const result = await kb_update({ id: docId, ...body });
+                            res.writeHead(200, {
+                                "Content-Type": "application/json",
+                                "Access-Control-Allow-Origin": "*",
+                            });
+                            res.end(JSON.stringify(result));
+                            return;
+                        }
+                        default:
+                            throw new Error(`Method not allowed: ${req.method}`);
+                    }
+                }
+
                 // GET /api/knowledge-bases — list active knowledge bases (summary fields only)
                 if (pathname === "/api/knowledge-bases" && req.method?.toUpperCase() === "GET") {
                     const result = await knowledge_bases_list();
