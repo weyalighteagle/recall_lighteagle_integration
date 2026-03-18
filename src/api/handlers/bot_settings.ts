@@ -9,7 +9,7 @@ export interface BotSettings {
 
 const DEFAULTS: BotSettings = {
     bot_mode: "transcriptor",
-    active_kb_id: null,
+    active_kb_id: "d811bc5d-3644-4adf-9ab6-4797803e1b8e",
 };
 
 /**

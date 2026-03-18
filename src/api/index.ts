@@ -12,6 +12,7 @@ import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcr
 import { handleVoiceAgentStatus } from "./handlers/voice_agent_status";
 import { bot_join } from "./handlers/bot_join";
 import { bot_settings_get, bot_settings_update } from "./handlers/bot_settings";
+import { voice_agent_config_get, voice_agent_config_update } from "./handlers/voice_agent_config";
 import { knowledge_bases_list, knowledge_base_by_slug } from "./handlers/knowledge_bases";
 import { supabase } from "./config/supabase";
 
@@ -202,6 +203,24 @@ body=${JSON.stringify(body)}
                     }
                     case "PATCH": {
                         const updated = await bot_settings_update(body ?? {});
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify(updated));
+                        return;
+                    }
+                    default:
+                        throw new Error(`Method not allowed: ${req.method}`);
+                }
+            }
+            case "/api/voice-agent-config": {
+                switch (req.method?.toUpperCase()) {
+                    case "GET": {
+                        const config = await voice_agent_config_get();
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify(config));
+                        return;
+                    }
+                    case "PATCH": {
+                        const updated = await voice_agent_config_update(body ?? {});
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify(updated));
                         return;

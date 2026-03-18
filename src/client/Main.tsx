@@ -8,6 +8,8 @@ import NotesList from "./pages/NotesList";
 import KnowledgeBase from "./pages/KnowledgeBase";
 import VoiceAgentPage from "./pages/VoiceAgentPage";
 import SettingsPage from "./pages/SettingsPage";
+import InstantMeetingPage from "./pages/InstantMeetingPage";
+import VoiceAgentSettingsPage from "./pages/VoiceAgentSettingsPage";
 import "./index.css";
 import DashboardWrapper from "./components/modules/DashboardWrapper";
 import { Toaster } from "./components/ui/Sonner";
@@ -41,8 +43,10 @@ function DashboardRoutes() {
         <Route path="notes/:botId" element={<TranscriptView />} />
         <Route path="knowledge-base" element={<KnowledgeBase />} />
         <Route path="transcripts" element={<NotesList />} />
+        <Route path="instant-meeting" element={<InstantMeetingPage />} />
         <Route path="voice-agent" element={<VoiceAgentPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="voice-agent-settings" element={<VoiceAgentSettingsPage />} />
       </Routes>
     </DashboardWrapper>
   );

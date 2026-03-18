@@ -9,8 +9,9 @@ import {
     Loader2,
     RefreshCw,
     Plus,
+    BookOpen,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import type { CalendarType } from "../schemas/CalendarArtifactSchema";
 import type { CalendarEventType } from "../schemas/CalendarEventArtifactSchema";
@@ -108,8 +109,47 @@ function ConnectCalendar() {
     );
 }
 
+interface KbDoc {
+    id: string;
+    title: string;
+    is_active: boolean;
+}
+
 function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     const [showConnectDialog, setShowConnectDialog] = useState(false);
+
+    // ── KB selector ───────────────────────────────────────────────────────────
+    const [kbDocuments, setKbDocuments] = useState<KbDoc[]>([]);
+    const [selectedKbId, setSelectedKbId] = useState<string>("");
+    const [kbLoading, setKbLoading] = useState(true);
+
+    useEffect(() => {
+        Promise.all([
+            fetch("/api/bot-settings").then((r) => r.json()) as Promise<{ bot_mode: string; active_kb_id: string | null }>,
+            fetch("/api/kb").then((r) => r.json()) as Promise<{ documents: KbDoc[] }>,
+        ])
+            .then(([settings, kbData]) => {
+                const docs = kbData.documents ?? [];
+                setKbDocuments(docs);
+                const savedId = settings.active_kb_id;
+                if (savedId && docs.some((d) => d.id === savedId)) {
+                    setSelectedKbId(savedId);
+                } else if (docs.length > 0) {
+                    setSelectedKbId(docs[0].id);
+                }
+            })
+            .catch(console.error)
+            .finally(() => setKbLoading(false));
+    }, []);
+
+    const handleKbChange = (id: string) => {
+        setSelectedKbId(id);
+        fetch("/api/bot-settings", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ active_kb_id: id }),
+        }).catch(console.error);
+    };
 
     // Her email adresi için ayrı tab
     const calendarsByEmail = useMemo(() => {
@@ -183,6 +223,36 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                         </TabsTrigger>
                     ))}
                 </TabsList>
+
+                {/* Knowledge Base — compact row, sits between tabs and calendar content */}
+                <div className="flex items-center gap-3 mt-3 px-3 py-2.5 bg-white border rounded-lg shadow-sm">
+                    <BookOpen className="size-4 text-gray-400 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium text-gray-700">Knowledge Base</span>
+                        <p className="text-xs text-gray-400 leading-tight">
+                            Voice Agent will use this knowledge base for scheduled meetings
+                        </p>
+                    </div>
+                    {kbLoading ? (
+                        <Loader2 className="size-4 animate-spin text-gray-400 shrink-0" />
+                    ) : (
+                        <select
+                            value={selectedKbId}
+                            onChange={(e) => handleKbChange(e.target.value)}
+                            className="px-2 py-1.5 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white shrink-0 max-w-xs"
+                        >
+                            {kbDocuments.length === 0 ? (
+                                <option value="">No knowledge bases</option>
+                            ) : (
+                                kbDocuments.map((doc) => (
+                                    <option key={doc.id} value={doc.id}>
+                                        {doc.title}
+                                    </option>
+                                ))
+                            )}
+                        </select>
+                    )}
+                </div>
 
                 {calendarsByEmail.map((entry) => (
                     <TabsContent key={entry.email} value={entry.email}>
@@ -650,7 +720,7 @@ function CalendarEventCard({
                 {/* Toggle'lar — sağ üst köşe */}
                 {canToggle ? (
                     <div className="flex flex-col gap-1.5 shrink-0 items-end">
-                        {renderToggle("Record", isRecordingScheduled, isRecordingPending, handleRecordingToggle, "bg-red-500")}
+                        {renderToggle("Transcriptor", isRecordingScheduled, isRecordingPending, handleRecordingToggle, "bg-red-500")}
                         {renderToggle("Voice Agent", hasVoiceAgentBot, isVoiceAgentPending, handleVoiceAgentToggle, "bg-purple-500")}
                     </div>
                 ) : !hasMeetingUrl ? (
