@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye, X } from "lucide-react";
+import { Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import {
     Card,
@@ -97,8 +97,8 @@ function KnowledgeBase() {
             if (!res.ok) throw new Error(await res.text());
             return res.json();
         },
-        onSuccess: (data) => {
-            toast.success(`"${title}" eklendi (${data.chunks} parça)`);
+        onSuccess: (resData) => {
+            toast.success(`"${title}" eklendi (${resData.chunks} parça)`);
             setTitle("");
             setContent("");
             setShowForm(false);
@@ -125,8 +125,8 @@ function KnowledgeBase() {
             if (!res.ok) throw new Error(await res.text());
             return res.json();
         },
-        onSuccess: (data) => {
-            toast.success(`Güncellendi (${data.chunks} parça)`);
+        onSuccess: (resData) => {
+            toast.success(`Güncellendi (${resData.chunks} parça)`);
             setIsEditing(false);
             void queryClient.invalidateQueries({ queryKey: ["kb_documents"] });
             void queryClient.invalidateQueries({ queryKey: ["kb_document", selectedDocId] });
@@ -314,8 +314,9 @@ function KnowledgeBase() {
                                         }`}
                                     >
                                         <button
+                                            type="button"
                                             onClick={() => handleOpenDocument(doc.id)}
-                                            className="flex flex-col gap-0.5 min-w-0 flex-1 text-left hover:bg-gray-50 -mx-2 px-2 py-1 rounded-md transition-colors"
+                                            className="flex flex-col gap-0.5 min-w-0 flex-1 text-left hover:bg-gray-50 -mx-2 px-2 py-1 rounded-md transition-colors cursor-pointer"
                                         >
                                             <span className="text-sm font-medium text-gray-800 truncate">
                                                 {doc.title}
@@ -377,7 +378,7 @@ function KnowledgeBase() {
 
             {/* ── View / Edit Dialog ───────────────────────────────────────── */}
             <Dialog open={!!selectedDocId} onOpenChange={(open) => { if (!open) handleCloseDialog(); }}>
-                <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+                <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
                     {isLoadingDoc ? (
                         <div className="flex flex-col items-center justify-center py-12">
                             <Loader2 className="size-8 text-blue-500 mb-3 animate-spin" />
@@ -396,10 +397,10 @@ function KnowledgeBase() {
                                     Doküman Düzenle
                                 </DialogTitle>
                                 <DialogDescription>
-                                    İçeriği düzenle ve kaydet. Kaydettiğinde chunk'lar ve embedding'ler yeniden oluşturulur.
+                                    İçeriği düzenle ve kaydet. Kaydettiğinde chunk&apos;lar ve embedding&apos;ler yeniden oluşturulur.
                                 </DialogDescription>
                             </DialogHeader>
-                            <div className="flex flex-col gap-3 flex-1 overflow-hidden">
+                            <div className="flex flex-col gap-3">
                                 <input
                                     type="text"
                                     value={editTitle}
@@ -421,12 +422,13 @@ function KnowledgeBase() {
                                 <textarea
                                     value={editContent}
                                     onChange={(e) => setEditContent(e.target.value)}
-                                    rows={16}
-                                    className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y flex-1 min-h-[200px]"
+                                    rows={12}
+                                    className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y min-h-[150px] max-h-[40vh]"
                                 />
                             </div>
                             <DialogFooter>
                                 <Button
+                                    type="button"
                                     variant="outline"
                                     size="sm"
                                     onClick={handleCancelEditing}
@@ -435,6 +437,7 @@ function KnowledgeBase() {
                                     İptal
                                 </Button>
                                 <Button
+                                    type="button"
                                     size="sm"
                                     disabled={
                                         !editTitle.trim() ||
@@ -475,13 +478,14 @@ function KnowledgeBase() {
                                     </span>
                                 </DialogDescription>
                             </DialogHeader>
-                            <ScrollArea className="flex-1 max-h-[50vh] border rounded-md p-4 bg-gray-50">
+                            <div className="border rounded-md p-4 bg-gray-50 max-h-[50vh] overflow-y-auto">
                                 <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed">
                                     {fullDoc.content}
                                 </pre>
-                            </ScrollArea>
+                            </div>
                             <DialogFooter>
                                 <Button
+                                    type="button"
                                     variant="outline"
                                     size="sm"
                                     onClick={handleCloseDialog}
@@ -489,6 +493,7 @@ function KnowledgeBase() {
                                     Kapat
                                 </Button>
                                 <Button
+                                    type="button"
                                     size="sm"
                                     onClick={handleStartEditing}
                                     className="flex items-center gap-2"
