@@ -58,6 +58,9 @@ export async function bot_join(args: {
                     provider: {
                         recallai_streaming: {},
                     },
+                    diarization: {
+                        use_separate_streams_when_available: true,
+                    },
                 },
                 realtime_endpoints: [
                     {

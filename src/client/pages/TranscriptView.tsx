@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Download, FileText, Loader2, MessageSquare, User } from "lucide-react";
+import { ArrowLeft, Bot, Download, FileText, Loader2, MessageSquare, User } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import {
     Card,
@@ -131,19 +131,29 @@ function TranscriptView() {
                     ) : (
                         <ScrollArea className="h-[500px]">
                             <div className="space-y-3 pr-4">
-                                {utterances.map((utterance, index) => (
+                                {utterances.map((utterance, index) => {
+                                    const isWeya = utterance.participant.toUpperCase().includes("WEYA");
+                                    return (
                                     <div
                                         key={index}
                                         className="flex gap-3 p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors"
                                     >
-                                        <div className="flex items-center justify-center size-8 bg-blue-100 rounded-full shrink-0 mt-0.5">
-                                            <User className="size-4 text-blue-600" />
+                                        <div className={`flex items-center justify-center size-8 rounded-full shrink-0 mt-0.5 ${isWeya ? "bg-violet-100" : "bg-blue-100"}`}>
+                                            {isWeya
+                                                ? <Bot className="size-4 text-violet-600" />
+                                                : <User className="size-4 text-blue-600" />
+                                            }
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2 mb-1">
                                                 <span className="text-sm font-medium text-gray-900">
                                                     {utterance.participant}
                                                 </span>
+                                                {isWeya && (
+                                                    <span className="text-xs font-medium text-violet-600 bg-violet-100 px-1.5 py-0.5 rounded">
+                                                        AI
+                                                    </span>
+                                                )}
                                                 <span className="text-xs text-gray-400">
                                                     {new Date(utterance.timestamp).toLocaleTimeString([], {
                                                         hour: "2-digit",
@@ -159,7 +169,8 @@ function TranscriptView() {
                                             </p>
                                         </div>
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </ScrollArea>
                     )}
