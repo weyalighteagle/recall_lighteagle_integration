@@ -471,11 +471,6 @@ export async function schedule_bot_for_calendar_event(args: {
                         url: `https://${env.RAILWAY_DOMAIN}/api/webhooks/transcript`,
                         events: ["transcript.data", "transcript.partial_data"],
                     },
-                    {
-                        type: "webhook",
-                        url: `https://${env.RAILWAY_DOMAIN}/api/recall/webhook`,
-                        events: ["bot.status_change"],
-                    },
                 ],
                 include_bot_in_recording: {
                     audio: true,
@@ -496,11 +491,6 @@ export async function schedule_bot_for_calendar_event(args: {
                         type: "webhook",
                         url: `https://${env.RAILWAY_DOMAIN}/api/webhooks/transcript`,
                         events: ["transcript.data", "transcript.partial_data"],
-                    },
-                    {
-                        type: "webhook",
-                        url: `https://${env.RAILWAY_DOMAIN}/api/recall/webhook`,
-                        events: ["bot.status_change"],
                     },
                 ],
             },
