@@ -13,6 +13,9 @@ import { bot_settings_get } from "./bot_settings";
 type BotType = "recording" | "voice_agent";
 
 export async function recall_webhook(payload: any): Promise<void> {
+    console.log("[recall_webhook] RAW payload:", JSON.stringify(payload).slice(0, 500));
+    console.log("[recall_webhook] event received:", payload?.event, "| type:", typeof payload?.event);
+
     // Route transcript events to the transcript webhook handler
     if (payload?.event === "transcript.data" || payload?.event === "transcript.done") {
         await handleTranscriptWebhook(payload);
@@ -221,57 +224,55 @@ async function handleBotDone(body: any): Promise<void> {
     }
     console.log(`[handleBotDone] merged total: ${segments.length} segments from ${downloadUrls.length} URL(s)`);
 
-    // Step 3: Replace real-time utterances with the complete transcript
+    // Step 3: Supplement real-time utterances — do NOT delete existing rows.
+    // The transcript.data webhook is the primary insertion path and is already working.
+    // handleBotDone only adds utterances that are missing (e.g. bot's own audio stream
+    // which doesn't arrive via transcript.data). If real-time rows already exist for this
+    // bot_id, we skip the insert entirely to avoid duplicates.
     if (segments.length > 0) {
-        // 3a: Delete existing utterances
-        try {
-            const { error: deleteError } = await supabase
-                .from("utterances")
-                .delete()
-                .eq("bot_id", botId);
+        // Check whether real-time utterances already exist for this bot
+        const { count: existingCount } = await supabase
+            .from("utterances")
+            .select("id", { count: "exact", head: true })
+            .eq("bot_id", botId);
 
-            if (deleteError) {
-                console.error(`Failed to delete existing utterances for bot ${botId}:`,
-                    { bot_id: botId, error: deleteError });
-            } else {
-                console.log(`Deleted existing utterances for bot ${botId}`);
-            }
-        } catch (err) {
-            console.error(`Unexpected error deleting utterances for bot ${botId}:`, err);
-        }
+        if ((existingCount ?? 0) > 0) {
+            console.log(`[handleBotDone] ${existingCount} real-time utterances already exist for bot ${botId} — skipping async insert to avoid overwrite`);
+        } else {
+            // No real-time rows arrived (e.g. transcript.data webhooks were missed).
+            // Safe to insert the async transcript as a fallback.
+            try {
+                const rows = segments.map((seg) => {
+                    const raw = seg.participant?.name ?? seg.speaker ?? "";
+                    const isFallback = !raw || raw === "Unknown";
+                    const speaker = isFallback ? (botName || "WEYA Voice Agent") : raw;
+                    if (isFallback) {
+                        console.log(`[handleBotDone] speaker normalized: "${raw}" → "${speaker}"`);
+                    }
+                    return {
+                        bot_id: botId,
+                        speaker,
+                        words: seg.words,
+                    };
+                });
 
-        // 3b: Insert final utterances
-        try {
-            const rows = segments.map((seg) => {
-                const raw = seg.participant?.name ?? seg.speaker ?? "";
-                const isFallback = !raw || raw === "Unknown";
-                const speaker = isFallback ? (botName || "WEYA Voice Agent") : raw;
-                if (isFallback) {
-                    console.log(`[handleBotDone] speaker normalized: "${raw}" → "${speaker}"`);
+                const speakers = [...new Set(rows.map(r => r.speaker))];
+                console.log(`[handleBotDone] no real-time rows found — inserting ${rows.length} async utterances, speakers: ${JSON.stringify(speakers)}`);
+
+                const { error: insertError, data: insertData } = await supabase
+                    .from("utterances")
+                    .insert(rows)
+                    .select("id");
+
+                if (insertError) {
+                    console.error(`[handleBotDone] Supabase insert FAILED for bot ${botId}:`,
+                        { error: insertError, segmentCount: rows.length });
+                } else {
+                    console.log(`[handleBotDone] Supabase insert OK — ${insertData?.length ?? rows.length} rows written for bot ${botId}`);
                 }
-                return {
-                    bot_id: botId,
-                    speaker,
-                    words: seg.words,
-                };
-            });
-
-            const speakers = [...new Set(rows.map(r => r.speaker))];
-            console.log(`[handleBotDone] inserting ${rows.length} utterances — speakers: ${JSON.stringify(speakers)}`);
-
-            const { error: insertError, data: insertData } = await supabase
-                .from("utterances")
-                .insert(rows)
-                .select("id");
-
-            if (insertError) {
-                console.error(`[handleBotDone] Supabase insert FAILED for bot ${botId}:`,
-                    { error: insertError, segmentCount: rows.length });
-            } else {
-                console.log(`[handleBotDone] Supabase insert OK — ${insertData?.length ?? rows.length} rows written for bot ${botId}`);
+            } catch (err) {
+                console.error(`Unexpected error inserting async utterances for bot ${botId}:`, err);
             }
-        } catch (err) {
-            console.error(`Unexpected error inserting final utterances for bot ${botId}:`, err);
         }
     }
 
