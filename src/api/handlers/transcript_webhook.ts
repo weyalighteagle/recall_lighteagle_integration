@@ -16,7 +16,21 @@ export async function handleTranscriptWebhook(body: any): Promise<{ status: numb
     if (event === "transcript.data") {
         const rawData = body?.data?.data;
         const words = rawData?.words ?? [];
-        const speaker = rawData?.participant?.name ?? "Unknown";
+        const rawSpeaker: string = rawData?.participant?.name ?? "";
+        const isFallback = !rawSpeaker || rawSpeaker === "Unknown";
+
+        let speaker = rawSpeaker || "Unknown";
+        if (isFallback) {
+            // Bot's own audio arrives with a null/empty/Unknown participant name.
+            // Look up the bot_name we stored when this bot was created.
+            const { data: meeting } = await supabase
+                .from("meetings")
+                .select("bot_name")
+                .eq("bot_id", botId)
+                .maybeSingle();
+            speaker = meeting?.bot_name || "WEYA Voice Agent";
+            console.log(`Speaker resolved via bot_name fallback: "${speaker}" (raw was "${rawSpeaker}")`);
+        }
 
         console.log("Parsed webhook:", { event, botId, speaker, wordCount: words.length });
 
