@@ -111,7 +111,7 @@ export async function bot_join(args: {
 
     // Supabase'de meeting kaydı oluştur (transcript takibi için) — hem recording hem voice_agent için
     await supabase.from("meetings").upsert(
-        { bot_id: bot.id, done: false, created_at: new Date().toISOString() },
+        { bot_id: bot.id, done: false, created_at: new Date().toISOString(), bot_type: botType, meeting_url },
         { onConflict: "bot_id", ignoreDuplicates: true },
     );
 

@@ -324,14 +324,29 @@ body=${JSON.stringify(body)}
                 if (pathname === "/api/transcripts" && req.method?.toUpperCase() === "GET") {
                     const { data } = await supabase
                         .from("meetings")
-                        .select("bot_id, done, created_at")
+                        .select("bot_id, bot_type, meeting_url, done, created_at")
                         .order("created_at", { ascending: false });
+
+                    // Group rows by meeting_url so that a meeting with both a recording bot and a
+                    // voice_agent bot surfaces as a single entry — preferring the voice_agent bot_id.
+                    // Rows without a meeting_url (e.g. in-progress calendar bots) are kept as-is.
+                    type Row = { bot_id: string; bot_type: string | null; meeting_url: string | null; done: boolean; created_at: string };
+                    const rows: Row[] = data ?? [];
+                    const grouped = new Map<string, Row>();
+                    for (const row of rows) {
+                        const key = row.meeting_url ?? row.bot_id; // ungrouped rows use their own bot_id as key
+                        const existing = grouped.get(key);
+                        if (!existing || row.bot_type === "voice_agent") {
+                            grouped.set(key, row);
+                        }
+                    }
+                    const meetings = [...grouped.values()];
 
                     res.writeHead(200, {
                         "Content-Type": "application/json",
                         "Access-Control-Allow-Origin": "*",
                     });
-                    res.end(JSON.stringify({ meetings: data ?? [] }));
+                    res.end(JSON.stringify({ meetings }));
                     return;
                 }
 

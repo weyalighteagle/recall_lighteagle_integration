@@ -141,6 +141,21 @@ async function handleBotDone(body: any): Promise<void> {
                 console.log(`No transcript download URL for bot ${botId}. media_shortcuts:`,
                     JSON.stringify(botData?.recordings?.[0]?.media_shortcuts ?? null));
             }
+
+            // Backfill meeting_url and bot_type — important for calendar-scheduled bots
+            // where these fields weren't available when the meetings row was first created.
+            const botMeetingUrl: string | null = botData?.meeting_url ?? null;
+            const botName: string = botData?.bot_name ?? "";
+            const inferredBotType = botName.toUpperCase().includes("WEYA VOICE") ? "voice_agent" : "recording";
+            try {
+                await supabase
+                    .from("meetings")
+                    .update({ meeting_url: botMeetingUrl, bot_type: inferredBotType })
+                    .eq("bot_id", botId);
+                console.log(`Backfilled meeting_url=${botMeetingUrl} bot_type=${inferredBotType} for bot ${botId}`);
+            } catch (err) {
+                console.error(`Failed to backfill meeting metadata for bot ${botId}:`, err);
+            }
         }
     } catch (err) {
         console.error(`Unexpected error fetching bot details for ${botId}:`, err);

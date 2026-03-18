@@ -7,6 +7,8 @@ import { Button } from "../components/ui/Button";
 
 interface Meeting {
     bot_id: string;
+    bot_type: string | null;
+    meeting_url: string | null;
     done: boolean;
     created_at: string;
 }
