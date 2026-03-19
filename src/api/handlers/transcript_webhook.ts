@@ -119,8 +119,7 @@ export async function handleGetTranscript(botId: string): Promise<{ utterances: 
         supabase
             .from("utterances")
             .select("speaker, words, timestamp")
-            .eq("bot_id", botId)
-            .order("timestamp", { ascending: true }),
+            .eq("bot_id", botId),
         supabase
             .from("meetings")
             .select("done")
@@ -138,8 +137,17 @@ export async function handleGetTranscript(botId: string): Promise<{ utterances: 
         throw meetingResult.error;
     }
 
+    // Sort by the first word's end_timestamp.absolute (actual speech time).
+    // Fall back to row timestamp if words array is empty or the field is missing.
+    const rows: { speaker: string; words: any; timestamp: string }[] = utterancesResult.data ?? [];
+    rows.sort((a, b) => {
+        const aTime = (a.words as any[])?.[0]?.end_timestamp?.absolute ?? new Date(a.timestamp).getTime() / 1000;
+        const bTime = (b.words as any[])?.[0]?.end_timestamp?.absolute ?? new Date(b.timestamp).getTime() / 1000;
+        return aTime - bTime;
+    });
+
     // Map DB column `speaker` back to `participant` to match the frontend's expected shape
-    const utterances = (utterancesResult.data ?? []).map((row: { speaker: string; words: unknown; timestamp: string }) => ({
+    const utterances = rows.map((row) => ({
         participant: row.speaker,
         words: row.words,
         timestamp: row.timestamp,
