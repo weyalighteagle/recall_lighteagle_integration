@@ -1,6 +1,12 @@
 import { z } from "zod";
-import { CalendarSchema, type CalendarType } from "../../schemas/CalendarArtifactSchema";
-import { CalendarEventSchema, type CalendarEventType } from "../../schemas/CalendarEventArtifactSchema";
+import {
+  CalendarSchema,
+  type CalendarType,
+} from "../../schemas/CalendarArtifactSchema";
+import {
+  CalendarEventSchema,
+  type CalendarEventType,
+} from "../../schemas/CalendarEventArtifactSchema";
 import { CalendarSyncEventsEventSchema } from "../../schemas/CalendarSyncEventsEventSchema";
 import { CalendarUpdateEventSchema } from "../../schemas/CalendarUpdateEventSchema";
 import { env } from "../config/env";
@@ -13,104 +19,149 @@ import { bot_settings_get } from "./bot_settings";
 type BotType = "recording" | "voice_agent";
 
 export async function recall_webhook(payload: any): Promise<void> {
-    console.log("[recall_webhook] RAW payload:", JSON.stringify(payload).slice(0, 500));
-    console.log("[recall_webhook] event received:", payload?.event, "| type:", typeof payload?.event);
+  console.log(
+    "[recall_webhook] RAW payload:",
+    JSON.stringify(payload).slice(0, 500),
+  );
+  console.log(
+    "[recall_webhook] event received:",
+    payload?.event,
+    "| type:",
+    typeof payload?.event,
+  );
 
-    // Route transcript events to the transcript webhook handler
-    if (payload?.event === "transcript.data" || payload?.event === "transcript.done") {
-        await handleTranscriptWebhook(payload);
-        return;
-    }
-
-    // Recall sends "bot.done" when the bot has fully shut down and recordings are available.
-    // Payload: { event: "bot.done", data: { bot: { id }, data: { code, sub_code, updated_at } } }
-    if (payload?.event === "bot.done") {
-        console.log(`[recall_webhook] bot.done received — bot_id="${payload?.data?.bot?.id}" code="${payload?.data?.data?.code}"`);
-        await handleBotDone(payload);
-        return;
-    }
-
-    const result = z.discriminatedUnion("event", [
-        CalendarUpdateEventSchema,
-        CalendarSyncEventsEventSchema,
-    ]).safeParse(payload);
-    if (!result.success) {
-        console.log(`Received unhandled Recall webhook event: ${JSON.stringify(payload)}`);
-        return;
-    }
-    const { event, data } = result.data;
-
-    const calendar = await calendar_retrieve({ calendar_id: data.calendar_id });
-    console.log(`Found calendar: ${JSON.stringify(calendar)}`);
-
-    switch (event) {
-        case "calendar.update": {
-            console.log(`Calendar update event received: ${JSON.stringify(data)}`);
-            break;
-        }
-        case "calendar.sync_events": {
-            // Read global bot_settings once before processing the event batch
-            const botSettings = await bot_settings_get();
-            console.log(`[calendar.sync_events] bot_mode=${botSettings.bot_mode}`);
-
-            let next: string | null = null;
-            do {
-
-                const { results, next: new_next } = await calendar_events_list({
-                    updated_at__gte: data.last_updated_ts,
-                    calendar_id: data.calendar_id,
-                    next,
-                });
-                console.log(`Received ${results.length} calendar events.`);
-
-                for (const calendar_event of results) {
-                    // Recall automatically unschedules bot if the calendar event is deleted.
-                    if (calendar_event.is_deleted) continue;
-                    // Skip calendar events that don't have a meeting URL or start time.
-                    if (!calendar_event.meeting_url || !calendar_event.start_time) continue;
-                    // Skip calendar events that have already passed.
-                    if (new Date(calendar_event.start_time) <= new Date()) continue;
-
-                    // Always schedule the recording bot (transcription)
-                    try {
-                        await schedule_bot_for_calendar_event({ calendar_event, calendar, bot_type: "recording" });
-                        console.log(`Scheduled recording bot for calendar event: ${calendar_event.id}`);
-                    } catch (err) {
-                        console.error(`Failed to schedule recording bot for calendar event ${calendar_event.id}:`, err);
-                    }
-
-                    // Schedule voice agent only when mode is voice_agent
-                    if (botSettings.bot_mode === "voice_agent") {
-                        if (env.VOICE_AGENT_PAGE_URL && env.VOICE_AGENT_WSS_URL) {
-                            try {
-                                // Check per-meeting KB override; fall back to global default
-                                const { data: kbOverride } = await supabase
-                                    .from("meeting_kb_overrides")
-                                    .select("kb_document_id")
-                                    .eq("calendar_event_id", calendar_event.id)
-                                    .maybeSingle();
-                                const effective_kb_id = kbOverride?.kb_document_id ?? botSettings.active_kb_id ?? undefined;
-                                console.log(`[calendar.sync_events] event=${calendar_event.id} effective_kb_id=${effective_kb_id ?? "none"}`);
-
-                                await schedule_bot_for_calendar_event({ calendar_event, calendar, bot_type: "voice_agent", kb_id: effective_kb_id });
-                                console.log(`Scheduled voice agent bot for calendar event: ${calendar_event.id}`);
-                            } catch (err) {
-                                console.error(`Failed to schedule voice agent bot for calendar event ${calendar_event.id}:`, err);
-                            }
-                        } else {
-                            console.warn(`[bot_settings] Mode is voice_agent but VOICE_AGENT_PAGE_URL/VOICE_AGENT_WSS_URL are not configured — skipping voice agent scheduling`);
-                        }
-                    }
-                }
-                next = new_next;
-            } while (next);
-
-            console.log(`Calendar sync events event received: ${JSON.stringify(data)}`);
-            break;
-        }
-    }
-
+  // Route transcript events to the transcript webhook handler
+  if (
+    payload?.event === "transcript.data" ||
+    payload?.event === "transcript.done"
+  ) {
+    await handleTranscriptWebhook(payload);
     return;
+  }
+
+  // Recall sends "bot.done" when the bot has fully shut down and recordings are available.
+  // Payload: { event: "bot.done", data: { bot: { id }, data: { code, sub_code, updated_at } } }
+  if (payload?.event === "bot.done") {
+    console.log(
+      `[recall_webhook] bot.done received — bot_id="${payload?.data?.bot?.id}" code="${payload?.data?.data?.code}"`,
+    );
+    await handleBotDone(payload);
+    return;
+  }
+
+  const result = z
+    .discriminatedUnion("event", [
+      CalendarUpdateEventSchema,
+      CalendarSyncEventsEventSchema,
+    ])
+    .safeParse(payload);
+  if (!result.success) {
+    console.log(
+      `Received unhandled Recall webhook event: ${JSON.stringify(payload)}`,
+    );
+    return;
+  }
+  const { event, data } = result.data;
+
+  const calendar = await calendar_retrieve({ calendar_id: data.calendar_id });
+  console.log(`Found calendar: ${JSON.stringify(calendar)}`);
+
+  switch (event) {
+    case "calendar.update": {
+      console.log(`Calendar update event received: ${JSON.stringify(data)}`);
+      break;
+    }
+    case "calendar.sync_events": {
+      // Read global bot_settings once before processing the event batch
+      const botSettings = await bot_settings_get();
+      console.log(`[calendar.sync_events] bot_mode=${botSettings.bot_mode}`);
+
+      let next: string | null = null;
+      do {
+        const { results, next: new_next } = await calendar_events_list({
+          updated_at__gte: data.last_updated_ts,
+          calendar_id: data.calendar_id,
+          next,
+        });
+        console.log(`Received ${results.length} calendar events.`);
+
+        for (const calendar_event of results) {
+          // Recall automatically unschedules bot if the calendar event is deleted.
+          if (calendar_event.is_deleted) continue;
+          // Skip calendar events that don't have a meeting URL or start time.
+          if (!calendar_event.meeting_url || !calendar_event.start_time)
+            continue;
+          // Skip calendar events that have already passed.
+          if (new Date(calendar_event.start_time) <= new Date()) continue;
+
+          // Always schedule the recording bot (transcription)
+          try {
+            await schedule_bot_for_calendar_event({
+              calendar_event,
+              calendar,
+              bot_type: "recording",
+            });
+            console.log(
+              `Scheduled recording bot for calendar event: ${calendar_event.id}`,
+            );
+          } catch (err) {
+            console.error(
+              `Failed to schedule recording bot for calendar event ${calendar_event.id}:`,
+              err,
+            );
+          }
+
+          // Schedule voice agent only when mode is voice_agent
+          if (botSettings.bot_mode === "voice_agent") {
+            if (env.VOICE_AGENT_PAGE_URL && env.VOICE_AGENT_WSS_URL) {
+              try {
+                // Check per-meeting KB override; fall back to global default
+                const { data: kbOverride } = await supabase
+                  .from("meeting_kb_overrides")
+                  .select("kb_document_id")
+                  .eq("calendar_event_id", calendar_event.id)
+                  .maybeSingle();
+                const effective_kb_id =
+                  kbOverride?.kb_document_id ??
+                  botSettings.active_kb_id ??
+                  undefined;
+                console.log(
+                  `[calendar.sync_events] event=${calendar_event.id} effective_kb_id=${effective_kb_id ?? "none"}`,
+                );
+
+                await schedule_bot_for_calendar_event({
+                  calendar_event,
+                  calendar,
+                  bot_type: "voice_agent",
+                  kb_id: effective_kb_id,
+                });
+                console.log(
+                  `Scheduled voice agent bot for calendar event: ${calendar_event.id}`,
+                );
+              } catch (err) {
+                console.error(
+                  `Failed to schedule voice agent bot for calendar event ${calendar_event.id}:`,
+                  err,
+                );
+              }
+            } else {
+              console.warn(
+                `[bot_settings] Mode is voice_agent but VOICE_AGENT_PAGE_URL/VOICE_AGENT_WSS_URL are not configured — skipping voice agent scheduling`,
+              );
+            }
+          }
+        }
+        next = new_next;
+      } while (next);
+
+      console.log(
+        `Calendar sync events event received: ${JSON.stringify(data)}`,
+      );
+      break;
+    }
+  }
+
+  return;
 }
 
 /**
@@ -119,292 +170,391 @@ export async function recall_webhook(payload: any): Promise<void> {
  * Always resolves without throwing so the caller always returns 200 to Recall.
  */
 async function handleBotDone(body: any): Promise<void> {
-    const botId: string | undefined = body?.data?.bot?.id;
+  const botId: string | undefined = body?.data?.bot?.id;
 
-    if (!botId) {
-        console.error("[handleBotDone] received without bot_id. Full payload:", JSON.stringify(body));
-        return;
+  if (!botId) {
+    console.error(
+      "[handleBotDone] received without bot_id. Full payload:",
+      JSON.stringify(body),
+    );
+    return;
+  }
+
+  console.log(
+    `[handleBotDone] ── START bot_id=${botId} ─────────────────────────────`,
+  );
+
+  // Step 1: Fetch bot details from Recall v1 API to get transcript download URLs
+  let downloadUrls: string[] = [];
+  let botName: string = "";
+  try {
+    const botResponse = await fetch_with_retry(
+      `https://${env.RECALL_REGION}.recall.ai/api/v1/bot/${botId}/`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `${env.RECALL_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+
+    if (!botResponse.ok) {
+      console.error(
+        `[handleBotDone] Recall API fetch failed for bot ${botId}:`,
+        await botResponse.text(),
+      );
+    } else {
+      const botData = await botResponse.json();
+
+      // ── STEP 1 DIAGNOSTICS ──────────────────────────────────────────────────
+      console.log(
+        `[handleBotDone] bot_name="${botData?.bot_name}" meeting_url="${botData?.meeting_url}" status="${botData?.status_changes?.at(-1)?.code}"`,
+      );
+      const recordings: any[] = Array.isArray(botData?.recordings)
+        ? botData.recordings
+        : [];
+      console.log(`[handleBotDone] recordings[] count: ${recordings.length}`);
+      recordings.forEach((r: any, i: number) => {
+        console.log(
+          `[handleBotDone] recordings[${i}] full media_shortcuts:`,
+          JSON.stringify(r?.media_shortcuts ?? null),
+        );
+      });
+
+      // Collect transcript download URLs from ALL recordings entries.
+      // When include_bot_in_recording.audio is true, Recall creates a separate recordings
+      // entry for the bot's own output audio stream in addition to the participant stream.
+      // Hardcoding recordings[0] would miss the bot's utterances entirely.
+      downloadUrls = recordings
+        .map((r: any, i: number) => {
+          const url =
+            r?.media_shortcuts?.transcript?.data?.download_url ?? null;
+          console.log(
+            `[handleBotDone] recordings[${i}] transcript download_url: ${url ?? "NONE"}`,
+          );
+          return url;
+        })
+        .filter((u: string | null): u is string => !!u);
+
+      console.log(
+        `[handleBotDone] transcript URLs found: ${downloadUrls.length} / ${recordings.length} recordings`,
+      );
+
+      // Backfill meeting_url, bot_type, and bot_name — important for calendar-scheduled bots
+      // where these fields weren't available when the meetings row was first created.
+      const botMeetingUrl: string | null = botData?.meeting_url ?? null;
+      botName = botData?.bot_name ?? "";
+      const inferredBotType = botName.toUpperCase().includes("WEYA VOICE")
+        ? "voice_agent"
+        : "recording";
+      try {
+        await supabase
+          .from("meetings")
+          .update({
+            meeting_url: botMeetingUrl,
+            bot_type: inferredBotType,
+            bot_name: botName || null,
+          })
+          .eq("bot_id", botId);
+        console.log(
+          `Backfilled meeting_url=${botMeetingUrl} bot_type=${inferredBotType} bot_name="${botName}" for bot ${botId}`,
+        );
+      } catch (err) {
+        console.error(
+          `Failed to backfill meeting metadata for bot ${botId}:`,
+          err,
+        );
+      }
     }
+  } catch (err) {
+    console.error(`Unexpected error fetching bot details for ${botId}:`, err);
+  }
 
-    console.log(`[handleBotDone] ── START bot_id=${botId} ─────────────────────────────`);
+  if (downloadUrls.length === 0) {
+    console.warn(
+      `[handleBotDone] No transcript URLs for bot ${botId} — marking done and exiting`,
+    );
+    await supabase.from("meetings").update({ done: true }).eq("bot_id", botId);
+    return;
+  }
 
-    // Step 1: Fetch bot details from Recall v1 API to get transcript download URLs
-    let downloadUrls: string[] = [];
+  // Step 2: Download and merge transcripts from all recordings entries.
+  // Each entry is an array of segments: [{ speaker, words: [{text, start_timestamp, end_timestamp}] }]
+  // Multiple entries occur when include_bot_in_recording.audio is true (bot audio = separate stream).
+  type TranscriptSegment = {
+    speaker?: string;
+    participant?: { name?: string };
+    words: unknown[];
+  };
+  let segments: TranscriptSegment[] = [];
+
+  for (const [urlIndex, url] of downloadUrls.entries()) {
+    console.log(
+      `[handleBotDone] ── downloading transcript ${urlIndex + 1}/${downloadUrls.length}: ${url}`,
+    );
     try {
-        const botResponse = await fetch_with_retry(
-            `https://${env.RECALL_REGION}.recall.ai/api/v1/bot/${botId}/`,
-            {
-                method: "GET",
-                headers: {
-                    "Authorization": `${env.RECALL_API_KEY}`,
-                    "Content-Type": "application/json",
-                },
-            },
+      const transcriptResponse = await fetch(url);
+      if (!transcriptResponse.ok) {
+        console.error(
+          `[handleBotDone] download failed (${transcriptResponse.status}) for url=${url}:`,
+          await transcriptResponse.text(),
+        );
+        continue;
+      }
+      const rawText = await transcriptResponse.text();
+      console.log(
+        `[handleBotDone] raw transcript (first 500 chars): ${rawText.slice(0, 500)}`,
+      );
+
+      let rawJson: unknown;
+      try {
+        rawJson = JSON.parse(rawText);
+      } catch (e) {
+        console.error(`[handleBotDone] JSON parse failed for url=${url}:`, e);
+        continue;
+      }
+
+      // Guard: transcript download must be a top-level array
+      if (!Array.isArray(rawJson)) {
+        console.error(
+          `[handleBotDone] transcript is not an array — shape:`,
+          JSON.stringify(rawJson).slice(0, 300),
+        );
+      } else {
+        const incoming = rawJson as TranscriptSegment[];
+        const speakers = [
+          ...new Set(
+            incoming.map((s) => s.participant?.name ?? s.speaker ?? "Unknown"),
+          ),
+        ];
+        console.log(
+          `[handleBotDone] transcript ${urlIndex + 1}: ${incoming.length} segments, speakers: ${JSON.stringify(speakers)}`,
+        );
+        segments.push(...incoming);
+      }
+    } catch (err) {
+      console.error(`[handleBotDone] unexpected error for url=${url}:`, err);
+    }
+  }
+  console.log(
+    `[handleBotDone] merged total: ${segments.length} segments from ${downloadUrls.length} URL(s)`,
+  );
+
+  // Step 3: Supplement real-time utterances — do NOT delete existing rows.
+  // The transcript.data webhook is the primary insertion path and is already working.
+  // handleBotDone only adds utterances that are missing (e.g. bot's own audio stream
+  // which doesn't arrive via transcript.data). If real-time rows already exist for this
+  // bot_id, we skip the insert entirely to avoid duplicates.
+  if (segments.length > 0) {
+    // Check whether real-time utterances already exist for this bot
+    const { count: existingCount } = await supabase
+      .from("utterances")
+      .select("id", { count: "exact", head: true })
+      .eq("bot_id", botId);
+
+    if ((existingCount ?? 0) > 0) {
+      console.log(
+        `[handleBotDone] ${existingCount} real-time utterances already exist for bot ${botId} — skipping async insert to avoid overwrite`,
+      );
+    } else {
+      // No real-time rows arrived (e.g. transcript.data webhooks were missed).
+      // Safe to insert the async transcript as a fallback.
+      try {
+        const rows = segments.map((seg) => {
+          const raw = seg.participant?.name ?? seg.speaker ?? "";
+          const isFallback = !raw || raw === "Unknown";
+          const speaker = isFallback ? botName || "WEYA Voice Agent" : raw;
+          if (isFallback) {
+            console.log(
+              `[handleBotDone] speaker normalized: "${raw}" → "${speaker}"`,
+            );
+          }
+          return {
+            bot_id: botId,
+            speaker,
+            words: seg.words,
+          };
+        });
+
+        const speakers = [...new Set(rows.map((r) => r.speaker))];
+        console.log(
+          `[handleBotDone] no real-time rows found — inserting ${rows.length} async utterances, speakers: ${JSON.stringify(speakers)}`,
         );
 
-        if (!botResponse.ok) {
-            console.error(`[handleBotDone] Recall API fetch failed for bot ${botId}:`, await botResponse.text());
+        const { error: insertError, data: insertData } = await supabase
+          .from("utterances")
+          .insert(rows)
+          .select("id");
+
+        if (insertError) {
+          console.error(
+            `[handleBotDone] Supabase insert FAILED for bot ${botId}:`,
+            { error: insertError, segmentCount: rows.length },
+          );
         } else {
-            const botData = await botResponse.json();
-
-            // ── STEP 1 DIAGNOSTICS ──────────────────────────────────────────────────
-            console.log(`[handleBotDone] bot_name="${botData?.bot_name}" meeting_url="${botData?.meeting_url}" status="${botData?.status_changes?.at(-1)?.code}"`);
-            const recordings: any[] = Array.isArray(botData?.recordings) ? botData.recordings : [];
-            console.log(`[handleBotDone] recordings[] count: ${recordings.length}`);
-            recordings.forEach((r: any, i: number) => {
-                console.log(`[handleBotDone] recordings[${i}] full media_shortcuts:`, JSON.stringify(r?.media_shortcuts ?? null));
-            });
-
-            // Collect transcript download URLs from ALL recordings entries.
-            // When include_bot_in_recording.audio is true, Recall creates a separate recordings
-            // entry for the bot's own output audio stream in addition to the participant stream.
-            // Hardcoding recordings[0] would miss the bot's utterances entirely.
-            downloadUrls = recordings
-                .map((r: any, i: number) => {
-                    const url = r?.media_shortcuts?.transcript?.data?.download_url ?? null;
-                    console.log(`[handleBotDone] recordings[${i}] transcript download_url: ${url ?? "NONE"}`);
-                    return url;
-                })
-                .filter((u: string | null): u is string => !!u);
-
-            console.log(`[handleBotDone] transcript URLs found: ${downloadUrls.length} / ${recordings.length} recordings`);
-
-            // Backfill meeting_url, bot_type, and bot_name — important for calendar-scheduled bots
-            // where these fields weren't available when the meetings row was first created.
-            const botMeetingUrl: string | null = botData?.meeting_url ?? null;
-            const botName: string = botData?.bot_name ?? "";
-            const inferredBotType = botName.toUpperCase().includes("WEYA VOICE") ? "voice_agent" : "recording";
-            try {
-                await supabase
-                    .from("meetings")
-                    .update({ meeting_url: botMeetingUrl, bot_type: inferredBotType, bot_name: botName || null })
-                    .eq("bot_id", botId);
-                console.log(`Backfilled meeting_url=${botMeetingUrl} bot_type=${inferredBotType} bot_name="${botName}" for bot ${botId}`);
-            } catch (err) {
-                console.error(`Failed to backfill meeting metadata for bot ${botId}:`, err);
-            }
+          console.log(
+            `[handleBotDone] Supabase insert OK — ${insertData?.length ?? rows.length} rows written for bot ${botId}`,
+          );
         }
-    } catch (err) {
-        console.error(`Unexpected error fetching bot details for ${botId}:`, err);
+      } catch (err) {
+        console.error(
+          `Unexpected error inserting async utterances for bot ${botId}:`,
+          err,
+        );
+      }
     }
+  }
 
-    if (downloadUrls.length === 0) {
-        console.warn(`[handleBotDone] No transcript URLs for bot ${botId} — marking done and exiting`);
-        await supabase.from("meetings").update({ done: true }).eq("bot_id", botId);
-        return;
+  // Step 4: Mark the meeting as done (runs regardless of transcript availability)
+  try {
+    const { error: doneError } = await supabase
+      .from("meetings")
+      .update({ done: true })
+      .eq("bot_id", botId);
+
+    if (doneError) {
+      console.error(`Failed to mark meeting done for bot ${botId}:`, {
+        bot_id: botId,
+        error: doneError,
+      });
+    } else {
+      console.log(`[handleBotDone] meeting marked done for bot ${botId}`);
     }
-
-    // Step 2: Download and merge transcripts from all recordings entries.
-    // Each entry is an array of segments: [{ speaker, words: [{text, start_timestamp, end_timestamp}] }]
-    // Multiple entries occur when include_bot_in_recording.audio is true (bot audio = separate stream).
-    type TranscriptSegment = { speaker?: string; participant?: { name?: string }; words: unknown[] };
-    let segments: TranscriptSegment[] = [];
-
-    for (const [urlIndex, url] of downloadUrls.entries()) {
-        console.log(`[handleBotDone] ── downloading transcript ${urlIndex + 1}/${downloadUrls.length}: ${url}`);
-        try {
-            const transcriptResponse = await fetch(url);
-            if (!transcriptResponse.ok) {
-                console.error(`[handleBotDone] download failed (${transcriptResponse.status}) for url=${url}:`,
-                    await transcriptResponse.text());
-                continue;
-            }
-            const rawText = await transcriptResponse.text();
-            console.log(`[handleBotDone] raw transcript (first 500 chars): ${rawText.slice(0, 500)}`);
-
-            let rawJson: unknown;
-            try { rawJson = JSON.parse(rawText); } catch (e) {
-                console.error(`[handleBotDone] JSON parse failed for url=${url}:`, e);
-                continue;
-            }
-
-            // Guard: transcript download must be a top-level array
-            if (!Array.isArray(rawJson)) {
-                console.error(`[handleBotDone] transcript is not an array — shape:`, JSON.stringify(rawJson).slice(0, 300));
-            } else {
-                const incoming = rawJson as TranscriptSegment[];
-                const speakers = [...new Set(incoming.map(s => s.participant?.name ?? s.speaker ?? "Unknown"))];
-                console.log(`[handleBotDone] transcript ${urlIndex + 1}: ${incoming.length} segments, speakers: ${JSON.stringify(speakers)}`);
-                segments.push(...incoming);
-            }
-        } catch (err) {
-            console.error(`[handleBotDone] unexpected error for url=${url}:`, err);
-        }
-    }
-    console.log(`[handleBotDone] merged total: ${segments.length} segments from ${downloadUrls.length} URL(s)`);
-
-    // Step 3: Supplement real-time utterances — do NOT delete existing rows.
-    // The transcript.data webhook is the primary insertion path and is already working.
-    // handleBotDone only adds utterances that are missing (e.g. bot's own audio stream
-    // which doesn't arrive via transcript.data). If real-time rows already exist for this
-    // bot_id, we skip the insert entirely to avoid duplicates.
-    if (segments.length > 0) {
-        // Check whether real-time utterances already exist for this bot
-        const { count: existingCount } = await supabase
-            .from("utterances")
-            .select("id", { count: "exact", head: true })
-            .eq("bot_id", botId);
-
-        if ((existingCount ?? 0) > 0) {
-            console.log(`[handleBotDone] ${existingCount} real-time utterances already exist for bot ${botId} — skipping async insert to avoid overwrite`);
-        } else {
-            // No real-time rows arrived (e.g. transcript.data webhooks were missed).
-            // Safe to insert the async transcript as a fallback.
-            try {
-                const rows = segments.map((seg) => {
-                    const raw = seg.participant?.name ?? seg.speaker ?? "";
-                    const isFallback = !raw || raw === "Unknown";
-                    const speaker = isFallback ? (botName || "WEYA Voice Agent") : raw;
-                    if (isFallback) {
-                        console.log(`[handleBotDone] speaker normalized: "${raw}" → "${speaker}"`);
-                    }
-                    return {
-                        bot_id: botId,
-                        speaker,
-                        words: seg.words,
-                    };
-                });
-
-                const speakers = [...new Set(rows.map(r => r.speaker))];
-                console.log(`[handleBotDone] no real-time rows found — inserting ${rows.length} async utterances, speakers: ${JSON.stringify(speakers)}`);
-
-                const { error: insertError, data: insertData } = await supabase
-                    .from("utterances")
-                    .insert(rows)
-                    .select("id");
-
-                if (insertError) {
-                    console.error(`[handleBotDone] Supabase insert FAILED for bot ${botId}:`,
-                        { error: insertError, segmentCount: rows.length });
-                } else {
-                    console.log(`[handleBotDone] Supabase insert OK — ${insertData?.length ?? rows.length} rows written for bot ${botId}`);
-                }
-            } catch (err) {
-                console.error(`Unexpected error inserting async utterances for bot ${botId}:`, err);
-            }
-        }
-    }
-
-    // Step 4: Mark the meeting as done (runs regardless of transcript availability)
-    try {
-        const { error: doneError } = await supabase
-            .from("meetings")
-            .update({ done: true })
-            .eq("bot_id", botId);
-
-        if (doneError) {
-            console.error(`Failed to mark meeting done for bot ${botId}:`,
-                { bot_id: botId, error: doneError });
-        } else {
-            console.log(`[handleBotDone] meeting marked done for bot ${botId}`);
-        }
-    } catch (err) {
-        console.error(`[handleBotDone] unexpected error marking done for bot ${botId}:`, err);
-    }
-    console.log(`[handleBotDone] ── END bot_id=${botId} ───────────────────────────────`);
+  } catch (err) {
+    console.error(
+      `[handleBotDone] unexpected error marking done for bot ${botId}:`,
+      err,
+    );
+  }
+  console.log(
+    `[handleBotDone] ── END bot_id=${botId} ───────────────────────────────`,
+  );
 }
 
 /**
  * Retrieve a calendar from Recall.
  */
-export async function calendar_retrieve(args: { calendar_id: string, }) {
-    const { calendar_id } = z.object({
-        calendar_id: z.string(),
-    }).parse(args);
+export async function calendar_retrieve(args: { calendar_id: string }) {
+  const { calendar_id } = z
+    .object({
+      calendar_id: z.string(),
+    })
+    .parse(args);
 
-    const response = await fetch_with_retry(`https://${env.RECALL_REGION}.recall.ai/api/v2/calendars/${calendar_id}`, {
-        method: "GET",
-        headers: {
-            "Authorization": `${env.RECALL_API_KEY}`,
-            "Content-Type": "application/json",
-        },
-    });
-    if (!response.ok) throw new Error(await response.text());
+  const response = await fetch_with_retry(
+    `https://${env.RECALL_REGION}.recall.ai/api/v2/calendars/${calendar_id}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `${env.RECALL_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+    },
+  );
+  if (!response.ok) throw new Error(await response.text());
 
-    return CalendarSchema.parse(await response.json());
+  return CalendarSchema.parse(await response.json());
 }
 
 /**
  * List calendar events for a given calendar from Recall.
  */
-export async function calendar_events_list(args: { updated_at__gte?: string | null, calendar_id: string, next: string | null }) {
-    const { updated_at__gte, calendar_id, next } = z.object({
-        updated_at__gte: z.string().nullish(),
-        calendar_id: z.string(),
-        next: z.string().nullable(),
-    }).parse(args);
+export async function calendar_events_list(args: {
+  updated_at__gte?: string | null;
+  calendar_id: string;
+  next: string | null;
+}) {
+  const { updated_at__gte, calendar_id, next } = z
+    .object({
+      updated_at__gte: z.string().nullish(),
+      calendar_id: z.string(),
+      next: z.string().nullable(),
+    })
+    .parse(args);
 
-    const url = new URL(`https://${env.RECALL_REGION}.recall.ai/api/v2/calendar-events/`);
-    url.searchParams.set("calendar_id", calendar_id);
-    if (next) url.searchParams.set("next", next);
-    if (updated_at__gte) url.searchParams.set("updated_at__gte", updated_at__gte);
+  const url = new URL(
+    `https://${env.RECALL_REGION}.recall.ai/api/v2/calendar-events/`,
+  );
+  url.searchParams.set("calendar_id", calendar_id);
+  if (next) url.searchParams.set("next", next);
+  if (updated_at__gte) url.searchParams.set("updated_at__gte", updated_at__gte);
 
-    const response = await fetch_with_retry(url.toString(), {
-        method: "GET",
-        headers: {
-            "Authorization": `${env.RECALL_API_KEY}`,
-            "Content-Type": "application/json",
-        },
-    });
-    if (!response.ok) throw new Error(await response.text());
+  const response = await fetch_with_retry(url.toString(), {
+    method: "GET",
+    headers: {
+      Authorization: `${env.RECALL_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+  });
+  if (!response.ok) throw new Error(await response.text());
 
-    return z.object({
-        next: z.string().nullable(),
-        results: CalendarEventSchema.array(),
-    }).parse(await response.json());
+  return z
+    .object({
+      next: z.string().nullable(),
+      results: CalendarEventSchema.array(),
+    })
+    .parse(await response.json());
 }
 
 /**
  * Retrieve a calendar event from Recall.
  */
 export async function calendar_event_retrieve(args: {
-    calendar_event_id: string,
+  calendar_event_id: string;
 }) {
-    const { calendar_event_id } = z.object({
-        calendar_event_id: z.string(),
-    }).parse(args);
+  const { calendar_event_id } = z
+    .object({
+      calendar_event_id: z.string(),
+    })
+    .parse(args);
 
-    const response = await fetch_with_retry(`https://${env.RECALL_REGION}.recall.ai/api/v2/calendar-events/${calendar_event_id}`, {
-        method: "GET",
-        headers: {
-            "Authorization": `${env.RECALL_API_KEY}`,
-            "Content-Type": "application/json",
-        },
-    });
-    if (!response.ok) throw new Error(await response.text());
+  const response = await fetch_with_retry(
+    `https://${env.RECALL_REGION}.recall.ai/api/v2/calendar-events/${calendar_event_id}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `${env.RECALL_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+    },
+  );
+  if (!response.ok) throw new Error(await response.text());
 
-    return CalendarEventSchema.parse(await response.json());
+  return CalendarEventSchema.parse(await response.json());
 }
 
 /**
  * Unschedule a bot for a given calendar event.
  */
 export async function unschedule_bot_for_calendar_event(args: {
-    calendar_event_id: string,
-    deduplication_key?: string,
+  calendar_event_id: string;
+  deduplication_key?: string;
 }) {
-    const { calendar_event_id } = z.object({
-        calendar_event_id: z.string(),
-    }).parse(args);
+  const { calendar_event_id } = z
+    .object({
+      calendar_event_id: z.string(),
+    })
+    .parse(args);
 
-    const body: Record<string, any> = {};
-    if (args.deduplication_key) {
-        body.deduplication_key = args.deduplication_key;
-    }
+  const body: Record<string, any> = {};
+  if (args.deduplication_key) {
+    body.deduplication_key = args.deduplication_key;
+  }
 
-    const response = await fetch_with_retry(
-        `https://${env.RECALL_REGION}.recall.ai/api/v2/calendar-events/${calendar_event_id}/bot`,
-        {
-            method: "DELETE",
-            headers: {
-                "Authorization": `${env.RECALL_API_KEY}`,
-                "Content-Type": "application/json",
-            },
-            body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
-        },
-    );
-    if (!response.ok) throw new Error(await response.text());
-    return CalendarEventSchema.parse(await response.json());
+  const response = await fetch_with_retry(
+    `https://${env.RECALL_REGION}.recall.ai/api/v2/calendar-events/${calendar_event_id}/bot`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `${env.RECALL_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
+    },
+  );
+  if (!response.ok) throw new Error(await response.text());
+  return CalendarEventSchema.parse(await response.json());
 }
 
 /**
@@ -412,148 +562,161 @@ export async function unschedule_bot_for_calendar_event(args: {
  * It will show up in the bot list as `${calendar.platform_email}'s notetaker'`.
  */
 export async function schedule_bot_for_calendar_event(args: {
-    calendar: CalendarType,
-    calendar_event: CalendarEventType,
-    bot_type?: BotType,
-    kb_id?: string,
+  calendar: CalendarType;
+  calendar_event: CalendarEventType;
+  bot_type?: BotType;
+  kb_id?: string;
 }) {
-    const { calendar, calendar_event } = z.object({
-        calendar: CalendarSchema,
-        calendar_event: CalendarEventSchema,
-    }).parse(args);
+  const { calendar, calendar_event } = z
+    .object({
+      calendar: CalendarSchema,
+      calendar_event: CalendarEventSchema,
+    })
+    .parse(args);
 
-    const bot_type: BotType = args.bot_type ?? "recording";
-    const kb_id: string | undefined = args.kb_id;
+  const bot_type: BotType = args.bot_type ?? "recording";
+  const kb_id: string | undefined = args.kb_id;
 
-    const { deduplication_key } = generate_bot_deduplication_key({
-        one_bot_per: "meeting",
-        email: calendar.platform_email!,
-        meeting_url: calendar_event.meeting_url!,
-        meeting_start_timestamp: calendar_event.start_time,
-        bot_type,
-    });
+  const { deduplication_key } = generate_bot_deduplication_key({
+    one_bot_per: "meeting",
+    email: calendar.platform_email!,
+    meeting_url: calendar_event.meeting_url!,
+    meeting_start_timestamp: calendar_event.start_time,
+    bot_type,
+  });
 
-    // Bot tipine göre config oluştur
-    let bot_config: Record<string, any>;
+  // Bot tipine göre config oluştur
+  let bot_config: Record<string, any>;
 
-    if (bot_type === "voice_agent") {
-        // Voice Agent: Output Media ile web sayfası render eder
-        if (!env.VOICE_AGENT_PAGE_URL || !env.VOICE_AGENT_WSS_URL) {
-            throw new Error("Voice agent environment variables (VOICE_AGENT_PAGE_URL, VOICE_AGENT_WSS_URL) are not configured");
-        }
-
-        const pageParams = new URLSearchParams({ wss: env.VOICE_AGENT_WSS_URL });
-        if (kb_id) pageParams.set("kb", kb_id);
-        const output_media_url = `${env.VOICE_AGENT_PAGE_URL}?${pageParams.toString()}`;
-
-        bot_config = {
-            bot_name: "WEYA Voice Agent",
-            variant: {
-                zoom: "web_4_core",
-                google_meet: "web_4_core",
-                microsoft_teams: "web_4_core",
-            },
-            output_media: {
-                camera: {
-                    kind: "webpage",
-                    config: {
-                        url: output_media_url,
-                    },
-                },
-            },
-            recording_config: {
-                transcript: {
-                    provider: {
-                        recallai_streaming: {},
-                    },
-                    diarization: {
-                        use_separate_streams_when_available: true,
-                    },
-                },
-                realtime_endpoints: [
-                    {
-                        type: "webhook",
-                        url: `https://${env.RAILWAY_DOMAIN}/api/webhooks/transcript`,
-                        events: ["transcript.data", "transcript.partial_data"],
-                    },
-                ],
-                include_bot_in_recording: {
-                    audio: true,
-                },
-            },
-        };
-    } else {
-        // Recording Bot: Mevcut config — transcript + realtime webhook
-        bot_config = {
-            bot_name: `WEYA by Light Eagle`,
-            // meeting_url and start_time is automatically updated by Recall when we call the schedule bot for calendar event endpoint.
-            recording_config: {
-                transcript: {
-                    provider: { recallai_streaming: {} },
-                },
-                realtime_endpoints: [
-                    {
-                        type: "webhook",
-                        url: `https://${env.RAILWAY_DOMAIN}/api/webhooks/transcript`,
-                        events: ["transcript.data", "transcript.partial_data"],
-                    },
-                ],
-            },
-        };
+  if (bot_type === "voice_agent") {
+    // Voice Agent: Output Media ile web sayfası render eder
+    if (!env.VOICE_AGENT_PAGE_URL || !env.VOICE_AGENT_WSS_URL) {
+      throw new Error(
+        "Voice agent environment variables (VOICE_AGENT_PAGE_URL, VOICE_AGENT_WSS_URL) are not configured",
+      );
     }
 
-    const response = await fetch_with_retry(
-        `https://${env.RECALL_REGION}.recall.ai/api/v2/calendar-events/${calendar_event.id}/bot`,
-        {
-            method: "POST",
-            headers: {
-                "Authorization": `${env.RECALL_API_KEY}`,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                deduplication_key,
-                bot_config,
-            }),
-        },
-    );
-    if (!response.ok) throw new Error(await response.text());
+    const pageParams = new URLSearchParams({ wss: env.VOICE_AGENT_WSS_URL });
+    if (kb_id) pageParams.set("kb", kb_id);
+    const output_media_url = `${env.VOICE_AGENT_PAGE_URL}?${pageParams.toString()}`;
 
-    return CalendarEventSchema.parse(await response.json());
+    bot_config = {
+      bot_name: "WEYA Voice Agent",
+      variant: {
+        zoom: "web_4_core",
+        google_meet: "web_4_core",
+        microsoft_teams: "web_4_core",
+      },
+      output_media: {
+        camera: {
+          kind: "webpage",
+          config: {
+            url: output_media_url,
+          },
+        },
+      },
+      recording_config: {
+        transcript: {
+          provider: {
+            recallai_streaming: {},
+          },
+          diarization: {
+            use_separate_streams_when_available: true,
+          },
+        },
+        realtime_endpoints: [
+          {
+            type: "webhook",
+            url: `https://${env.RAILWAY_DOMAIN}/api/webhooks/transcript`,
+            events: ["transcript.data", "transcript.partial_data"],
+          },
+        ],
+        include_bot_in_recording: {
+          audio: true,
+        },
+      },
+    };
+  } else {
+    // Recording Bot: Mevcut config — transcript + realtime webhook
+    bot_config = {
+      bot_name: `WEYA by Light Eagle`,
+      // meeting_url and start_time is automatically updated by Recall when we call the schedule bot for calendar event endpoint.
+      recording_config: {
+        transcript: {
+          provider: { recallai_streaming: {} },
+        },
+        realtime_endpoints: [
+          {
+            type: "webhook",
+            url: `https://${env.RAILWAY_DOMAIN}/api/webhooks/transcript`,
+            events: ["transcript.data", "transcript.partial_data"],
+          },
+        ],
+      },
+    };
+  }
+
+  const response = await fetch_with_retry(
+    `https://${env.RECALL_REGION}.recall.ai/api/v2/calendar-events/${calendar_event.id}/bot`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `${env.RECALL_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        deduplication_key,
+        bot_config,
+      }),
+    },
+  );
+  if (!response.ok) throw new Error(await response.text());
+
+  return CalendarEventSchema.parse(await response.json());
 }
 
 /**
  * Generate a deduplication key for a bot based on the one_bot_per, email, meeting_url, and meeting_start_timestamp.
  */
 function generate_bot_deduplication_key(args: {
-    one_bot_per: "user" | "email_domain" | "meeting",
-    email: string,
-    meeting_url: string,
-    meeting_start_timestamp: string,
-    bot_type: BotType,
+  one_bot_per: "user" | "email_domain" | "meeting";
+  email: string;
+  meeting_url: string;
+  meeting_start_timestamp: string;
+  bot_type: BotType;
 }) {
-    const { one_bot_per, email, meeting_url, meeting_start_timestamp, bot_type } = z.object({
+  const { one_bot_per, email, meeting_url, meeting_start_timestamp, bot_type } =
+    z
+      .object({
         one_bot_per: z.enum(["user", "email_domain", "meeting"]),
         email: z.string(),
         meeting_url: z.string(),
         meeting_start_timestamp: z.string(),
         bot_type: z.enum(["recording", "voice_agent"]),
-    }).parse(args);
+      })
+      .parse(args);
 
-    // Prefix: "rec" veya "va" — aynı event'e 2 farklı bot gidebilsin
-    const prefix = bot_type === "recording" ? "rec" : "va";
+  // Prefix: "rec" veya "va" — aynı event'e 2 farklı bot gidebilsin
+  const prefix = bot_type === "recording" ? "rec" : "va";
 
-    switch (one_bot_per) {
-        case "user": {
-            // Deduplicate at user level: every user who has a bot scheduled will get their own bot.
-            return { deduplication_key: `${prefix}-${email}-${meeting_url}-${meeting_start_timestamp}` };
-        }
-        case "email_domain": {
-            // Deduplicate at company/domain level: one shared bot for everyone from that domain on this meeting occurrence.
-            return { deduplication_key: `${prefix}-${email.split("@")[1]}-${meeting_url}-${meeting_start_timestamp}` };
-        }
-        case "meeting": {
-            // Deduplicate at meeting level: one bot for the entire meeting regardless of who scheduled it.
-            return { deduplication_key: `${prefix}-${meeting_url}-${meeting_start_timestamp}` };
-        }
+  switch (one_bot_per) {
+    case "user": {
+      // Deduplicate at user level: every user who has a bot scheduled will get their own bot.
+      return {
+        deduplication_key: `${prefix}-${email}-${meeting_url}-${meeting_start_timestamp}`,
+      };
     }
+    case "email_domain": {
+      // Deduplicate at company/domain level: one shared bot for everyone from that domain on this meeting occurrence.
+      return {
+        deduplication_key: `${prefix}-${email.split("@")[1]}-${meeting_url}-${meeting_start_timestamp}`,
+      };
+    }
+    case "meeting": {
+      // Deduplicate at meeting level: one bot for the entire meeting regardless of who scheduled it.
+      return {
+        deduplication_key: `${prefix}-${meeting_url}-${meeting_start_timestamp}`,
+      };
+    }
+  }
 }
