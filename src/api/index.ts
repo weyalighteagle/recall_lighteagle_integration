@@ -7,12 +7,11 @@ import { calendar_oauth_callback } from "./handlers/calendar_oauth_callback";
 import { calendars_delete } from "./handlers/calendars_delete";
 import { calendars_list } from "./handlers/calendars_list";
 import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event } from "./handlers/recall_webhook";
-import { kb_list, kb_create, kb_delete, kb_toggle, kb_get, kb_update } from "./handlers/knowledge_base";
+import { kb_list, kb_create, kb_delete, kb_toggle } from "./handlers/knowledge_base";
 import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
 import { handleVoiceAgentStatus } from "./handlers/voice_agent_status";
 import { bot_join } from "./handlers/bot_join";
 import { bot_settings_get, bot_settings_update } from "./handlers/bot_settings";
-import { voice_agent_config_get, voice_agent_config_update } from "./handlers/voice_agent_config";
 import { knowledge_bases_list, knowledge_base_by_slug } from "./handlers/knowledge_bases";
 import { supabase } from "./config/supabase";
 
@@ -211,24 +210,6 @@ body=${JSON.stringify(body)}
                         throw new Error(`Method not allowed: ${req.method}`);
                 }
             }
-            case "/api/voice-agent-config": {
-                switch (req.method?.toUpperCase()) {
-                    case "GET": {
-                        const config = await voice_agent_config_get();
-                        res.writeHead(200, { "Content-Type": "application/json" });
-                        res.end(JSON.stringify(config));
-                        return;
-                    }
-                    case "PATCH": {
-                        const updated = await voice_agent_config_update(body ?? {});
-                        res.writeHead(200, { "Content-Type": "application/json" });
-                        res.end(JSON.stringify(updated));
-                        return;
-                    }
-                    default:
-                        throw new Error(`Method not allowed: ${req.method}`);
-                }
-            }
             case "/api/bot/join": {
                 if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
                 if (!body?.meeting_url) throw new Error("meeting_url is required");
@@ -302,37 +283,6 @@ body=${JSON.stringify(body)}
 
             /** Default endpoints */
             default: {
-                // ── Single KB Document routes: /api/kb/:id ────────────────────
-                if (pathname.startsWith("/api/kb/") && pathname !== "/api/kb/") {
-                    const docId = pathname.replace("/api/kb/", "");
-
-                    switch (req.method?.toUpperCase()) {
-                        case "GET": {
-                            const doc = await kb_get({ id: docId });
-                            res.writeHead(200, {
-                                "Content-Type": "application/json",
-                                "Access-Control-Allow-Origin": "*",
-                            });
-                            res.end(JSON.stringify(doc));
-                            return;
-                        }
-                        case "PUT": {
-                            if (!body?.title || !body?.content || !body?.category) {
-                                throw new Error("title, category, and content are required");
-                            }
-                            const result = await kb_update({ id: docId, ...body });
-                            res.writeHead(200, {
-                                "Content-Type": "application/json",
-                                "Access-Control-Allow-Origin": "*",
-                            });
-                            res.end(JSON.stringify(result));
-                            return;
-                        }
-                        default:
-                            throw new Error(`Method not allowed: ${req.method}`);
-                    }
-                }
-
                 // GET /api/knowledge-bases — list active knowledge bases (summary fields only)
                 if (pathname === "/api/knowledge-bases" && req.method?.toUpperCase() === "GET") {
                     const result = await knowledge_bases_list();
@@ -370,33 +320,42 @@ body=${JSON.stringify(body)}
                     return;
                 }
 
-                // GET /api/transcripts — all meetings
+                // GET /api/transcripts — all meetings with participants
                 if (pathname === "/api/transcripts" && req.method?.toUpperCase() === "GET") {
-                    const { data } = await supabase
+                    const { data: meetings } = await supabase
                         .from("meetings")
-                        .select("bot_id, bot_type, meeting_url, done, created_at")
+                        .select("bot_id, done, created_at")
                         .order("created_at", { ascending: false });
 
-                    // Group rows by meeting_url so that a meeting with both a recording bot and a
-                    // voice_agent bot surfaces as a single entry — preferring the voice_agent bot_id.
-                    // Rows without a meeting_url (e.g. in-progress calendar bots) are kept as-is.
-                    type Row = { bot_id: string; bot_type: string | null; meeting_url: string | null; done: boolean; created_at: string };
-                    const rows: Row[] = data ?? [];
-                    const grouped = new Map<string, Row>();
-                    for (const row of rows) {
-                        const key = row.meeting_url ?? row.bot_id; // ungrouped rows use their own bot_id as key
-                        const existing = grouped.get(key);
-                        if (!existing || row.bot_type === "voice_agent") {
-                            grouped.set(key, row);
+                    // Fetch unique speakers per meeting in a single query
+                    const botIds = (meetings ?? []).map((m: any) => m.bot_id);
+                    const { data: utterances } = botIds.length > 0
+                        ? await supabase
+                            .from("utterances")
+                            .select("bot_id, speaker")
+                            .in("bot_id", botIds)
+                        : { data: [] };
+
+                    // Group unique speakers by bot_id
+                    const participantsByBot = new Map<string, string[]>();
+                    for (const u of (utterances ?? []) as { bot_id: string; speaker: string }[]) {
+                        const existing = participantsByBot.get(u.bot_id) ?? [];
+                        if (!existing.includes(u.speaker)) {
+                            existing.push(u.speaker);
                         }
+                        participantsByBot.set(u.bot_id, existing);
                     }
-                    const meetings = [...grouped.values()];
+
+                    const enrichedMeetings = (meetings ?? []).map((m: any) => ({
+                        ...m,
+                        participants: participantsByBot.get(m.bot_id) ?? [],
+                    }));
 
                     res.writeHead(200, {
                         "Content-Type": "application/json",
                         "Access-Control-Allow-Origin": "*",
                     });
-                    res.end(JSON.stringify({ meetings }));
+                    res.end(JSON.stringify({ meetings: enrichedMeetings }));
                     return;
                 }
 
