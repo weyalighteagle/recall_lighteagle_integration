@@ -409,50 +409,11 @@ body=${JSON.stringify(body)}
                     const transcript = await handleGetTranscript(botId);
                     console.log(`Retrieved transcript for bot ${botId}: ${transcript.utterances.length} utterances`);
 
-                    // Extract unique participants from utterances
-                    const participants: string[] = [];
-                    for (const u of transcript.utterances) {
-                        if (u.participant && !participants.includes(u.participant)) {
-                            participants.push(u.participant);
-                        }
-                    }
-
-                    // Look up meeting title from calendar events
-                    let title: string | null = null;
-                    try {
-                        const { calendars } = await calendars_list({});
-                        for (const cal of calendars) {
-                            if (title) break;
-                            try {
-                                let next: string | null = null;
-                                do {
-                                    const result = await calendar_events_list({
-                                        calendar_id: cal.id,
-                                        next,
-                                        start_time__gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(),
-                                        start_time__lte: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-                                    });
-                                    for (const event of result.calendar_events) {
-                                        if (event.bots?.some((b) => b.bot_id === botId)) {
-                                            title = event.raw?.summary ?? event.raw?.subject ?? null;
-                                            break;
-                                        }
-                                    }
-                                    next = title ? null : result.next;
-                                } while (next);
-                            } catch (e) {
-                                console.error(`Failed to fetch events for calendar ${cal.id}:`, e);
-                            }
-                        }
-                    } catch (e) {
-                        console.error("Failed to fetch calendars for meeting title:", e);
-                    }
-
                     res.writeHead(200, {
                         "Content-Type": "application/json",
                         "Access-Control-Allow-Origin": "*",
                     });
-                    res.end(JSON.stringify({ ...transcript, title, participants }));
+                    res.end(JSON.stringify(transcript));
                     return;
                 }
 
