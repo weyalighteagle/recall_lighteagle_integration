@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye } from "lucide-react";
+import { Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye, Star } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import {
     Card,
@@ -165,7 +165,35 @@ function KnowledgeBase() {
         onError: (err: Error) => toast.error(err.message),
     });
 
+    // ── Bot settings query (to know which doc is the default) ─────────
+    const { data: botSettings } = useQuery<{ active_kb_id: string | null }>({
+        queryKey: ["bot_settings"],
+        queryFn: async () => {
+            const res = await fetch("/api/bot-settings");
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        },
+    });
+
+    // ── Set default mutation ──────────────────────────────────────────
+    const setDefaultMutation = useMutation({
+        mutationFn: async (id: string) => {
+            const res = await fetch("/api/bot-settings", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ active_kb_id: id }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+        },
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: ["bot_settings"] });
+            toast.success("Default KB updated");
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
     const documents = data?.documents ?? [];
+    const activeKbId = botSettings?.active_kb_id ?? null;
 
     // ── Dialog handlers ───────────────────────────────────────────────
     const handleOpenDocument = (docId: string) => {
@@ -284,7 +312,7 @@ function KnowledgeBase() {
                         Dokümanlar
                     </CardTitle>
                     <CardDescription>
-                        {documents.length} doküman yüklü
+                        {documents.length} doküman yüklü. The default Knowledge Base is used by Voice Agent for all meetings unless overridden per meeting.
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -334,6 +362,32 @@ function KnowledgeBase() {
                                             </div>
                                         </button>
                                         <div className="flex items-center gap-1 shrink-0 ml-2">
+                                            {/* Default star */}
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                title={activeKbId === doc.id ? "Default KB" : "Set as default"}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (activeKbId !== doc.id) {
+                                                        setDefaultMutation.mutate(doc.id);
+                                                    }
+                                                }}
+                                                disabled={setDefaultMutation.isPending}
+                                            >
+                                                <Star
+                                                    className={`size-4 ${
+                                                        activeKbId === doc.id
+                                                            ? "fill-yellow-400 text-yellow-400"
+                                                            : "text-gray-300 hover:text-yellow-400"
+                                                    }`}
+                                                />
+                                            </Button>
+                                            {activeKbId === doc.id && (
+                                                <span className="text-xs px-1.5 py-0.5 rounded-full bg-yellow-50 text-yellow-700 font-medium">
+                                                    Default
+                                                </span>
+                                            )}
                                             <Button
                                                 variant="ghost"
                                                 size="icon-sm"
