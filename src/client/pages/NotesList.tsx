@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Download, FileText, Loader2, Users } from "lucide-react";
+import { Download, FileText, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
@@ -7,21 +7,14 @@ import { Button } from "../components/ui/Button";
 
 interface Meeting {
     bot_id: string;
+    bot_type: string | null;
+    meeting_url: string | null;
     done: boolean;
     created_at: string;
-    participants: string[];
 }
 
 interface MeetingsResponse {
     meetings: Meeting[];
-}
-
-/** Build a human-readable meeting title from the participant list. */
-function getMeetingTitle(participants: string[]): string {
-    if (participants.length === 0) return "Meeting";
-    if (participants.length === 1) return `Meeting with ${participants[0]}`;
-    if (participants.length === 2) return `${participants[0]} & ${participants[1]}`;
-    return `${participants[0]}, ${participants[1]} +${participants.length - 2} more`;
 }
 
 function NotesList() {
@@ -94,16 +87,10 @@ function NotesList() {
                             {meetings.map((meeting) => (
                                 <div
                                     key={meeting.bot_id}
-                                    className="flex items-center justify-between py-3 gap-4"
+                                    className="flex items-center justify-between py-3"
                                 >
-                                    <div className="flex flex-col gap-1 min-w-0">
-                                        {/* Title — derived from participants */}
-                                        <span className="text-sm font-semibold text-gray-900 truncate">
-                                            {getMeetingTitle(meeting.participants)}
-                                        </span>
-
-                                        {/* Date — small, underneath */}
-                                        <span className="text-xs text-gray-400">
+                                    <div className="flex flex-col gap-0.5">
+                                        <span className="text-sm font-medium text-gray-800">
                                             {new Date(meeting.created_at).toLocaleString([], {
                                                 year: "numeric",
                                                 month: "short",
@@ -112,18 +99,11 @@ function NotesList() {
                                                 minute: "2-digit",
                                             })}
                                         </span>
-
-                                        {/* Participants list */}
-                                        {meeting.participants.length > 0 && (
-                                            <span className="flex items-center gap-1 text-xs text-gray-500 mt-0.5">
-                                                <Users className="size-3 shrink-0" />
-                                                <span className="truncate">
-                                                    {meeting.participants.join(", ")}
-                                                </span>
-                                            </span>
-                                        )}
+                                        <span className="text-xs text-gray-400 font-mono">
+                                            {meeting.bot_id}
+                                        </span>
                                     </div>
-                                    <div className="flex items-center gap-2 shrink-0">
+                                    <div className="flex items-center gap-3">
                                         <span
                                             className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                                                 meeting.done
