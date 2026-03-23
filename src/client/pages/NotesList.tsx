@@ -10,18 +10,23 @@ interface Meeting {
     done: boolean;
     created_at: string;
     participants: string[];
+    title: string | null;
 }
 
 interface MeetingsResponse {
     meetings: Meeting[];
 }
 
-/** Build a human-readable meeting title from the participant list. */
-function getMeetingTitle(participants: string[]): string {
-    if (participants.length === 0) return "Meeting";
-    if (participants.length === 1) return `Meeting with ${participants[0]}`;
-    if (participants.length === 2) return `${participants[0]} & ${participants[1]}`;
-    return `${participants[0]}, ${participants[1]} +${participants.length - 2} more`;
+/** Build a human-readable meeting title from available data. */
+function getMeetingTitle(meeting: Meeting): string {
+    // Use the calendar event title if available
+    if (meeting.title) return meeting.title;
+    // Fall back to participant-based title
+    const p = meeting.participants;
+    if (p.length === 0) return "Meeting";
+    if (p.length === 1) return `Meeting with ${p[0]}`;
+    if (p.length === 2) return `${p[0]} & ${p[1]}`;
+    return `${p[0]}, ${p[1]} +${p.length - 2} more`;
 }
 
 function NotesList() {
@@ -97,9 +102,9 @@ function NotesList() {
                                     className="flex items-center justify-between py-3 gap-4"
                                 >
                                     <div className="flex flex-col gap-1 min-w-0">
-                                        {/* Title — derived from participants */}
+                                        {/* Title — from calendar event or derived from participants */}
                                         <span className="text-sm font-semibold text-gray-900 truncate">
-                                            {getMeetingTitle(meeting.participants)}
+                                            {getMeetingTitle(meeting)}
                                         </span>
 
                                         {/* Date — small, underneath */}
