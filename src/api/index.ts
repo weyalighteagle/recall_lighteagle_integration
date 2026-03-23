@@ -14,6 +14,7 @@ import { bot_join } from "./handlers/bot_join";
 import { bot_settings_get, bot_settings_update } from "./handlers/bot_settings";
 import { voice_agent_config_get, voice_agent_config_update } from "./handlers/voice_agent_config";
 import { knowledge_bases_list, knowledge_base_by_slug } from "./handlers/knowledge_bases";
+import { meeting_kb_get, meeting_kb_upsert, meeting_kb_delete } from "./handlers/meeting_kb_override";
 import { supabase } from "./config/supabase";
 
 dotenv.config();
@@ -413,6 +414,37 @@ body=${JSON.stringify(body)}
                         "Access-Control-Allow-Origin": "*",
                     });
                     res.end(JSON.stringify(transcript));
+                    return;
+                }
+
+                // GET /api/meeting-kb/:calendarEventId — per-meeting KB override
+                if (pathname.startsWith("/api/meeting-kb/") && req.method?.toUpperCase() === "GET") {
+                    const calendarEventId = pathname.replace("/api/meeting-kb/", "");
+                    if (!calendarEventId) throw new Error("calendarEventId is required");
+                    const result = await meeting_kb_get(calendarEventId);
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // PUT /api/meeting-kb/:calendarEventId — upsert per-meeting KB override
+                if (pathname.startsWith("/api/meeting-kb/") && req.method?.toUpperCase() === "PUT") {
+                    const calendarEventId = pathname.replace("/api/meeting-kb/", "");
+                    if (!calendarEventId) throw new Error("calendarEventId is required");
+                    if (!body?.kb_document_id) throw new Error("kb_document_id is required");
+                    await meeting_kb_upsert(calendarEventId, body.kb_document_id);
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ message: "Override saved" }));
+                    return;
+                }
+
+                // DELETE /api/meeting-kb/:calendarEventId — remove per-meeting KB override
+                if (pathname.startsWith("/api/meeting-kb/") && req.method?.toUpperCase() === "DELETE") {
+                    const calendarEventId = pathname.replace("/api/meeting-kb/", "");
+                    if (!calendarEventId) throw new Error("calendarEventId is required");
+                    await meeting_kb_delete(calendarEventId);
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ message: "Override removed" }));
                     return;
                 }
 

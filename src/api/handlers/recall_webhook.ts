@@ -83,7 +83,16 @@ export async function recall_webhook(payload: any): Promise<void> {
                     if (botSettings.bot_mode === "voice_agent") {
                         if (env.VOICE_AGENT_PAGE_URL && env.VOICE_AGENT_WSS_URL) {
                             try {
-                                await schedule_bot_for_calendar_event({ calendar_event, calendar, bot_type: "voice_agent" });
+                                // Check per-meeting KB override; fall back to global default
+                                const { data: kbOverride } = await supabase
+                                    .from("meeting_kb_overrides")
+                                    .select("kb_document_id")
+                                    .eq("calendar_event_id", calendar_event.id)
+                                    .maybeSingle();
+                                const effective_kb_id = kbOverride?.kb_document_id ?? botSettings.active_kb_id ?? undefined;
+                                console.log(`[calendar.sync_events] event=${calendar_event.id} effective_kb_id=${effective_kb_id ?? "none"}`);
+
+                                await schedule_bot_for_calendar_event({ calendar_event, calendar, bot_type: "voice_agent", kb_id: effective_kb_id });
                                 console.log(`Scheduled voice agent bot for calendar event: ${calendar_event.id}`);
                             } catch (err) {
                                 console.error(`Failed to schedule voice agent bot for calendar event ${calendar_event.id}:`, err);
@@ -406,6 +415,7 @@ export async function schedule_bot_for_calendar_event(args: {
     calendar: CalendarType,
     calendar_event: CalendarEventType,
     bot_type?: BotType,
+    kb_id?: string,
 }) {
     const { calendar, calendar_event } = z.object({
         calendar: CalendarSchema,
@@ -413,6 +423,7 @@ export async function schedule_bot_for_calendar_event(args: {
     }).parse(args);
 
     const bot_type: BotType = args.bot_type ?? "recording";
+    const kb_id: string | undefined = args.kb_id;
 
     const { deduplication_key } = generate_bot_deduplication_key({
         one_bot_per: "meeting",
@@ -431,7 +442,9 @@ export async function schedule_bot_for_calendar_event(args: {
             throw new Error("Voice agent environment variables (VOICE_AGENT_PAGE_URL, VOICE_AGENT_WSS_URL) are not configured");
         }
 
-        const output_media_url = `${env.VOICE_AGENT_PAGE_URL}?wss=${encodeURIComponent(env.VOICE_AGENT_WSS_URL)}`;
+        const pageParams = new URLSearchParams({ wss: env.VOICE_AGENT_WSS_URL });
+        if (kb_id) pageParams.set("kb", kb_id);
+        const output_media_url = `${env.VOICE_AGENT_PAGE_URL}?${pageParams.toString()}`;
 
         bot_config = {
             bot_name: "WEYA Voice Agent",

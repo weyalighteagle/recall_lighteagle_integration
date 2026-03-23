@@ -230,7 +230,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                     <div className="flex-1 min-w-0">
                         <span className="text-sm font-medium text-gray-700">Knowledge Base</span>
                         <p className="text-xs text-gray-400 leading-tight">
-                            Voice Agent will use this knowledge base for scheduled meetings
+                            Default Knowledge Base for scheduled meetings (can be overridden per meeting)
                         </p>
                     </div>
                     {kbLoading ? (
@@ -261,6 +261,8 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                                 <CalendarDetails
                                     key={calendar.id}
                                     calendar={calendar}
+                                    kbDocuments={kbDocuments}
+                                    globalKbId={selectedKbId}
                                 />
                             ))}
                         </div>
@@ -271,7 +273,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     );
 }
 
-function CalendarDetails({ calendar }: { calendar: CalendarType }) {
+function CalendarDetails({ calendar, kbDocuments, globalKbId }: { calendar: CalendarType; kbDocuments: KbDoc[]; globalKbId: string }) {
     const [searchParams, setSearchParams] = useSearchParams();
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
     const { deleteCalendar, isDeleting } = useDeleteCalendar({
@@ -467,6 +469,8 @@ function CalendarDetails({ calendar }: { calendar: CalendarType }) {
                     calendar={calendar}
                     startTimeGte={selectedStartDate}
                     startTimeLte={selectedEndDate}
+                    kbDocuments={kbDocuments}
+                    globalKbId={globalKbId}
                 />
             </div>
         </div>
@@ -477,10 +481,14 @@ function CalendarEventsList({
     calendar,
     startTimeGte,
     startTimeLte,
+    kbDocuments,
+    globalKbId,
 }: {
     calendar: CalendarType;
     startTimeGte: string;
     startTimeLte: string;
+    kbDocuments: KbDoc[];
+    globalKbId: string;
 }) {
     const latestStatus = calendar.status_changes.at(0)?.status;
     const isConnecting = latestStatus === "connecting";
@@ -560,6 +568,8 @@ function CalendarEventsList({
                                         calendarId={calendar.id}
                                         formatTime={formatTime}
                                         getEventTitle={getEventTitle}
+                                        kbDocuments={kbDocuments}
+                                        globalKbId={globalKbId}
                                     />
                                 ))}
                         </div>
@@ -575,11 +585,15 @@ function CalendarEventCard({
     calendarId,
     formatTime,
     getEventTitle,
+    kbDocuments,
+    globalKbId,
 }: {
     event: CalendarEventType;
     calendarId: string;
     formatTime: (dateString: string) => string;
     getEventTitle: (event: CalendarEventType) => string;
+    kbDocuments: KbDoc[];
+    globalKbId: string;
 }) {
     // Recording bot toggle hook
     const {
@@ -605,6 +619,32 @@ function CalendarEventCard({
 
     const navigate = useNavigate();
     const [isExporting, setIsExporting] = useState(false);
+    // undefined = still loading, null = no override set
+    const [eventKbId, setEventKbId] = useState<string | null | undefined>(undefined);
+
+    const isInFuture = new Date(event.start_time) > new Date();
+    const hasMeetingUrl = !!event.meeting_url;
+    const canToggle = isInFuture && hasMeetingUrl;
+
+    useEffect(() => {
+        if (!canToggle || kbDocuments.length === 0) {
+            setEventKbId(null);
+            return;
+        }
+        fetch(`/api/meeting-kb/${event.id}`)
+            .then((r) => r.json())
+            .then((data: { kb_document_id: string | null }) => setEventKbId(data.kb_document_id))
+            .catch(() => setEventKbId(null));
+    }, [event.id, canToggle, kbDocuments.length]);
+
+    const handleKbChange = (id: string) => {
+        setEventKbId(id);
+        fetch(`/api/meeting-kb/${event.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ kb_document_id: id }),
+        }).catch(console.error);
+    };
 
     const handleExportTranscript = async (botId: string) => {
         setIsExporting(true);
@@ -633,10 +673,6 @@ function CalendarEventCard({
             setIsExporting(false);
         }
     };
-
-    const isInFuture = new Date(event.start_time) > new Date();
-    const hasMeetingUrl = !!event.meeting_url;
-    const canToggle = isInFuture && hasMeetingUrl;
 
     // Dedup key prefix'ine bakarak bot tipini tespit et
     const hasRecordingBot = event.bots.some(
@@ -748,6 +784,26 @@ function CalendarEventCard({
                         <Video className="size-3 shrink-0" />
                         <span className="truncate">{event.meeting_url}</span>
                     </a>
+                )}
+                {canToggle && kbDocuments.length > 0 && (
+                    <div className="flex items-center gap-1.5">
+                        <span className="text-gray-500">KB:</span>
+                        {eventKbId === undefined ? (
+                            <Loader2 className="size-3 animate-spin text-gray-400" />
+                        ) : (
+                            <select
+                                value={eventKbId ?? globalKbId}
+                                onChange={(e) => handleKbChange(e.target.value)}
+                                className="text-xs border rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[160px]"
+                            >
+                                {kbDocuments.map((doc) => (
+                                    <option key={doc.id} value={doc.id}>
+                                        {doc.title}{doc.id === globalKbId ? " (default)" : ""}
+                                    </option>
+                                ))}
+                            </select>
+                        )}
+                    </div>
                 )}
             </div>
 
