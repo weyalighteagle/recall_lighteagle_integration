@@ -320,7 +320,7 @@ body=${JSON.stringify(body)}
                     return;
                 }
 
-                // GET /api/transcripts — all meetings with participants and titles
+                // GET /api/transcripts — all meetings with participants
                 if (pathname === "/api/transcripts" && req.method?.toUpperCase() === "GET") {
                     const { data: meetings } = await supabase
                         .from("meetings")
@@ -346,51 +346,9 @@ body=${JSON.stringify(body)}
                         participantsByBot.set(u.bot_id, existing);
                     }
 
-                    // Fetch meeting titles from calendar events (bot_id → event title)
-                    const titlesByBotId = new Map<string, string>();
-                    try {
-                        const { calendars } = await calendars_list({});
-                        // Determine date range from oldest meeting to now
-                        const oldestMeeting = (meetings ?? []).at(-1);
-                        const startDate = oldestMeeting
-                            ? new Date(new Date(oldestMeeting.created_at).getTime() - 24 * 60 * 60 * 1000).toISOString()
-                            : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
-                        const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-
-                        for (const cal of calendars) {
-                            try {
-                                let next: string | null = null;
-                                do {
-                                    const result = await calendar_events_list({
-                                        calendar_id: cal.id,
-                                        next,
-                                        start_time__gte: startDate,
-                                        start_time__lte: endDate,
-                                    });
-                                    for (const event of result.calendar_events) {
-                                        const title = event.raw?.summary ?? event.raw?.subject ?? null;
-                                        if (title && event.bots) {
-                                            for (const bot of event.bots) {
-                                                if (bot.bot_id && !titlesByBotId.has(bot.bot_id)) {
-                                                    titlesByBotId.set(bot.bot_id, title);
-                                                }
-                                            }
-                                        }
-                                    }
-                                    next = result.next;
-                                } while (next);
-                            } catch (e) {
-                                console.error(`Failed to fetch events for calendar ${cal.id}:`, e);
-                            }
-                        }
-                    } catch (e) {
-                        console.error("Failed to fetch calendars for meeting titles:", e);
-                    }
-
                     const enrichedMeetings = (meetings ?? []).map((m: any) => ({
                         ...m,
                         participants: participantsByBot.get(m.bot_id) ?? [],
-                        title: titlesByBotId.get(m.bot_id) ?? null,
                     }));
 
                     res.writeHead(200, {
