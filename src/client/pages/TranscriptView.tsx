@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Bot, Download, FileText, Loader2, MessageSquare, User } from "lucide-react";
+import { ArrowLeft, Download, FileText, Loader2, MessageSquare, User, Users } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import {
     Card,
@@ -19,6 +19,8 @@ interface Utterance {
 interface TranscriptResponse {
     utterances: Utterance[];
     done: boolean;
+    title: string | null;
+    participants: string[];
 }
 
 function TranscriptView() {
@@ -38,6 +40,17 @@ function TranscriptView() {
 
     const utterances = data?.utterances ?? [];
     const isDone = data?.done ?? false;
+    const title = data?.title ?? null;
+    const participants = data?.participants ?? [];
+
+    /** Build a display title from available data. */
+    const displayTitle = (() => {
+        if (title) return title;
+        if (participants.length === 0) return "Meeting Transcript";
+        if (participants.length === 1) return `Meeting with ${participants[0]}`;
+        if (participants.length === 2) return `${participants[0]} & ${participants[1]}`;
+        return `${participants[0]}, ${participants[1]} +${participants.length - 2} more`;
+    })();
 
     const handleExportTranscript = () => {
         if (utterances.length === 0) return;
@@ -65,11 +78,11 @@ function TranscriptView() {
                 <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => navigate("/dashboard/calendar")}
+                    onClick={() => navigate("/dashboard/notes")}
                     className="flex items-center gap-1"
                 >
                     <ArrowLeft className="size-4" />
-                    Back to Calendar
+                    Back to Notes
                 </Button>
                 {utterances.length > 0 && (
                     <Button
@@ -86,23 +99,44 @@ function TranscriptView() {
 
             <Card>
                 <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                        <FileText className="size-4" />
-                        Meeting Transcript
+                    <CardTitle className="text-lg flex items-center gap-2">
+                        <FileText className="size-5" />
+                        {displayTitle}
                     </CardTitle>
-                    <p className="text-sm text-gray-500">
-                        Bot ID: <span className="font-mono text-xs">{botId}</span>
-                        {isDone && (
-                            <span className="ml-2 text-green-600 font-medium">
-                                — Transcript complete
-                            </span>
+                    <div className="flex flex-col gap-1 mt-1">
+                        {/* Date */}
+                        {utterances.length > 0 && (
+                            <p className="text-xs text-gray-400">
+                                {new Date(utterances[0].timestamp).toLocaleString([], {
+                                    year: "numeric",
+                                    month: "short",
+                                    day: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                })}
+                            </p>
                         )}
-                        {!isDone && utterances.length > 0 && (
-                            <span className="ml-2 text-blue-600 font-medium">
-                                — Live (updating every 5s)
-                            </span>
+                        {/* Participants */}
+                        {participants.length > 0 && (
+                            <p className="flex items-center gap-1.5 text-xs text-gray-500">
+                                <Users className="size-3 shrink-0" />
+                                {participants.join(", ")}
+                            </p>
                         )}
-                    </p>
+                        {/* Status */}
+                        <p className="text-sm text-gray-500 mt-0.5">
+                            {isDone && (
+                                <span className="text-green-600 font-medium">
+                                    Transcript complete
+                                </span>
+                            )}
+                            {!isDone && utterances.length > 0 && (
+                                <span className="text-blue-600 font-medium">
+                                    Live — updating every 5s
+                                </span>
+                            )}
+                        </p>
+                    </div>
                 </CardHeader>
                 <CardContent>
                     {isPending ? (
@@ -131,29 +165,19 @@ function TranscriptView() {
                     ) : (
                         <ScrollArea className="h-[500px]">
                             <div className="space-y-3 pr-4">
-                                {utterances.map((utterance, index) => {
-                                    const isWeya = utterance.participant.toUpperCase().includes("WEYA");
-                                    return (
+                                {utterances.map((utterance, index) => (
                                     <div
                                         key={index}
                                         className="flex gap-3 p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors"
                                     >
-                                        <div className={`flex items-center justify-center size-8 rounded-full shrink-0 mt-0.5 ${isWeya ? "bg-violet-100" : "bg-blue-100"}`}>
-                                            {isWeya
-                                                ? <Bot className="size-4 text-violet-600" />
-                                                : <User className="size-4 text-blue-600" />
-                                            }
+                                        <div className="flex items-center justify-center size-8 bg-blue-100 rounded-full shrink-0 mt-0.5">
+                                            <User className="size-4 text-blue-600" />
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2 mb-1">
                                                 <span className="text-sm font-medium text-gray-900">
                                                     {utterance.participant}
                                                 </span>
-                                                {isWeya && (
-                                                    <span className="text-xs font-medium text-violet-600 bg-violet-100 px-1.5 py-0.5 rounded">
-                                                        AI
-                                                    </span>
-                                                )}
                                                 <span className="text-xs text-gray-400">
                                                     {new Date(utterance.timestamp).toLocaleTimeString([], {
                                                         hour: "2-digit",
@@ -169,8 +193,7 @@ function TranscriptView() {
                                             </p>
                                         </div>
                                     </div>
-                                    );
-                                })}
+                                ))}
                             </div>
                         </ScrollArea>
                     )}
