@@ -151,9 +151,11 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
 
     // Her email adresi için ayrı tab
     const calendarsByEmail = useMemo(() => {
+        const userEmail = user?.primaryEmailAddress?.emailAddress;
+        const filtered = calendars.filter((cal) => cal.platform_email === userEmail);
         const map = new Map<string, CalendarType[]>();
-        for (const cal of calendars) {
-            const key = user?.primaryEmailAddress?.emailAddress || cal.id;
+        for (const cal of filtered) {
+            const key = cal.platform_email ?? cal.id;
             const existing = map.get(key) || [];
             existing.push(cal);
             map.set(key, existing);
@@ -163,7 +165,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
             calendars: cals,
             platform: cals[0].platform,
         }));
-    }, [calendars]);
+    }, [calendars, user]);
 
     const defaultTab = calendarsByEmail[0]?.email || "";
 
