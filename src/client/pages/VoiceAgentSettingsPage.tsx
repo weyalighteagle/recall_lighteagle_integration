@@ -28,6 +28,7 @@ interface Config {
     system_prompt: string;
     voice: string;
     language: string;
+    wake_word: string | null;
 }
 
 export default function VoiceAgentSettingsPage() {
@@ -54,6 +55,7 @@ export default function VoiceAgentSettingsPage() {
                     system_prompt: config.system_prompt,
                     voice: config.voice,
                     language: config.language,
+                    wake_word: config.wake_word?.trim() || null,
                 }),
             });
             if (!res.ok) throw new Error(await res.text());
@@ -126,6 +128,23 @@ export default function VoiceAgentSettingsPage() {
                                     ))}
                                 </select>
                             </div>
+                        </div>
+
+                        {/* Wake Word */}
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+                                Wake Word
+                            </label>
+                            <input
+                                type="text"
+                                value={config.wake_word ?? ""}
+                                onChange={(e) => setConfig({ ...config, wake_word: e.target.value })}
+                                placeholder="e.g. weya"
+                                className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <p className="text-xs text-gray-400">
+                                When set, the assistant will only respond after hearing this word. Leave empty to disable.
+                            </p>
                         </div>
 
                         {/* System Prompt */}
