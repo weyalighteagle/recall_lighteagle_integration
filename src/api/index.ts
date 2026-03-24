@@ -115,8 +115,8 @@ body=${JSON.stringify(body)}
                     /** List calendars */
                     case "GET": {
                         if (!await requireAuth(req, res)) return;
-                        // platform_email artık opsiyonel — verilmezse tüm takvimler döner
-                        const results = await calendars_list(search_params);
+                        const email = (req as any).userEmail;
+                        const results = await calendars_list({ ...search_params, platform_email: email });
                         console.log(`Listed Calendars: ${JSON.stringify(results)}`);
 
                         res.writeHead(200, { "Content-Type": "application/json" });
