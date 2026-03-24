@@ -1,3 +1,4 @@
+import { useAuth, useUser } from "@clerk/react";
 import {
     Calendar as CalendarIcon,
     Clock,
@@ -39,7 +40,11 @@ import { useDeleteCalendar } from "./hooks/use-delete-calendar";
 import { useToggleRecording } from "./hooks/use-toggle-recording";
 
 function App() {
+    const { isLoaded } = useAuth();
+    const { user } = useUser();
     const { calendars, isPending } = useCalendar();
+
+    if (!isLoaded || !user) return null;
 
     if (isPending) {
         return (
@@ -52,10 +57,14 @@ function App() {
         );
     }
 
+    const filteredCalendars = calendars.filter(
+        (cal) => !/(birthday|holiday)/i.test(cal.name ?? ""),
+    );
+
     return (
         <>
-            {calendars?.length ? (
-                <CalendarList calendars={calendars} />
+            {filteredCalendars?.length ? (
+                <CalendarList calendars={filteredCalendars} />
             ) : (
                 <div className="flex items-center justify-center min-h-[60vh]">
                     <ConnectCalendar />
@@ -115,6 +124,7 @@ interface KbDoc {
 }
 
 function CalendarList({ calendars }: { calendars: CalendarType[] }) {
+    const { user } = useUser();
     const [showConnectDialog, setShowConnectDialog] = useState(false);
 
     // ── KB data — needed by per-meeting KB dropdowns on event cards ──────────
@@ -141,9 +151,11 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
 
     // Her email adresi için ayrı tab
     const calendarsByEmail = useMemo(() => {
+        const userEmail = user?.primaryEmailAddress?.emailAddress;
+        const filtered = calendars.filter((cal) => cal.platform_email === userEmail);
         const map = new Map<string, CalendarType[]>();
-        for (const cal of calendars) {
-            const key = cal.platform_email || cal.id;
+        for (const cal of filtered) {
+            const key = cal.platform_email ?? cal.id;
             const existing = map.get(key) || [];
             existing.push(cal);
             map.set(key, existing);
@@ -153,7 +165,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
             calendars: cals,
             platform: cals[0].platform,
         }));
-    }, [calendars]);
+    }, [calendars, user]);
 
     const defaultTab = calendarsByEmail[0]?.email || "";
 
@@ -232,6 +244,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
 }
 
 function CalendarDetails({ calendar, kbDocuments, globalKbId }: { calendar: CalendarType; kbDocuments: KbDoc[]; globalKbId: string }) {
+    const { user } = useUser();
     const [searchParams, setSearchParams] = useSearchParams();
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
     const { deleteCalendar, isDeleting } = useDeleteCalendar({
@@ -313,7 +326,7 @@ function CalendarDetails({ calendar, kbDocuments, globalKbId }: { calendar: Cale
                         <div className="flex flex-col w-full">
                             <div className="flex items-center justify-between w-full gap-3">
                                 <CardTitle className="text-base">
-                                    {calendar.platform_email}
+                                    {user?.primaryEmailAddress?.emailAddress}
                                 </CardTitle>
 
                                 <Button
@@ -339,7 +352,7 @@ function CalendarDetails({ calendar, kbDocuments, globalKbId }: { calendar: Cale
                                                 Are you sure you want to
                                                 disconnect{" "}
                                                 <span className="font-medium">
-                                                    {calendar.platform_email}
+                                                    {user?.primaryEmailAddress?.emailAddress}
                                                 </span>
                                                 ? This will stop syncing events
                                                 from this calendar.

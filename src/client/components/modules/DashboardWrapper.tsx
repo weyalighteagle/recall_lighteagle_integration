@@ -12,6 +12,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { UserButton } from "@clerk/react";
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "../../utils/cn";
@@ -70,7 +71,7 @@ function DashboardWrapper({ children }: { children: React.ReactNode }) {
               <Bell className="size-5 text-gray-600" />
               <span className="absolute top-1 right-1 size-2 bg-red-500 rounded-full" />
             </button>
-            <div className="size-8 bg-gray-200 rounded-full" />
+            <UserButton />
           </div>
         </div>
       </nav>
