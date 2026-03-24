@@ -28,6 +28,7 @@ interface Config {
     system_prompt: string;
     voice: string;
     language: string;
+    wake_word_enabled: boolean;
 }
 
 export default function VoiceAgentSettingsPage() {
@@ -54,6 +55,7 @@ export default function VoiceAgentSettingsPage() {
                     system_prompt: config.system_prompt,
                     voice: config.voice,
                     language: config.language,
+                    wake_word_enabled: config.wake_word_enabled,
                 }),
             });
             if (!res.ok) throw new Error(await res.text());
@@ -126,6 +128,30 @@ export default function VoiceAgentSettingsPage() {
                                     ))}
                                 </select>
                             </div>
+                        </div>
+
+                        {/* Wake Word */}
+                        <div className="flex items-center justify-between py-3 border-t">
+                            <div>
+                                <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+                                    Wake Word
+                                </p>
+                                <p className="text-xs text-gray-500 mt-0.5">
+                                    Açık: Bot sadece "Weya" dendiğinde yanıt verir. Kapalı: Her konuşmaya yanıt verir.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setConfig({ ...config, wake_word_enabled: !config.wake_word_enabled })}
+                                className="relative shrink-0 w-11 h-6 rounded-full transition-colors"
+                                style={{ backgroundColor: config.wake_word_enabled ? "#2563eb" : "#d1d5db" }}
+                            >
+                                <div
+                                    className={`absolute top-0.5 size-5 bg-white rounded-full shadow transition-transform ${
+                                        config.wake_word_enabled ? "translate-x-5" : "translate-x-0.5"
+                                    }`}
+                                />
+                            </button>
                         </div>
 
                         {/* System Prompt */}
