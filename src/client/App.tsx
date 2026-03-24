@@ -57,10 +57,14 @@ function App() {
         );
     }
 
+    const filteredCalendars = calendars.filter(
+        (cal) => !/(birthday|holiday)/i.test(cal.name ?? ""),
+    );
+
     return (
         <>
-            {calendars?.length ? (
-                <CalendarList calendars={calendars} />
+            {filteredCalendars?.length ? (
+                <CalendarList calendars={filteredCalendars} />
             ) : (
                 <div className="flex items-center justify-center min-h-[60vh]">
                     <ConnectCalendar />
