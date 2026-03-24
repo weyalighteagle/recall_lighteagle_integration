@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -5,16 +6,19 @@ import { z } from "zod";
 export function useDeleteCalendar(props: { calendarId: string | null }) {
     const { calendarId } = z.object({ calendarId: z.string().nullable() }).parse(props);
     const queryClient = useQueryClient();
+    const { getToken } = useAuth();
 
     const { mutate: deleteCalendar, isPending: isDeleting } = useMutation({
         mutationFn: async () => {
             const url = new URL("/api/calendar", window.location.origin);
             if (calendarId) url.searchParams.set("calendar_id", calendarId);
 
+            const token = await getToken();
             const res = await fetch(url.toString(), {
                 method: "DELETE",
-                headers: { 
+                headers: {
                     "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
                 },
             });
             if (!res.ok) throw new Error(await res.text());
