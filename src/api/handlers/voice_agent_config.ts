@@ -7,6 +7,7 @@ export interface VoiceAgentConfig {
     voice: string;
     language: string;
     is_active: boolean;
+    wake_word_enabled: boolean;
 }
 
 /**
@@ -15,7 +16,7 @@ export interface VoiceAgentConfig {
 export async function voice_agent_config_get(): Promise<VoiceAgentConfig> {
     const { data, error } = await supabase
         .from("voice_agent_config")
-        .select("id, name, system_prompt, voice, language, is_active")
+        .select("id, name, system_prompt, voice, language, is_active, wake_word_enabled")
         .eq("is_active", true)
         .limit(1)
         .maybeSingle();
@@ -31,11 +32,11 @@ export async function voice_agent_config_get(): Promise<VoiceAgentConfig> {
  * Only system_prompt, voice, and language are patchable.
  */
 export async function voice_agent_config_update(
-    patch: Partial<Pick<VoiceAgentConfig, "system_prompt" | "voice" | "language">>
+    patch: Partial<Pick<VoiceAgentConfig, "system_prompt" | "voice" | "language" | "wake_word_enabled">>
 ): Promise<VoiceAgentConfig> {
     const { data: existing, error: fetchError } = await supabase
         .from("voice_agent_config")
-        .select("id, name, system_prompt, voice, language, is_active")
+        .select("id, name, system_prompt, voice, language, is_active, wake_word_enabled")
         .eq("is_active", true)
         .limit(1)
         .maybeSingle();
@@ -47,6 +48,7 @@ export async function voice_agent_config_update(
         system_prompt: patch.system_prompt ?? existing.system_prompt,
         voice: patch.voice ?? existing.voice,
         language: patch.language ?? existing.language,
+        wake_word_enabled: patch.wake_word_enabled ?? existing.wake_word_enabled ?? false,
         updated_at: new Date().toISOString(),
     };
 
