@@ -1,4 +1,4 @@
-import { ClerkProvider } from "@clerk/react";
+import { ClerkProvider, useAuth } from "@clerk/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import ReactDOM from "react-dom/client";
@@ -11,6 +11,7 @@ import VoiceAgentPage from "./pages/VoiceAgentPage";
 import SettingsPage from "./pages/SettingsPage";
 import InstantMeetingPage from "./pages/InstantMeetingPage";
 import VoiceAgentSettingsPage from "./pages/VoiceAgentSettingsPage";
+import SignInPage from "./pages/SignInPage";
 import "./index.css";
 import DashboardWrapper from "./components/modules/DashboardWrapper";
 import { Toaster } from "./components/ui/Sonner";
@@ -29,10 +30,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
-          <Route path="/dashboard/*" element={<DashboardRoutes />} />
+          <Route path="/sign-in" element={<SignInPage />} />
+          <Route path="/dashboard/*" element={<ProtectedRoute><DashboardRoutes /></ProtectedRoute>} />
           <Route
             path="*"
-            element={<Navigate replace to="/dashboard/calendar" />}
+            element={<ProtectedRoute><Navigate replace to="/dashboard/calendar" /></ProtectedRoute>}
           />
         </Routes>
       </BrowserRouter>
@@ -40,6 +42,13 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </ClerkProvider>
   </React.StrictMode>,
 );
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { isLoaded, isSignedIn } = useAuth();
+  if (!isLoaded) return <div>Loading...</div>;
+  if (!isSignedIn) return <Navigate replace to="/sign-in" />;
+  return <>{children}</>;
+}
 
 function DashboardRoutes() {
   return (
