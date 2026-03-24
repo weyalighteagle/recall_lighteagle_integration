@@ -15,6 +15,14 @@ if (!is_google_calendar_configured && !is_outlook_calendar_configured) {
     throw new Error("No Calendar is configured. Please set one of the GOOGLE or OUTLOOK Calendar OAuth environment variables sets.");
 }
 
+// Verify Clerk keys are present and have the expected prefixes.
+if (!env.CLERK_PUBLISHABLE_KEY.startsWith("pk_")) {
+    throw new Error("CLERK_PUBLISHABLE_KEY must start with 'pk_'");
+}
+if (!env.CLERK_SECRET_KEY.startsWith("sk_")) {
+    throw new Error("CLERK_SECRET_KEY must start with 'sk_'");
+}
+
 if (is_google_calendar_configured) {
     if (!env.GOOGLE_OAUTH_REDIRECT_URI) {
         throw new Error("Google Calendar Redirect URI is not set");
