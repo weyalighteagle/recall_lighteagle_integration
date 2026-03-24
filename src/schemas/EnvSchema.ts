@@ -21,4 +21,8 @@ export const EnvSchema = z.object({
     VOICE_AGENT_PAGE_URL: z.string().optional(),
     VOICE_AGENT_WSS_URL: z.string().optional(),
     OPENAI_API_KEY: z.string().optional(),
+
+    // Clerk Auth
+    CLERK_PUBLISHABLE_KEY: z.string(),
+    CLERK_SECRET_KEY: z.string(),
 });
