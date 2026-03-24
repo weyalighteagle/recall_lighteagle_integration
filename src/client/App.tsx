@@ -1,4 +1,4 @@
-import { useUser } from "@clerk/react";
+import { useAuth, useUser } from "@clerk/react";
 import {
     Calendar as CalendarIcon,
     Clock,
@@ -40,7 +40,11 @@ import { useDeleteCalendar } from "./hooks/use-delete-calendar";
 import { useToggleRecording } from "./hooks/use-toggle-recording";
 
 function App() {
+    const { isLoaded } = useAuth();
+    const { user } = useUser();
     const { calendars, isPending } = useCalendar();
+
+    if (!isLoaded || !user) return null;
 
     if (isPending) {
         return (
