@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -14,6 +15,7 @@ export function useToggleRecording(props: {
 
     const botType = props.botType ?? "recording";
     const queryClient = useQueryClient();
+    const { getToken } = useAuth();
 
     const label = botType === "voice_agent" ? "Voice agent" : "Recording";
 
@@ -23,9 +25,13 @@ export function useToggleRecording(props: {
             url.searchParams.set("calendar_event_id", calendarEventId);
             url.searchParams.set("bot_type", botType);
 
+            const token = await getToken();
             const res = await fetch(url.toString(), {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                },
             });
             if (!res.ok) throw new Error(await res.text());
             return { isScheduled: true };
@@ -46,9 +52,13 @@ export function useToggleRecording(props: {
             url.searchParams.set("calendar_event_id", calendarEventId);
             url.searchParams.set("bot_type", botType);
 
+            const token = await getToken();
             const res = await fetch(url.toString(), {
                 method: "DELETE",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                },
             });
             if (!res.ok) throw new Error(await res.text());
             return { isUnscheduled: true };

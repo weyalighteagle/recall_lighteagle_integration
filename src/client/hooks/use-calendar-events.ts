@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -17,6 +18,8 @@ export function useCalendarEvents(props: {
         startTimeGte: z.string().nullish(),
         startTimeLte: z.string().nullish(),
     }).parse(props);
+
+    const { getToken } = useAuth();
 
     const formatDateTime = (rawDate: string) => {
         const date = new Date(rawDate);
@@ -45,7 +48,10 @@ export function useCalendarEvents(props: {
                 if (startTimeGte) url.searchParams.set("start_time__gte", formatDateTime(startTimeGte));
                 if (startTimeLte) url.searchParams.set("start_time__lte", formatDateTime(startTimeLte));
 
-                const res = await fetch(url.toString());
+                const token = await getToken();
+                const res = await fetch(url.toString(), {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
                 if (!res.ok) throw new Error(await res.text());
 
                 const data = z

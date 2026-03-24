@@ -12,6 +12,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { useClerk } from "@clerk/react";
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "../../utils/cn";
@@ -30,6 +31,7 @@ const SidebarItems = [
 function DashboardWrapper({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
+  const { signOut } = useClerk();
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -71,6 +73,12 @@ function DashboardWrapper({ children }: { children: React.ReactNode }) {
               <span className="absolute top-1 right-1 size-2 bg-red-500 rounded-full" />
             </button>
             <div className="size-8 bg-gray-200 rounded-full" />
+            <button
+              onClick={() => signOut(() => { window.location.href = "/sign-in"; })}
+              style={{ cursor: "pointer", marginLeft: 8 }}
+            >
+              Sign out
+            </button>
           </div>
         </div>
       </nav>

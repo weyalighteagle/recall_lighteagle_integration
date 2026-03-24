@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -5,6 +6,7 @@ import { CalendarSchema } from "../../schemas/CalendarArtifactSchema";
 
 export function useCalendar(props?: { email?: string | null }) {
     const email = props?.email ?? null;
+    const { getToken } = useAuth();
 
     const { data: results, isPending } = useQuery({
         queryKey: ["calendars", email ?? "all"],
@@ -14,7 +16,10 @@ export function useCalendar(props?: { email?: string | null }) {
                 // Sadece email verilmişse filtrele, yoksa hepsini getir
                 if (email) url.searchParams.set("platform_email", email);
 
-                const res = await fetch(url.toString());
+                const token = await getToken();
+                const res = await fetch(url.toString(), {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
                 if (!res.ok) throw new Error(await res.text());
 
                 const data = z

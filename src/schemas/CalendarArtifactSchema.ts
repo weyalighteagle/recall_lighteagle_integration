@@ -3,6 +3,7 @@ import { OAuthStateSchema } from "./OAuthStateSchema";
 
 export const CalendarSchema = z.object({
     id: z.string(),
+    name: z.string().nullable().optional(),
     platform_email: z.string().nullable(),
     oauth_client_id: z.string().nullable(),
     oauth_client_secret: z.string().nullable(),
