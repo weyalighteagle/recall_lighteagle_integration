@@ -16,6 +16,7 @@ import { voice_agent_config_get, voice_agent_config_update } from "./handlers/vo
 import { knowledge_bases_list, knowledge_base_by_slug } from "./handlers/knowledge_bases";
 import { meeting_kb_get, meeting_kb_upsert, meeting_kb_delete } from "./handlers/meeting_kb_override";
 import { supabase } from "./config/supabase";
+import { requireAuth } from "./middleware/auth";
 
 dotenv.config();
 
@@ -113,6 +114,7 @@ body=${JSON.stringify(body)}
                 switch (req.method?.toUpperCase()) {
                     /** List calendars */
                     case "GET": {
+                        if (!await requireAuth(req, res)) return;
                         // platform_email artık opsiyonel — verilmezse tüm takvimler döner
                         const results = await calendars_list(search_params);
                         console.log(`Listed Calendars: ${JSON.stringify(results)}`);
@@ -123,6 +125,7 @@ body=${JSON.stringify(body)}
                     }
                     /** Delete calendar */
                     case "DELETE": {
+                        if (!await requireAuth(req, res)) return;
                         if (!search_params.calendar_id) throw new Error("calendar_id is required");
 
                         await calendars_delete(search_params);
@@ -141,6 +144,7 @@ body=${JSON.stringify(body)}
                 switch (req.method?.toUpperCase()) {
                     // List the calendar events for a given calendar.
                     case "GET": {
+                        if (!await requireAuth(req, res)) return;
                         if (!search_params.calendar_id) throw new Error("calendar_id is required");
 
                         const results = await calendar_events_list(search_params);
@@ -252,6 +256,7 @@ body=${JSON.stringify(body)}
                 switch (req.method?.toUpperCase()) {
                     // Scheudle a bot for a given calendar event.
                     case "POST": {
+                        if (!await requireAuth(req, res)) return;
                         if (!search_params.calendar_event_id) throw new Error("calendar_event_id is required");
 
                         const bot_type = (search_params.bot_type === "voice_agent") ? "voice_agent" : "recording";
@@ -271,6 +276,7 @@ body=${JSON.stringify(body)}
                     }
                     // Unschedule a bot for a given calendar event.
                     case "DELETE": {
+                        if (!await requireAuth(req, res)) return;
                         if (!search_params.calendar_event_id) throw new Error("calendar_event_id is required");
 
                         const bot_type = (search_params.bot_type === "voice_agent") ? "voice_agent" : "recording";
