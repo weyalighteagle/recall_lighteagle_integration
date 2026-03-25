@@ -43,6 +43,9 @@ function TranscriptView() {
     const title = data?.title ?? "Untitled Meeting";
     const participants = data?.participants ?? [];
 
+    const sanitizeFilename = (name: string) =>
+        name.replace(/[^a-zA-Z0-9\u00C0-\u024F\u0400-\u04FF\s\-_]/g, "").trim().replace(/\s+/g, "-");
+
     const handleExportTranscript = () => {
         if (utterances.length === 0) return;
         const lines = utterances.map((u) => {
@@ -55,7 +58,10 @@ function TranscriptView() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `transcript-${botId}.txt`;
+        const filename = title !== "Untitled Meeting"
+            ? `${sanitizeFilename(title)}.txt`
+            : `transcript-${botId}.txt`;
+        a.download = filename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
