@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Bot, Download, FileText, Loader2, MessageSquare, User } from "lucide-react";
+import { ArrowLeft, Bot, Calendar, Download, FileText, Loader2, MessageSquare, User, Users } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import {
     Card,
@@ -16,19 +16,21 @@ interface Utterance {
     timestamp: string;
 }
 
-interface TranscriptResponse {
+interface NoteDetailResponse {
     utterances: Utterance[];
     done: boolean;
+    title: string | null;
+    participants: string[];
 }
 
 function TranscriptView() {
     const { botId } = useParams<{ botId: string }>();
     const navigate = useNavigate();
 
-    const { data, isPending, isError } = useQuery<TranscriptResponse>({
-        queryKey: ["transcript", botId],
+    const { data, isPending, isError } = useQuery<NoteDetailResponse>({
+        queryKey: ["note-detail", botId],
         queryFn: async () => {
-            const res = await fetch(`/api/transcripts/${botId}`);
+            const res = await fetch(`/api/notes/${botId}`);
             if (!res.ok) throw new Error(await res.text());
             return res.json();
         },
@@ -38,6 +40,8 @@ function TranscriptView() {
 
     const utterances = data?.utterances ?? [];
     const isDone = data?.done ?? false;
+    const title = data?.title ?? "Untitled Meeting";
+    const participants = data?.participants ?? [];
 
     const handleExportTranscript = () => {
         if (utterances.length === 0) return;
@@ -65,11 +69,11 @@ function TranscriptView() {
                 <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => navigate("/dashboard/calendar")}
+                    onClick={() => navigate("/dashboard/notes")}
                     className="flex items-center gap-1"
                 >
                     <ArrowLeft className="size-4" />
-                    Back to Calendar
+                    Back to Notes
                 </Button>
                 {utterances.length > 0 && (
                     <Button
@@ -88,21 +92,27 @@ function TranscriptView() {
                 <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
                         <FileText className="size-4" />
-                        Meeting Transcript
+                        {title}
                     </CardTitle>
-                    <p className="text-sm text-gray-500">
-                        Bot ID: <span className="font-mono text-xs">{botId}</span>
+                    <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500">
+                        {participants.length > 0 && (
+                            <span className="flex items-center gap-1">
+                                <Users className="size-3.5" />
+                                {participants.join(", ")}
+                            </span>
+                        )}
                         {isDone && (
-                            <span className="ml-2 text-green-600 font-medium">
-                                — Transcript complete
+                            <span className="text-green-600 font-medium flex items-center gap-1">
+                                <Calendar className="size-3.5" />
+                                Transcript complete
                             </span>
                         )}
                         {!isDone && utterances.length > 0 && (
-                            <span className="ml-2 text-blue-600 font-medium">
-                                — Live (updating every 5s)
+                            <span className="text-blue-600 font-medium">
+                                Live (updating every 5s)
                             </span>
                         )}
-                    </p>
+                    </div>
                 </CardHeader>
                 <CardContent>
                     {isPending ? (

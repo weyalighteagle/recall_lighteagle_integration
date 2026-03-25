@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Download, FileText, Loader2 } from "lucide-react";
+import { Calendar, Download, FileText, Loader2, Users } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
@@ -11,9 +11,11 @@ interface Meeting {
     meeting_url: string | null;
     done: boolean;
     created_at: string;
+    title: string | null;
+    participants: string[];
 }
 
-interface MeetingsResponse {
+interface NotesResponse {
     meetings: Meeting[];
 }
 
@@ -21,10 +23,10 @@ function NotesList() {
     const navigate = useNavigate();
     const [exportingBotId, setExportingBotId] = useState<string | null>(null);
 
-    const { data, isPending } = useQuery<MeetingsResponse>({
-        queryKey: ["meetings"],
+    const { data, isPending } = useQuery<NotesResponse>({
+        queryKey: ["notes"],
         queryFn: async () => {
-            const res = await fetch("/api/transcripts");
+            const res = await fetch("/api/notes");
             if (!res.ok) throw new Error(await res.text());
             return res.json();
         },
@@ -62,6 +64,19 @@ function NotesList() {
         }
     };
 
+    const formatDate = (dateStr: string) =>
+        new Date(dateStr).toLocaleDateString([], {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+        });
+
+    const formatTime = (dateStr: string) =>
+        new Date(dateStr).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+
     return (
         <div className="flex flex-col gap-4 max-w-3xl mx-auto">
             <Card>
@@ -87,23 +102,26 @@ function NotesList() {
                             {meetings.map((meeting) => (
                                 <div
                                     key={meeting.bot_id}
-                                    className="flex items-center justify-between py-3"
+                                    className="flex items-center justify-between py-3 gap-4"
                                 >
-                                    <div className="flex flex-col gap-0.5">
-                                        <span className="text-sm font-medium text-gray-800">
-                                            {new Date(meeting.created_at).toLocaleString([], {
-                                                year: "numeric",
-                                                month: "short",
-                                                day: "numeric",
-                                                hour: "2-digit",
-                                                minute: "2-digit",
-                                            })}
+                                    <div className="flex flex-col gap-1 min-w-0">
+                                        <span className="text-sm font-medium text-gray-900 truncate">
+                                            {meeting.title ?? "Untitled Meeting"}
                                         </span>
-                                        <span className="text-xs text-gray-400 font-mono">
-                                            {meeting.bot_id}
-                                        </span>
+                                        <div className="flex items-center gap-3 text-xs text-gray-500">
+                                            <span className="flex items-center gap-1">
+                                                <Calendar className="size-3" />
+                                                {formatDate(meeting.created_at)} at {formatTime(meeting.created_at)}
+                                            </span>
+                                            {meeting.participants.length > 0 && (
+                                                <span className="flex items-center gap-1 truncate">
+                                                    <Users className="size-3 shrink-0" />
+                                                    {meeting.participants.join(", ")}
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
-                                    <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-2 shrink-0">
                                         <span
                                             className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                                                 meeting.done
