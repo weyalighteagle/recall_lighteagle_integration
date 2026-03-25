@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { Calendar, Download, FileText, Loader2, Users } from "lucide-react";
+import { Calendar, ChevronLeft, ChevronRight, Download, FileText, Loader2, Users } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
+
+const ITEMS_PER_PAGE = 10;
 
 interface Meeting {
     bot_id: string;
@@ -22,6 +24,7 @@ interface NotesResponse {
 function NotesList() {
     const navigate = useNavigate();
     const [exportingBotId, setExportingBotId] = useState<string | null>(null);
+    const [currentPage, setCurrentPage] = useState(1);
 
     const { data, isPending } = useQuery<NotesResponse>({
         queryKey: ["notes"],
@@ -32,9 +35,17 @@ function NotesList() {
         },
     });
 
-    const meetings = data?.meetings ?? [];
+    const allMeetings = data?.meetings ?? [];
+    const totalPages = Math.max(1, Math.ceil(allMeetings.length / ITEMS_PER_PAGE));
+    const meetings = allMeetings.slice(
+        (currentPage - 1) * ITEMS_PER_PAGE,
+        currentPage * ITEMS_PER_PAGE,
+    );
 
-    const handleExportTranscript = async (botId: string) => {
+    const sanitizeFilename = (name: string) =>
+        name.replace(/[^a-zA-Z0-9\u00C0-\u024F\u0400-\u04FF\s\-_]/g, "").trim().replace(/\s+/g, "-");
+
+    const handleExportTranscript = async (botId: string, meetingTitle: string | null) => {
         setExportingBotId(botId);
         try {
             const res = await fetch(`/api/transcripts/${botId}`);
@@ -52,7 +63,10 @@ function NotesList() {
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
-            a.download = `transcript-${botId}.txt`;
+            const filename = meetingTitle
+                ? `${sanitizeFilename(meetingTitle)}.txt`
+                : `transcript-${botId}.txt`;
+            a.download = filename;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -98,6 +112,7 @@ function NotesList() {
                             <p className="text-sm text-gray-500">No meetings recorded yet</p>
                         </div>
                     ) : (
+                        <>
                         <div className="divide-y">
                             {meetings.map((meeting) => (
                                 <div
@@ -135,7 +150,7 @@ function NotesList() {
                                             size="sm"
                                             variant="outline"
                                             disabled={exportingBotId === meeting.bot_id}
-                                            onClick={() => handleExportTranscript(meeting.bot_id)}
+                                            onClick={() => handleExportTranscript(meeting.bot_id, meeting.title)}
                                         >
                                             {exportingBotId === meeting.bot_id ? (
                                                 <Loader2 className="size-4 animate-spin mr-1" />
@@ -157,6 +172,34 @@ function NotesList() {
                                 </div>
                             ))}
                         </div>
+                        {totalPages > 1 && (
+                            <div className="flex items-center justify-between pt-4 border-t mt-2">
+                                <span className="text-xs text-gray-500">
+                                    Page {currentPage} of {totalPages} ({allMeetings.length} meetings)
+                                </span>
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={currentPage === 1}
+                                        onClick={() => setCurrentPage((p) => p - 1)}
+                                    >
+                                        <ChevronLeft className="size-4" />
+                                        Previous
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={currentPage === totalPages}
+                                        onClick={() => setCurrentPage((p) => p + 1)}
+                                    >
+                                        Next
+                                        <ChevronRight className="size-4" />
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+                        </>
                     )}
                 </CardContent>
             </Card>
