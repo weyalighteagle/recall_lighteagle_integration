@@ -10,12 +10,16 @@ import {
 } from "../components/ui/Card";
 
 const VOICES = [
-    { value: "shimmer", label: "Shimmer" },
-    { value: "alloy", label: "Alloy" },
-    { value: "echo", label: "Echo" },
-    { value: "fable", label: "Fable" },
-    { value: "onyx", label: "Onyx" },
-    { value: "nova", label: "Nova" },
+    { value: "marin",   label: "Marin — Best (GA exclusive · most natural)" },
+    { value: "cedar",   label: "Cedar — Best (GA exclusive · most natural)" },
+    { value: "coral",   label: "Coral — Good (warm and friendly)" },
+    { value: "ballad",  label: "Ballad — Good (melodic and smooth)" },
+    { value: "ash",     label: "Ash — Good (clear and precise)" },
+    { value: "verse",   label: "Verse — Good (versatile and expressive)" },
+    { value: "sage",    label: "Sage — OK (calm and thoughtful)" },
+    { value: "alloy",   label: "Alloy — OK (neutral and balanced)" },
+    { value: "shimmer", label: "Shimmer — OK (bright and energetic)" },
+    { value: "echo",    label: "Echo — OK (resonant and deep)" },
 ];
 
 const LANGUAGES = [
