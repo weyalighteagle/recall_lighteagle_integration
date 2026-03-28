@@ -21,10 +21,10 @@ import {
 } from "../components/ui/Dialog";
 
 const CATEGORIES = [
-    { value: "company_docs", label: "Şirket Dokümanları" },
-    { value: "faq", label: "SSS / Ürün Bilgisi" },
-    { value: "crm", label: "CRM / Müşteri" },
-    { value: "transcripts", label: "Toplantı Geçmişi" },
+    { value: "company_docs", label: "Company Documents" },
+    { value: "faq", label: "FAQ / Product Info" },
+    { value: "crm", label: "CRM / Customer" },
+    { value: "transcripts", label: "Meeting History" },
 ];
 
 interface KBDocument {
@@ -98,7 +98,7 @@ function KnowledgeBase() {
             return res.json();
         },
         onSuccess: (resData) => {
-            toast.success(`"${title}" eklendi (${resData.chunks} parça)`);
+            toast.success(`"${title}" added (${resData.chunks} chunks)`);
             setTitle("");
             setContent("");
             setShowForm(false);
@@ -126,7 +126,7 @@ function KnowledgeBase() {
             return res.json();
         },
         onSuccess: (resData) => {
-            toast.success(`Güncellendi (${resData.chunks} parça)`);
+            toast.success(`Updated (${resData.chunks} chunks)`);
             setIsEditing(false);
             void queryClient.invalidateQueries({ queryKey: ["kb_documents"] });
             void queryClient.invalidateQueries({ queryKey: ["kb_document", selectedDocId] });
@@ -143,7 +143,7 @@ function KnowledgeBase() {
             if (!res.ok) throw new Error(await res.text());
         },
         onSuccess: () => {
-            toast.success("Doküman silindi");
+            toast.success("Document deleted");
             void queryClient.invalidateQueries({ queryKey: ["kb_documents"] });
         },
         onError: (err: Error) => toast.error(err.message),
@@ -235,7 +235,7 @@ function KnowledgeBase() {
                     className="flex items-center gap-1"
                 >
                     <Plus className="size-4" />
-                    Doküman Ekle
+                    Add Document
                 </Button>
             </div>
 
@@ -243,16 +243,16 @@ function KnowledgeBase() {
             {showForm && (
                 <Card>
                     <CardHeader className="pb-3">
-                        <CardTitle className="text-base">Yeni Doküman</CardTitle>
+                        <CardTitle className="text-base">New Document</CardTitle>
                         <CardDescription>
-                            Metin yapıştır, başlık ve kategori seç. Bot toplantıda bu bilgileri kullanacak.
+                            Paste text, select a title and category. The bot will use this information during meetings.
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="flex flex-col gap-3">
                             <input
                                 type="text"
-                                placeholder="Başlık (ör: Fiyat Listesi)"
+                                placeholder="Title (e.g. Price List)"
                                 value={title}
                                 onChange={(e) => setTitle(e.target.value)}
                                 className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -269,7 +269,7 @@ function KnowledgeBase() {
                                 ))}
                             </select>
                             <textarea
-                                placeholder="İçerik metni buraya yapıştır..."
+                                placeholder="Paste content here..."
                                 value={content}
                                 onChange={(e) => setContent(e.target.value)}
                                 rows={8}
@@ -281,7 +281,7 @@ function KnowledgeBase() {
                                     size="sm"
                                     onClick={() => setShowForm(false)}
                                 >
-                                    İptal
+                                    Cancel
                                 </Button>
                                 <Button
                                     size="sm"
@@ -292,10 +292,10 @@ function KnowledgeBase() {
                                     {createMutation.isPending ? (
                                         <>
                                             <Loader2 className="size-4 animate-spin" />
-                                            Kaydediliyor...
+                                            Saving...
                                         </>
                                     ) : (
-                                        "Kaydet"
+                                        "Save"
                                     )}
                                 </Button>
                             </div>
@@ -309,26 +309,26 @@ function KnowledgeBase() {
                 <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
                         <BookOpen className="size-4" />
-                        Dokümanlar
+                        Documents
                     </CardTitle>
                     <CardDescription>
-                        {documents.length} doküman yüklü. The default Knowledge Base is used by Voice Agent for all meetings unless overridden per meeting.
+                        The default Knowledge Base is used by Voice Agent for all meetings unless overridden per meeting.
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
                     {isPending ? (
                         <div className="flex flex-col items-center justify-center py-12">
                             <Loader2 className="size-8 text-blue-500 mb-3 animate-spin" />
-                            <p className="text-sm text-gray-500">Yükleniyor…</p>
+                            <p className="text-sm text-gray-500">Loading…</p>
                         </div>
                     ) : documents.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-12">
                             <BookOpen className="size-8 text-gray-300 mb-2" />
                             <p className="text-sm text-gray-500">
-                                Henüz doküman eklenmemiş
+                                No documents added yet
                             </p>
                             <p className="text-xs text-gray-400 mt-1">
-                                "Doküman Ekle" butonuyla bilgi yükleyin
+                                Use &quot;Add Document&quot; to upload information
                             </p>
                         </div>
                     ) : (
@@ -337,9 +337,8 @@ function KnowledgeBase() {
                                 {documents.map((doc) => (
                                     <div
                                         key={doc.id}
-                                        className={`flex items-center justify-between py-3 ${
-                                            !doc.is_active ? "opacity-50" : ""
-                                        }`}
+                                        className={`flex items-center justify-between py-3 ${!doc.is_active ? "opacity-50" : ""
+                                            }`}
                                     >
                                         <button
                                             type="button"
@@ -357,7 +356,7 @@ function KnowledgeBase() {
                                                     {new Date(doc.created_at).toLocaleDateString()}
                                                 </span>
                                                 <span className="text-xs text-blue-500 flex items-center gap-0.5">
-                                                    <Eye className="size-3" /> Görüntüle
+                                                    <Eye className="size-3" /> View
                                                 </span>
                                             </div>
                                         </button>
@@ -376,11 +375,10 @@ function KnowledgeBase() {
                                                 disabled={setDefaultMutation.isPending}
                                             >
                                                 <Star
-                                                    className={`size-4 ${
-                                                        activeKbId === doc.id
+                                                    className={`size-4 ${activeKbId === doc.id
                                                             ? "fill-yellow-400 text-yellow-400"
                                                             : "text-gray-300 hover:text-yellow-400"
-                                                    }`}
+                                                        }`}
                                                 />
                                             </Button>
                                             {activeKbId === doc.id && (
@@ -391,7 +389,7 @@ function KnowledgeBase() {
                                             <Button
                                                 variant="ghost"
                                                 size="icon-sm"
-                                                title={doc.is_active ? "Pasife al" : "Aktif et"}
+                                                title={doc.is_active ? "Deactivate" : "Activate"}
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     toggleMutation.mutate({
@@ -401,20 +399,19 @@ function KnowledgeBase() {
                                                 }}
                                             >
                                                 <Power
-                                                    className={`size-4 ${
-                                                        doc.is_active
+                                                    className={`size-4 ${doc.is_active
                                                             ? "text-green-600"
                                                             : "text-gray-400"
-                                                    }`}
+                                                        }`}
                                                 />
                                             </Button>
                                             <Button
                                                 variant="ghost"
                                                 size="icon-sm"
-                                                title="Sil"
+                                                title="Delete"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
-                                                    if (confirm(`"${doc.title}" silinecek. Emin misin?`))
+                                                    if (confirm(`"${doc.title}" will be deleted. Are you sure?`))
                                                         deleteMutation.mutate(doc.id);
                                                 }}
                                                 className="text-red-500 hover:text-red-700"
@@ -436,11 +433,11 @@ function KnowledgeBase() {
                     {isLoadingDoc ? (
                         <div className="flex flex-col items-center justify-center py-12">
                             <Loader2 className="size-8 text-blue-500 mb-3 animate-spin" />
-                            <p className="text-sm text-gray-500">Doküman yükleniyor…</p>
+                            <p className="text-sm text-gray-500">Loading document…</p>
                         </div>
                     ) : !fullDoc ? (
                         <div className="py-12 text-center text-sm text-red-500">
-                            Doküman bulunamadı.
+                            Document not found.
                         </div>
                     ) : isEditing ? (
                         /* ── EDIT MODE ─────────────────────────────────────────── */
@@ -448,10 +445,10 @@ function KnowledgeBase() {
                             <DialogHeader>
                                 <DialogTitle className="flex items-center gap-2">
                                     <Pencil className="size-4" />
-                                    Doküman Düzenle
+                                    Edit Document
                                 </DialogTitle>
                                 <DialogDescription>
-                                    İçeriği düzenle ve kaydet. Kaydettiğinde chunk&apos;lar ve embedding&apos;ler yeniden oluşturulur.
+                                    Edit and save. Chunks and embeddings will be regenerated on save.
                                 </DialogDescription>
                             </DialogHeader>
                             <div className="flex flex-col gap-3">
@@ -459,7 +456,7 @@ function KnowledgeBase() {
                                     type="text"
                                     value={editTitle}
                                     onChange={(e) => setEditTitle(e.target.value)}
-                                    placeholder="Başlık"
+                                    placeholder="Title"
                                     className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 />
                                 <select
@@ -488,7 +485,7 @@ function KnowledgeBase() {
                                     onClick={handleCancelEditing}
                                     disabled={updateMutation.isPending}
                                 >
-                                    İptal
+                                    Cancel
                                 </Button>
                                 <Button
                                     type="button"
@@ -504,10 +501,10 @@ function KnowledgeBase() {
                                     {updateMutation.isPending ? (
                                         <>
                                             <Loader2 className="size-4 animate-spin" />
-                                            Kaydediliyor...
+                                            Saving...
                                         </>
                                     ) : (
-                                        "Kaydet"
+                                        "Save"
                                     )}
                                 </Button>
                             </DialogFooter>
@@ -528,7 +525,7 @@ function KnowledgeBase() {
                                         {new Date(fullDoc.created_at).toLocaleDateString()}
                                     </span>
                                     <span className={`text-xs font-medium ${fullDoc.is_active ? "text-green-600" : "text-gray-400"}`}>
-                                        {fullDoc.is_active ? "Aktif" : "Pasif"}
+                                        {fullDoc.is_active ? "Active" : "Inactive"}
                                     </span>
                                 </DialogDescription>
                             </DialogHeader>
@@ -544,7 +541,7 @@ function KnowledgeBase() {
                                     size="sm"
                                     onClick={handleCloseDialog}
                                 >
-                                    Kapat
+                                    Close
                                 </Button>
                                 <Button
                                     type="button"
@@ -553,7 +550,7 @@ function KnowledgeBase() {
                                     className="flex items-center gap-2"
                                 >
                                     <Pencil className="size-4" />
-                                    Düzenle
+                                    Edit
                                 </Button>
                             </DialogFooter>
                         </>
