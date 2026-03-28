@@ -17,6 +17,7 @@ import { handleTranscriptWebhook } from "./transcript_webhook";
 import { bot_settings_get } from "./bot_settings";
 import { chunkText, createEmbeddings } from "./knowledge_base";
 import { buildBotMetadataMap } from "./notes";
+import { cleanTranscript } from "../lib/cleanTranscript";
 
 // ─── Bot Type ───────────────────────────────────────────────
 type BotType = "recording" | "voice_agent";
@@ -407,6 +408,17 @@ async function handleBotDone(body: any): Promise<void> {
         );
       }
     }
+  }
+
+  // Step 3b: LLM transcript cleaning — fix ASR hallucinations via Claude Haiku
+  // Runs after utterances are saved, before marking done. Non-blocking on error.
+  try {
+    await cleanTranscript(botId);
+  } catch (err) {
+    console.error(
+      `[handleBotDone] cleanTranscript failed for bot ${botId} — continuing:`,
+      err,
+    );
   }
 
   // Step 4: Mark the meeting as done (runs regardless of transcript availability)

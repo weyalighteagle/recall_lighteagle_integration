@@ -25,4 +25,7 @@ export const EnvSchema = z.object({
     // Clerk Auth
     CLERK_PUBLISHABLE_KEY: z.string(),
     CLERK_SECRET_KEY: z.string(),
+
+    // Anthropic
+    ANTHROPIC_API_KEY: z.string().min(1),
 });
