@@ -9,11 +9,14 @@ import {
 } from "../../schemas/CalendarEventArtifactSchema";
 import { CalendarSyncEventsEventSchema } from "../../schemas/CalendarSyncEventsEventSchema";
 import { CalendarUpdateEventSchema } from "../../schemas/CalendarUpdateEventSchema";
+import { createHash } from "crypto";
 import { env } from "../config/env";
 import { fetch_with_retry } from "../fetch_with_retry";
 import { supabase } from "../config/supabase";
 import { handleTranscriptWebhook } from "./transcript_webhook";
 import { bot_settings_get } from "./bot_settings";
+import { chunkText, createEmbeddings } from "./knowledge_base";
+import { buildBotMetadataMap } from "./notes";
 
 // ─── Bot Type ───────────────────────────────────────────────
 type BotType = "recording" | "voice_agent";
@@ -427,6 +430,150 @@ async function handleBotDone(body: any): Promise<void> {
       err,
     );
   }
+  // Step 5: Auto-ingest transcript into Knowledge Base (non-blocking)
+  // This enables the voice agent to answer questions about past meetings
+  try {
+    const { data: allUtterances } = await supabase
+      .from("utterances")
+      .select("speaker, words, timestamp")
+      .eq("bot_id", botId)
+      .order("timestamp", { ascending: true });
+
+    if (allUtterances && allUtterances.length > 0) {
+      // Build transcript text with speaker labels
+      const transcriptText = allUtterances
+        .map((row) => {
+          const text = Array.isArray(row.words)
+            ? row.words.map((w: any) => w.text).join(" ")
+            : "";
+          return `${row.speaker}: ${text}`;
+        })
+        .join("\n");
+
+      // Skip very short transcripts (likely failed recordings)
+      if (transcriptText.length < 100) {
+        console.log(
+          `[handleBotDone] Transcript too short (${transcriptText.length} chars) — skipping KB ingest`,
+        );
+      } else {
+        // Dedup check using content hash
+        const contentHash = createHash("sha256")
+          .update(transcriptText)
+          .digest("hex");
+        const { data: existing } = await supabase
+          .from("kb_documents")
+          .select("id")
+          .eq("content_hash", contentHash)
+          .maybeSingle();
+
+        if (existing) {
+          console.log(
+            `[handleBotDone] KB doc already exists for bot ${botId} (hash match) — skipping`,
+          );
+        } else {
+          // Build a rich title: "Meeting Title — 27 Mart 2026 Cuma — Gülfem, Yiğit"
+          const participants = [
+            ...new Set(allUtterances.map((r) => r.speaker)),
+          ].filter(
+            (name) =>
+              name !== "WEYA Voice Agent" &&
+              name !== "WEYA by Light Eagle" &&
+              name !== "Unknown",
+          );
+
+          const meetingDate = new Date(allUtterances[0].timestamp);
+          const dateStr = meetingDate.toLocaleDateString("tr-TR", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            weekday: "long",
+          });
+
+          // Try to get calendar title
+          let calendarTitle = "Toplantı";
+          try {
+            const metaMap = await buildBotMetadataMap([botId]);
+            const meta = metaMap.get(botId);
+            if (meta?.title) calendarTitle = meta.title;
+          } catch (metaErr) {
+            console.error(
+              `[handleBotDone] Failed to get calendar title for KB ingest:`,
+              metaErr,
+            );
+          }
+
+          const docTitle = participants.length > 0
+            ? `${calendarTitle} — ${dateStr} — ${participants.join(", ")}`
+            : `${calendarTitle} — ${dateStr}`;
+
+          // Get transcripts category
+          const { data: cat } = await supabase
+            .from("kb_categories")
+            .select("id")
+            .eq("name", "transcripts")
+            .single();
+
+          if (!cat) {
+            console.error(
+              `[handleBotDone] 'transcripts' category not found — run migration first`,
+            );
+          } else {
+            // Create KB document
+            const { data: doc, error: docErr } = await supabase
+              .from("kb_documents")
+              .insert({
+                title: docTitle,
+                category_id: cat.id,
+                source_type: "transcript",
+                content_hash: contentHash,
+                metadata: { botId, meetingDate: meetingDate.toISOString() },
+              })
+              .select("id")
+              .single();
+
+            if (docErr) {
+              console.error(`[handleBotDone] KB doc insert failed:`, docErr);
+            } else {
+              // Chunk and embed
+              const chunks = chunkText(transcriptText);
+              const embeddings = await createEmbeddings(chunks);
+
+              const chunkRows = chunks.map((chunk, i) => ({
+                document_id: doc.id,
+                chunk_index: i,
+                content: chunk,
+                token_count: Math.ceil(chunk.length / 4),
+                embedding: JSON.stringify(embeddings[i]),
+              }));
+
+              const { error: chunkErr } = await supabase
+                .from("kb_chunks")
+                .insert(chunkRows);
+
+              if (chunkErr) {
+                console.error(
+                  `[handleBotDone] KB chunks insert failed:`,
+                  chunkErr,
+                );
+              } else {
+                console.log(
+                  `[handleBotDone] ✅ Auto-ingested to KB: "${docTitle}" (${chunks.length} chunks, ${transcriptText.length} chars)`,
+                );
+              }
+            }
+          }
+        }
+      }
+    } else {
+      console.log(
+        `[handleBotDone] No utterances for bot ${botId} — skipping KB ingest`,
+      );
+    }
+  } catch (kbErr) {
+    // KB ingest failure must NEVER break the webhook — Recall expects 200
+    console.error(`[handleBotDone] KB auto-ingest failed (non-fatal):`, kbErr);
+  }
+
   console.log(
     `[handleBotDone] ── END bot_id=${botId} ───────────────────────────────`,
   );
