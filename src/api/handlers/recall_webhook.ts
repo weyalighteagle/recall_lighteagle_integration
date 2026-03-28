@@ -765,7 +765,10 @@ export async function schedule_bot_for_calendar_event(args: {
       recording_config: {
         transcript: {
           provider: {
-            recallai_streaming: {},
+            recallai_streaming: {
+              language: "tr",
+              key_terms: ["WEYA", "Heval", "Gulfem", "Yigit", "Mehmet Cem", "Vercel", "Clerk", "JWT", "GitHub", "TypeScript", "pull request", "deploy", "webhook"]
+            },
           },
           diarization: {
             use_separate_streams_when_available: true,
@@ -790,7 +793,12 @@ export async function schedule_bot_for_calendar_event(args: {
       // meeting_url and start_time is automatically updated by Recall when we call the schedule bot for calendar event endpoint.
       recording_config: {
         transcript: {
-          provider: { recallai_streaming: {} },
+          provider: {
+            recallai_streaming: {
+              language: "tr",
+              key_terms: ["WEYA", "Heval", "Gulfem", "Yigit", "Mehmet Cem", "Vercel", "Clerk", "JWT", "GitHub", "TypeScript", "pull request", "deploy", "webhook"]
+            },
+          },
         },
         realtime_endpoints: [
           {
