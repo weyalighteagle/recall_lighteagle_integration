@@ -411,9 +411,15 @@ async function handleBotDone(body: any): Promise<void> {
   }
 
   // Step 3b: LLM transcript cleaning — fix ASR hallucinations via Claude Haiku
-  // Runs after utterances are saved, before marking done. Non-blocking on error.
+  // Pre-fetch utterances here to avoid Supabase connection pool race condition
+  // where cleanTranscript would query a connection that hasn't seen the recent inserts.
   try {
-    await cleanTranscript(botId);
+    const { data: utterancesForCleaning } = await supabase
+      .from("utterances")
+      .select("id, speaker, words")
+      .eq("bot_id", botId)
+      .order("created_at");
+    await cleanTranscript(botId, utterancesForCleaning ?? undefined);
   } catch (err) {
     console.error(
       `[handleBotDone] cleanTranscript failed for bot ${botId} — continuing:`,

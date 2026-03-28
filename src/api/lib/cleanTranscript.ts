@@ -16,11 +16,7 @@ Rules:
 
 const CHUNK_SIZE = 50; // utterances per Claude call — safe for any meeting length
 
-type Utterance = {
-  id: string;
-  speaker: string;
-  text: string;
-};
+type Utterance = { id: string; speaker: string; text: string };
 
 async function cleanChunk(chunk: Utterance[]): Promise<Utterance[]> {
   const transcriptString = chunk
@@ -69,33 +65,12 @@ async function cleanChunk(chunk: Utterance[]): Promise<Utterance[]> {
   });
 }
 
-export async function cleanTranscript(botId: string): Promise<void> {
-  console.log(`[cleanTranscript] START bot_id=${botId}`);
-
-  // 1. Fetch all utterances for this bot
-  const { data: utterances, error } = await supabase
-    .from("utterances")
-    .select("id, speaker, words")
-    .eq("bot_id", botId)
-    .order("created_at");
-
-  if (error || !utterances || utterances.length === 0) {
-    console.warn(`[cleanTranscript] no utterances found for bot ${botId}`);
-    return;
-  }
-
-  // 2. Build flat array of utterances with joined text
-  const lines: Utterance[] = utterances.map((u) => ({
-    id: u.id as string,
-    speaker: u.speaker as string,
-    text: (u.words as any[]).map((w) => w.text).join(" ").trim(),
-  }));
-
+async function processAndUpdate(botId: string, lines: Utterance[]): Promise<void> {
   console.log(
     `[cleanTranscript] ${lines.length} utterances — processing in chunks of ${CHUNK_SIZE}`,
   );
 
-  // 3. Process in chunks — handles meetings of any length safely
+  // Process in chunks — handles meetings of any length safely
   const allCleaned: Utterance[] = [];
   for (let i = 0; i < lines.length; i += CHUNK_SIZE) {
     const chunk = lines.slice(i, i + CHUNK_SIZE);
@@ -106,7 +81,7 @@ export async function cleanTranscript(botId: string): Promise<void> {
     allCleaned.push(...cleanedChunk);
   }
 
-  // 4. Update Supabase — only rows where text actually changed or was removed
+  // Update Supabase — only rows where text actually changed or was removed
   let updatedCount = 0;
   let removedCount = 0;
 
@@ -143,4 +118,43 @@ export async function cleanTranscript(botId: string): Promise<void> {
   console.log(
     `[cleanTranscript] END bot_id=${botId} — ${updatedCount} corrected, ${removedCount} hallucinations removed`,
   );
+}
+
+export async function cleanTranscript(
+  botId: string,
+  prefetchedUtterances?: Array<{ id: string; speaker: string; words: any[] }>
+): Promise<void> {
+  console.log(`[cleanTranscript] START bot_id=${botId}`);
+
+  let lines: Utterance[];
+
+  if (prefetchedUtterances && prefetchedUtterances.length > 0) {
+    // Use pre-fetched utterances — avoids Supabase connection pool race condition
+    console.log(`[cleanTranscript] using ${prefetchedUtterances.length} pre-fetched utterances`);
+    lines = prefetchedUtterances.map((u) => ({
+      id: u.id as string,
+      speaker: u.speaker as string,
+      text: (u.words as any[]).map((w) => w.text).join(" ").trim(),
+    }));
+  } else {
+    // Fallback: fetch from Supabase directly
+    const { data: utterances, error } = await supabase
+      .from("utterances")
+      .select("id, speaker, words")
+      .eq("bot_id", botId)
+      .order("created_at");
+
+    if (error || !utterances || utterances.length === 0) {
+      console.warn(`[cleanTranscript] no utterances found for bot ${botId}`);
+      return;
+    }
+
+    lines = utterances.map((u) => ({
+      id: u.id as string,
+      speaker: u.speaker as string,
+      text: (u.words as any[]).map((w) => w.text).join(" ").trim(),
+    }));
+  }
+
+  await processAndUpdate(botId, lines);
 }
