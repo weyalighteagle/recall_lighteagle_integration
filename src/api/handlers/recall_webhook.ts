@@ -766,8 +766,24 @@ export async function schedule_bot_for_calendar_event(args: {
         transcript: {
           provider: {
             recallai_streaming: {
-              language: "tr",
-              key_terms: ["WEYA", "Heval", "Gulfem", "Yigit", "Mehmet Cem", "Vercel", "Clerk", "JWT", "GitHub", "TypeScript", "pull request", "deploy", "webhook"]
+              language: "auto",
+              key_terms: [
+                "WEYA",
+                "Light Eagle",
+                "Onur",
+                "Heval",
+                "Gulfem",
+                "Yigit",
+                "Mehmet Cem",
+                "Vercel",
+                "Clerk",
+                "JWT",
+                "GitHub",
+                "TypeScript",
+                "pull request",
+                "deploy",
+                "webhook",
+              ],
             },
           },
           diarization: {
@@ -795,8 +811,22 @@ export async function schedule_bot_for_calendar_event(args: {
         transcript: {
           provider: {
             recallai_streaming: {
-              language: "tr",
-              key_terms: ["WEYA", "Heval", "Gulfem", "Yigit", "Mehmet Cem", "Vercel", "Clerk", "JWT", "GitHub", "TypeScript", "pull request", "deploy", "webhook"]
+              language: "auto",
+              key_terms: [
+                "WEYA",
+                "Heval",
+                "Gulfem",
+                "Yigit",
+                "Mehmet Cem",
+                "Vercel",
+                "Clerk",
+                "JWT",
+                "GitHub",
+                "TypeScript",
+                "pull request",
+                "deploy",
+                "webhook",
+              ],
             },
           },
         },
