@@ -56,6 +56,7 @@ export async function kb_list(): Promise<{ documents: any[] }> {
     const { data, error } = await supabase
         .from("kb_documents")
         .select("id, title, source_type, is_active, created_at, category_id, kb_categories(name)")
+        .neq("source_type", "transcript")
         .order("created_at", { ascending: false });
 
     if (error) throw new Error(error.message);
