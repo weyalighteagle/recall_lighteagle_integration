@@ -65,7 +65,27 @@ async function cleanChunk(chunk: Utterance[]): Promise<Utterance[]> {
   });
 }
 
-async function processAndUpdate(botId: string, lines: Utterance[]): Promise<void> {
+export async function cleanTranscript(botId: string): Promise<void> {
+  console.log(`[cleanTranscript] START bot_id=${botId}`);
+
+  const { data: utterances, error } = await supabase
+    .from("utterances")
+    .select("id, speaker, words")
+    .eq("bot_id", botId)
+    .order("created_at");
+
+  if (error || !utterances || utterances.length === 0) {
+    console.warn(`[cleanTranscript] no utterances found for bot ${botId}`);
+    return;
+  }
+
+  // Build flat array of utterances with joined text
+  const lines: Utterance[] = utterances.map((u) => ({
+    id: u.id as string,
+    speaker: u.speaker as string,
+    text: (u.words as any[]).map((w) => w.text).join(" ").trim(),
+  }));
+
   console.log(
     `[cleanTranscript] ${lines.length} utterances — processing in chunks of ${CHUNK_SIZE}`,
   );
@@ -118,43 +138,4 @@ async function processAndUpdate(botId: string, lines: Utterance[]): Promise<void
   console.log(
     `[cleanTranscript] END bot_id=${botId} — ${updatedCount} corrected, ${removedCount} hallucinations removed`,
   );
-}
-
-export async function cleanTranscript(
-  botId: string,
-  prefetchedUtterances?: Array<{ id: string; speaker: string; words: any[] }>
-): Promise<void> {
-  console.log(`[cleanTranscript] START bot_id=${botId}`);
-
-  let lines: Utterance[];
-
-  if (prefetchedUtterances && prefetchedUtterances.length > 0) {
-    // Use pre-fetched utterances — avoids Supabase connection pool race condition
-    console.log(`[cleanTranscript] using ${prefetchedUtterances.length} pre-fetched utterances`);
-    lines = prefetchedUtterances.map((u) => ({
-      id: u.id as string,
-      speaker: u.speaker as string,
-      text: (u.words as any[]).map((w) => w.text).join(" ").trim(),
-    }));
-  } else {
-    // Fallback: fetch from Supabase directly
-    const { data: utterances, error } = await supabase
-      .from("utterances")
-      .select("id, speaker, words")
-      .eq("bot_id", botId)
-      .order("created_at");
-
-    if (error || !utterances || utterances.length === 0) {
-      console.warn(`[cleanTranscript] no utterances found for bot ${botId}`);
-      return;
-    }
-
-    lines = utterances.map((u) => ({
-      id: u.id as string,
-      speaker: u.speaker as string,
-      text: (u.words as any[]).map((w) => w.text).join(" ").trim(),
-    }));
-  }
-
-  await processAndUpdate(botId, lines);
 }
