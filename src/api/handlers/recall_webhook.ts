@@ -766,7 +766,7 @@ export async function schedule_bot_for_calendar_event(args: {
         transcript: {
           provider: {
             recallai_streaming: {
-              language: "tr",
+              language: "auto",
               key_terms: [
                 "WEYA",
                 "Light Eagle",
@@ -811,7 +811,7 @@ export async function schedule_bot_for_calendar_event(args: {
         transcript: {
           provider: {
             recallai_streaming: {
-              language: "tr",
+              language: "auto",
               key_terms: [
                 "WEYA",
                 "Heval",
