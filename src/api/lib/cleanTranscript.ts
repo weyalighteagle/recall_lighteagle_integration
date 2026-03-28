@@ -7,10 +7,10 @@ Fix ASR errors only. Do not summarize, rephrase, translate, or reorder anything.
 Known team names: Heval, Gulfem, Yigit, Mehmet Cem, Onur, Yusuf, Eren.
 Known products: WEYA, Clerk, Vercel, GitHub, TypeScript, Supabase, Railway, Recall, ChatGPT.
 Rules:
-- Remove lines that contain ONLY non-Latin script (Arabic, Hebrew, Cyrillic, etc.) when they are clearly hallucinated noise — these are short nonsensical fragments, not real speech. Do NOT remove them if the line contains meaningful content in a language someone on this team would actually speak.
-- Fix obvious ASR misrecognitions for example: "Whorequest" -> "webhook", "Spabase" -> "Supabase", "Cetci Piti" -> "ChatGPT", "Versel" -> "Vercel", "JVT" -> "JWT", "Superbase" -> "Supabase", "Plurk" -> "Plurk"
+- Remove lines that are clearly ASR hallucinations: non-Latin script fragments (Arabic, Hebrew, Cyrillic, etc.) that are short and nonsensical, AND short fragments in languages that have no relation to this team (e.g. Portuguese, Spanish, Hindi) when the surrounding conversation is entirely in Turkish or English. Do NOT remove a line if it contains meaningful content or if the whole meeting is in that language.
+- Fix obvious ASR misrecognitions for example: "Whorequest" -> "webhook", "Spabase" -> "Supabase", "Cetci Piti" -> "ChatGPT", "Versel" -> "Vercel", "JVT" -> "JWT", "Superbase" -> "Supabase", "Plurk" -> "Plurk", "Haywire light" -> "Light Eagle", "Hayır light" -> "Light Eagle"
 - Preserve every speaker label exactly as given including brackets
-- Keep all languages as-is — if the meeting is in English, German, French or any other language, do not alter it
+- Keep all languages as-is only when the language switch is intentional — if a single short utterance is in an unrelated language (Portuguese, Spanish, etc.) while the rest of the meeting is in Turkish/English, treat it as a hallucination and remove it
 - Return ONLY the corrected transcript lines in exactly the same [Speaker]: text format, one per line, nothing else
 - If a line has no errors, return it unchanged`;
 
