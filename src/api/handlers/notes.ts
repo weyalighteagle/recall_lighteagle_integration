@@ -10,7 +10,7 @@ import { handleGetTranscript } from "./transcript_webhook";
  * This is used exclusively by the Notes page so we don't modify
  * the existing /api/transcripts endpoints that other modules depend on.
  */
-async function buildBotMetadataMap(botIds: string[]): Promise<
+export async function buildBotMetadataMap(botIds: string[]): Promise<
     Map<string, { title: string | null; participants: string[] }>
 > {
     const meta = new Map<string, { title: string | null; participants: string[] }>();

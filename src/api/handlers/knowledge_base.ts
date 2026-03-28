@@ -7,7 +7,7 @@ import { createHash } from "crypto";
 
 const EMBEDDING_MODEL = "text-embedding-3-small";
 
-async function createEmbeddings(texts: string[]): Promise<number[][]> {
+export async function createEmbeddings(texts: string[]): Promise<number[][]> {
     const apiKey = env.OPENAI_API_KEY;
     if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
 
@@ -31,7 +31,7 @@ async function createEmbeddings(texts: string[]): Promise<number[][]> {
     return allEmbeddings;
 }
 
-function chunkText(text: string, maxChars = 2000, overlapChars = 400): string[] {
+export function chunkText(text: string, maxChars = 2000, overlapChars = 400): string[] {
     const chunks: string[] = [];
     const paragraphs = text.split(/\n\n+/);
     let currentChunk = "";
@@ -56,6 +56,7 @@ export async function kb_list(): Promise<{ documents: any[] }> {
     const { data, error } = await supabase
         .from("kb_documents")
         .select("id, title, source_type, is_active, created_at, category_id, kb_categories(name)")
+        .neq("source_type", "transcript")
         .order("created_at", { ascending: false });
 
     if (error) throw new Error(error.message);
