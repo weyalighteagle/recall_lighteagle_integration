@@ -20,63 +20,93 @@ export async function buildBotMetadataMap(botIds: string[]): Promise<
         meta.set(id, { title: null, participants: [] });
     }
 
-    // ── 1. Get unique speakers per bot_id from utterances table ──────────
+    // Run both enrichments in parallel for speed
+    await Promise.all([
+        enrichParticipants(botIds, meta),
+        enrichTitles(botIds, meta),
+    ]);
+
+    return meta;
+}
+
+/**
+ * Get unique speakers per bot_id from the utterances table.
+ * We only need distinct speaker names, so 1000 rows is more than enough —
+ * meetings rarely have more than a few dozen unique participants.
+ */
+async function enrichParticipants(
+    botIds: string[],
+    meta: Map<string, { title: string | null; participants: string[] }>,
+): Promise<void> {
     const { data: utteranceRows } = await supabase
         .from("utterances")
         .select("bot_id, speaker")
-        .in("bot_id", botIds);
+        .in("bot_id", botIds)
+        .limit(1000);
 
-    if (utteranceRows) {
-        const speakersByBot = new Map<string, Set<string>>();
-        for (const row of utteranceRows) {
-            if (!speakersByBot.has(row.bot_id)) {
-                speakersByBot.set(row.bot_id, new Set());
-            }
-            speakersByBot.get(row.bot_id)!.add(row.speaker);
+    if (!utteranceRows || utteranceRows.length === 0) return;
+
+    const speakersByBot = new Map<string, Set<string>>();
+    for (const row of utteranceRows) {
+        if (!speakersByBot.has(row.bot_id)) {
+            speakersByBot.set(row.bot_id, new Set());
         }
-        for (const [botId, speakers] of speakersByBot) {
-            const entry = meta.get(botId);
-            if (entry) {
-                entry.participants = [...speakers];
-            }
+        speakersByBot.get(row.bot_id)!.add(row.speaker);
+    }
+    for (const [botId, speakers] of speakersByBot) {
+        const entry = meta.get(botId);
+        if (entry) {
+            entry.participants = [...speakers];
         }
     }
+}
 
-    // ── 2. Get meeting titles from calendar events via Recall API ────────
+/**
+ * Get meeting titles from calendar events via Recall API.
+ * Fetches all calendars, then fetches recent events from each calendar
+ * in parallel. Cross-references bot_ids in the events to find titles.
+ */
+async function enrichTitles(
+    botIds: string[],
+    meta: Map<string, { title: string | null; participants: string[] }>,
+): Promise<void> {
     try {
-        // Fetch all calendars, then all events from each calendar
+        const botIdSet = new Set(botIds);
         const { calendars } = await calendars_list({});
 
-        for (const calendar of calendars) {
-            // Fetch events from the last 90 days to cover recent meetings
-            const ninetyDaysAgo = new Date();
-            ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-            let nextPage: string | null = null;
-            let allEvents: any[] = [];
+        // Fetch events from all calendars in parallel
+        const eventResults = await Promise.all(
+            calendars.map(async (calendar) => {
+                try {
+                    // Fetch only the first page of events (most recent)
+                    // to keep the response fast
+                    const result = await calendar_events_list({
+                        calendar_id: calendar.id,
+                        next: null,
+                        start_time__gte: thirtyDaysAgo.toISOString(),
+                        start_time__lte: null,
+                    });
+                    return result.calendar_events;
+                } catch {
+                    return [];
+                }
+            }),
+        );
 
-            // Paginate through calendar events
-            do {
-                const result = await calendar_events_list({
-                    calendar_id: calendar.id,
-                    next: nextPage,
-                    start_time__gte: ninetyDaysAgo.toISOString(),
-                    start_time__lte: null,
-                });
-                allEvents = allEvents.concat(result.calendar_events);
-                nextPage = result.next;
-            } while (nextPage);
-
-            // Cross-reference: find events that have bots matching our bot_ids
-            for (const event of allEvents) {
+        // Flatten and cross-reference
+        for (const events of eventResults) {
+            for (const event of events) {
                 for (const bot of event.bots ?? []) {
-                    const entry = meta.get(bot.bot_id);
-                    if (entry) {
-                        // Extract title from raw calendar data
-                        // Google Calendar uses "summary", Outlook uses "subject"
-                        const title = event.raw?.summary ?? event.raw?.subject ?? null;
-                        if (title) {
-                            entry.title = title;
+                    if (botIdSet.has(bot.bot_id)) {
+                        const entry = meta.get(bot.bot_id);
+                        if (entry) {
+                            const title = event.raw?.summary ?? event.raw?.subject ?? null;
+                            if (title) {
+                                entry.title = title;
+                            }
                         }
                     }
                 }
@@ -86,8 +116,6 @@ export async function buildBotMetadataMap(botIds: string[]): Promise<
         // If calendar API fails, we still return meetings — just without titles
         console.error("Failed to fetch calendar events for notes enrichment:", err);
     }
-
-    return meta;
 }
 
 /**
@@ -152,18 +180,22 @@ export async function handleNotesList(): Promise<{
 export async function handleNoteDetail(botId: string): Promise<{
     utterances: any[];
     done: boolean;
+    bot_type: string | null;
     title: string | null;
     participants: string[];
 }> {
-    // Get the base transcript data using the existing handler
-    const transcript = await handleGetTranscript(botId);
+    // Get the base transcript data and bot_type in parallel
+    const [transcript, meetingMeta, metaMap] = await Promise.all([
+        handleGetTranscript(botId),
+        supabase.from("meetings").select("bot_type").eq("bot_id", botId).maybeSingle(),
+        buildBotMetadataMap([botId]),
+    ]);
 
-    // Enrich with metadata
-    const metaMap = await buildBotMetadataMap([botId]);
     const enrichment = metaMap.get(botId);
 
     return {
         ...transcript,
+        bot_type: meetingMeta.data?.bot_type ?? null,
         title: enrichment?.title ?? null,
         participants: enrichment?.participants ?? [],
     };
