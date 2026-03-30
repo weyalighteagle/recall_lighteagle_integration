@@ -21,12 +21,30 @@ async function buildBotMetadataMap(botIds: string[]): Promise<
     }
 
     // ── 1. Get unique speakers per bot_id from utterances table ──────────
-    const { data: utteranceRows } = await supabase
-        .from("utterances")
-        .select("bot_id, speaker")
-        .in("bot_id", botIds);
+    // Paginate to avoid Supabase's default 1000-row limit
+    const PAGE_SIZE = 1000;
+    let utteranceRows: { bot_id: string; speaker: string }[] = [];
+    let offset = 0;
+    let hasMore = true;
 
-    if (utteranceRows) {
+    while (hasMore) {
+        const { data } = await supabase
+            .from("utterances")
+            .select("bot_id, speaker")
+            .in("bot_id", botIds)
+            .range(offset, offset + PAGE_SIZE - 1);
+
+        const rows = data ?? [];
+        utteranceRows = utteranceRows.concat(rows);
+
+        if (rows.length < PAGE_SIZE) {
+            hasMore = false;
+        } else {
+            offset += PAGE_SIZE;
+        }
+    }
+
+    if (utteranceRows.length > 0) {
         const speakersByBot = new Map<string, Set<string>>();
         for (const row of utteranceRows) {
             if (!speakersByBot.has(row.bot_id)) {
