@@ -428,6 +428,7 @@ async function handleBotDone(body: any): Promise<void> {
       for (const r of recordingsForGladia) {
         const url =
           r?.media_shortcuts?.audio?.data?.download_url ??
+          r?.media_shortcuts?.video_mixed?.data?.download_url ??
           r?.media_shortcuts?.video?.data?.download_url ??
           null;
         if (url) {
