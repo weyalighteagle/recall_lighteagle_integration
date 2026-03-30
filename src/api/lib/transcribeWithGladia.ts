@@ -101,11 +101,73 @@ export async function transcribeWithGladia(
       );
     }
 
-    // Step 3: Map Gladia utterances to our schema
     const gladiaUtterances: any[] =
       result?.result?.transcription?.utterances ?? [];
 
+    // Step 3a: Fetch real-time utterances to resolve speaker names.
+    // Gladia returns numeric indices ("0", "1", "2") — we map them back to
+    // real names (e.g. "Heval Söğüt", "WEYA Voice Agent") using the
+    // real-time transcript.data rows that arrived during the meeting.
+    const { data: realtimeUtterances } = await supabase
+      .from("utterances")
+      .select("speaker, words")
+      .eq("bot_id", botId)
+      .order("timestamp", { ascending: true });
+
+    // Step 3b: Find recording start time from the earliest absolute word timestamp.
+    let recordingStartMs: number | null = null;
+    if (realtimeUtterances && realtimeUtterances.length > 0) {
+      for (const u of realtimeUtterances) {
+        const abs = (u.words as any[])?.[0]?.start_timestamp?.absolute;
+        if (abs) {
+          const ms = new Date(abs).getTime();
+          if (recordingStartMs === null || ms < recordingStartMs) {
+            recordingStartMs = ms;
+          }
+        }
+      }
+    }
+
+    // Step 3c: Build speakerMap: Gladia index → real speaker name.
+    // For each unique Gladia speaker index, find its absolute start time and
+    // match it to the closest real-time utterance by wall-clock proximity.
+    const speakerMap: Record<string, string> = {};
+    if (recordingStartMs !== null && realtimeUtterances && realtimeUtterances.length > 0) {
+      const uniqueIndices = [...new Set(gladiaUtterances.map((u: any) => String(u.speaker)))];
+
+      for (const idx of uniqueIndices) {
+        const sample = gladiaUtterances.find((u: any) => String(u.speaker) === idx);
+        if (!sample) continue;
+
+        const gladiaAbsMs = recordingStartMs + sample.start * 1000;
+
+        // Find the real-time utterance whose first word's absolute timestamp
+        // is closest to this Gladia utterance's absolute start time.
+        let bestName: string | null = null;
+        let bestDelta = Infinity;
+
+        for (const rt of realtimeUtterances) {
+          const abs = (rt.words as any[])?.[0]?.start_timestamp?.absolute;
+          if (!abs) continue;
+          const delta = Math.abs(new Date(abs).getTime() - gladiaAbsMs);
+          if (delta < bestDelta) {
+            bestDelta = delta;
+            bestName = rt.speaker as string;
+          }
+        }
+
+        if (bestName) {
+          speakerMap[idx] = bestName;
+        }
+      }
+    }
+    console.log(`[gladia] speakerMap: ${JSON.stringify(speakerMap)}`);
+
+    // Step 3d: Map Gladia utterances to our schema using resolved speaker names.
     const rows = gladiaUtterances.map((utterance: any) => {
+      const speakerIdx = String(utterance.speaker);
+      const resolvedSpeaker = speakerMap[speakerIdx] ?? utterance.speaker;
+
       const hasWordLevel =
         Array.isArray(utterance.words) && utterance.words.length > 0;
 
@@ -117,11 +179,18 @@ export async function transcribeWithGladia(
           }))
         : [{ text: utterance.transcription }];
 
+      // Compute absolute timestamp so utterances sort correctly in the UI.
+      // Fall back to raw Gladia seconds if no recording start time is available.
+      const timestamp =
+        recordingStartMs !== null
+          ? new Date(recordingStartMs + utterance.start * 1000).toISOString()
+          : new Date(utterance.start * 1000).toISOString();
+
       return {
         bot_id: botId,
-        speaker: utterance.speaker,
+        speaker: resolvedSpeaker,
         words,
-        timestamp: new Date(utterance.start * 1000).toISOString(),
+        timestamp,
       };
     });
 
