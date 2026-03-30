@@ -28,4 +28,7 @@ export const EnvSchema = z.object({
 
     // Anthropic
     ANTHROPIC_API_KEY: z.string().min(1),
+
+    // Gladia
+    GLADIA_API_KEY: z.string().min(1),
 });

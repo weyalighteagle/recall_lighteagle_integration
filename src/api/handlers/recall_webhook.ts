@@ -18,6 +18,7 @@ import { bot_settings_get } from "./bot_settings";
 import { chunkText, createEmbeddings } from "./knowledge_base";
 import { buildBotMetadataMap } from "./notes";
 import { cleanTranscript } from "../lib/cleanTranscript";
+import { transcribeWithGladia } from "../lib/transcribeWithGladia";
 
 // ─── Bot Type ───────────────────────────────────────────────
 type BotType = "recording" | "voice_agent";
@@ -191,6 +192,8 @@ async function handleBotDone(body: any): Promise<void> {
   // Step 1: Fetch bot details from Recall v1 API to get transcript download URLs
   let downloadUrls: string[] = [];
   let botName: string = "";
+  let botData: any = null;
+  let inferredBotType: string = "recording";
   try {
     const botResponse = await fetch_with_retry(
       `https://${env.RECALL_REGION}.recall.ai/api/v1/bot/${botId}/`,
@@ -209,7 +212,7 @@ async function handleBotDone(body: any): Promise<void> {
         await botResponse.text(),
       );
     } else {
-      const botData = await botResponse.json();
+      botData = await botResponse.json();
 
       // ── STEP 1 DIAGNOSTICS ──────────────────────────────────────────────────
       console.log(
@@ -249,7 +252,7 @@ async function handleBotDone(body: any): Promise<void> {
       // where these fields weren't available when the meetings row was first created.
       const botMeetingUrl: string | null = botData?.meeting_url ?? null;
       botName = botData?.bot_name ?? "";
-      const inferredBotType = botName.toUpperCase().includes("WEYA VOICE")
+      inferredBotType = botName.toUpperCase().includes("WEYA VOICE")
         ? "voice_agent"
         : "recording";
       try {
@@ -410,17 +413,42 @@ async function handleBotDone(body: any): Promise<void> {
     }
   }
 
-  // Step 3b: LLM transcript cleaning — runs 2 min after bot.done to avoid Supabase race condition
-  setTimeout(async () => {
+  // Step 3b — Gladia post-meeting transcription (voice agent only)
+  // Recording bot transcripts arrive cleanly via transcript.data — Gladia not needed.
+  if (inferredBotType === "voice_agent") {
     try {
-      await cleanTranscript(botId);
+      // Mirror the exact same pattern used in Step 1 for transcript URLs:
+      //   recordings[i].media_shortcuts.transcript.data.download_url
+      // Audio-only is preferred over video — smaller file, faster Gladia upload/processing.
+      // Fall back to video if audio shortcut is absent.
+      const recordingsForGladia: any[] = Array.isArray(botData?.recordings)
+        ? botData.recordings
+        : [];
+      let recordingUrl: string | null = null;
+      for (const r of recordingsForGladia) {
+        const url =
+          r?.media_shortcuts?.audio?.data?.download_url ??
+          r?.media_shortcuts?.video?.data?.download_url ??
+          null;
+        if (url) {
+          recordingUrl = url;
+          break;
+        }
+      }
+      console.log(`[handleBotDone] Gladia recording URL: ${recordingUrl ?? "NONE"}`);
+
+      if (recordingUrl) {
+        console.log(`[handleBotDone] Starting Gladia transcription for bot ${botId}`);
+        await transcribeWithGladia(recordingUrl, botId);
+      } else {
+        console.warn(`[handleBotDone] No recording URL found for bot ${botId} — skipping Gladia`);
+      }
     } catch (err) {
-      console.error(
-        `[handleBotDone] cleanTranscript failed for bot ${botId} — continuing:`,
-        err,
-      );
+      console.error(`[handleBotDone] Gladia step failed for bot ${botId}:`, err);
     }
-  }, 2 * 60 * 1000);
+  } else {
+    console.log(`[handleBotDone] bot_type=${inferredBotType} — skipping Gladia (recording bot uses real-time transcript)`);
+  }
 
   // Step 4: Mark the meeting as done (runs regardless of transcript availability)
   try {
