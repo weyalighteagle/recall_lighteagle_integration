@@ -180,18 +180,22 @@ export async function handleNotesList(): Promise<{
 export async function handleNoteDetail(botId: string): Promise<{
     utterances: any[];
     done: boolean;
+    bot_type: string | null;
     title: string | null;
     participants: string[];
 }> {
-    // Get the base transcript data using the existing handler
-    const transcript = await handleGetTranscript(botId);
+    // Get the base transcript data and bot_type in parallel
+    const [transcript, meetingMeta, metaMap] = await Promise.all([
+        handleGetTranscript(botId),
+        supabase.from("meetings").select("bot_type").eq("bot_id", botId).maybeSingle(),
+        buildBotMetadataMap([botId]),
+    ]);
 
-    // Enrich with metadata
-    const metaMap = await buildBotMetadataMap([botId]);
     const enrichment = metaMap.get(botId);
 
     return {
         ...transcript,
+        bot_type: meetingMeta.data?.bot_type ?? null,
         title: enrichment?.title ?? null,
         participants: enrichment?.participants ?? [],
     };
