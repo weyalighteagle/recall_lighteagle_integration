@@ -25,7 +25,6 @@ export async function transcribeWithGladia(
         body: JSON.stringify({
           audio_url: recordingUrl,
           language: "tr",
-          code_switching: true,
           diarization: true,
           custom_vocabulary: [
             "WEYA",
