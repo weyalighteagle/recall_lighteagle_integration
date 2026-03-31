@@ -440,7 +440,7 @@ async function handleBotDone(body: any): Promise<void> {
 
       if (recordingUrl) {
         console.log(`[handleBotDone] Starting Gladia transcription for bot ${botId}`);
-        await transcribeWithGladia(recordingUrl, botId, botName);
+        await transcribeWithGladia(recordingUrl, botId);
       } else {
         console.warn(`[handleBotDone] No recording URL found for bot ${botId} — skipping Gladia`);
       }
