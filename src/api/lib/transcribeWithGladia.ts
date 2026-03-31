@@ -7,7 +7,6 @@ const MAX_POLL_MS = 20 * 60 * 1_000; // 20 minutes
 export async function transcribeWithGladia(
   recordingUrl: string,
   botId: string,
-  botName: string,
 ): Promise<void> {
   try {
     console.log(
@@ -130,74 +129,24 @@ export async function transcribeWithGladia(
     }
 
     // Step 3c: Build speakerMap: Gladia index → real speaker name.
+    // For each unique Gladia speaker index, find its absolute start time and
+    // match it to the closest real-time utterance by wall-clock proximity.
     const speakerMap: Record<string, string> = {};
     if (recordingStartMs !== null && realtimeUtterances && realtimeUtterances.length > 0) {
       const uniqueIndices = [...new Set(gladiaUtterances.map((u: any) => String(u.speaker)))];
 
-      // Separate agent utterances from human utterances so they don't
-      // cross-contaminate the proximity matching.
-      const agentUtterances = realtimeUtterances.filter(
-        (u) => u.speaker === botName,
-      );
-      const humanUtterances = realtimeUtterances.filter(
-        (u) => u.speaker !== botName,
-      );
-
-      // Pre-pass: identify which Gladia speaker index belongs to the bot agent.
-      // For each unique index we compute the minimum delta across ALL of its
-      // utterances against ALL agent real-time utterances.  The index with the
-      // globally smallest minimum delta is assigned to botName.
-      if (agentUtterances.length > 0) {
-        const agentTimestampsMs: number[] = agentUtterances
-          .flatMap((u) => (u.words as any[]) ?? [])
-          .map((w: any) => w?.start_timestamp?.absolute)
-          .filter(Boolean)
-          .map((abs: string) => new Date(abs).getTime());
-
-        let agentIdx: string | null = null;
-        let agentBestDelta = Infinity;
-
-        for (const idx of uniqueIndices) {
-          const idxUtterances = gladiaUtterances.filter(
-            (u: any) => String(u.speaker) === idx,
-          );
-
-          for (const gu of idxUtterances) {
-            const gladiaAbsMs = recordingStartMs + gu.start * 1000;
-            for (const agentMs of agentTimestampsMs) {
-              const delta = Math.abs(gladiaAbsMs - agentMs);
-              if (delta < agentBestDelta) {
-                agentBestDelta = delta;
-                agentIdx = idx;
-              }
-            }
-          }
-        }
-
-        if (agentIdx !== null) {
-          speakerMap[agentIdx] = botName;
-          console.log(
-            `[gladia] agent index=${agentIdx} → "${botName}" (best delta ${agentBestDelta}ms)`,
-          );
-        }
-      }
-
-      // Human resolution: skip any index already resolved (the agent's index),
-      // and only match against human real-time utterances.
       for (const idx of uniqueIndices) {
-        if (speakerMap[idx]) continue;
-
         const sample = gladiaUtterances.find((u: any) => String(u.speaker) === idx);
         if (!sample) continue;
 
         const gladiaAbsMs = recordingStartMs + sample.start * 1000;
 
-        // Find the human real-time utterance whose first word's absolute
-        // timestamp is closest to this Gladia utterance's absolute start time.
+        // Find the real-time utterance whose first word's absolute timestamp
+        // is closest to this Gladia utterance's absolute start time.
         let bestName: string | null = null;
         let bestDelta = Infinity;
 
-        for (const rt of humanUtterances) {
+        for (const rt of realtimeUtterances) {
           const abs = (rt.words as any[])?.[0]?.start_timestamp?.absolute;
           if (!abs) continue;
           const delta = Math.abs(new Date(abs).getTime() - gladiaAbsMs);
