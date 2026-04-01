@@ -48,7 +48,7 @@ function NotesList() {
     const handleExportTranscript = async (botId: string, meetingTitle: string | null) => {
         setExportingBotId(botId);
         try {
-            const res = await fetch(`/api/transcripts/${botId}`);
+            const res = await fetch(`/api/notes/${botId}`);
             if (!res.ok) throw new Error(await res.text());
             const data: { utterances: { participant: string; words: { text: string }[]; timestamp: string }[]; done: boolean } = await res.json();
 
