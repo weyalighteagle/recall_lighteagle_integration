@@ -124,7 +124,8 @@ async function fetchCalendarBotMeta(
 ): Promise<Map<string, { title: string | null }>> {
     const meta = new Map<string, { title: string | null }>();
     try {
-        const { calendars } = await calendars_list({ platform_email: userEmail });
+        const { calendars: allCalendars } = await calendars_list({ platform_email: userEmail });
+        const calendars = allCalendars.filter((c) => c.platform_email === userEmail);
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 

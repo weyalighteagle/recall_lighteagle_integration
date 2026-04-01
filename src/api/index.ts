@@ -117,7 +117,8 @@ body=${JSON.stringify(body)}
                     case "GET": {
                         if (!await requireAuth(req, res)) return;
                         const email = (req as any).userEmail;
-                        const results = await calendars_list({ ...search_params, platform_email: email });
+                        const { calendars: allCalendars } = await calendars_list({ ...search_params, platform_email: email });
+                        const results = { calendars: allCalendars.filter((c) => c.platform_email === email) };
                         console.log(`Listed Calendars: ${JSON.stringify(results)}`);
 
                         res.writeHead(200, { "Content-Type": "application/json" });
