@@ -918,7 +918,34 @@ export async function schedule_bot_for_calendar_event(args: {
   );
   if (!response.ok) throw new Error(await response.text());
 
-  return CalendarEventSchema.parse(await response.json());
+  const updatedEvent = CalendarEventSchema.parse(await response.json());
+
+  // Pre-store the user association for each bot on this calendar event so that
+  // meetings.user_email is populated before transcript.data webhooks arrive.
+  // This lets the Notes page filter by user without a Recall API round-trip per request.
+  // ignoreDuplicates: true preserves user_email if the row already exists.
+  if (calendar.platform_email && updatedEvent.bots.length > 0) {
+    await Promise.all(
+      updatedEvent.bots.map((bot) =>
+        supabase
+          .from("meetings")
+          .upsert(
+            { bot_id: bot.bot_id, user_email: calendar.platform_email, done: false },
+            { onConflict: "bot_id", ignoreDuplicates: true },
+          )
+          .then(({ error }) => {
+            if (error) {
+              console.error(
+                `[schedule_bot] Failed to pre-store user_email for bot ${bot.bot_id}:`,
+                error,
+              );
+            }
+          }),
+      ),
+    );
+  }
+
+  return updatedEvent;
 }
 
 /**

@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/react";
 import { useQuery } from "@tanstack/react-query";
 import { Calendar, ChevronLeft, ChevronRight, Download, FileText, Loader2, Users } from "lucide-react";
 import { useState } from "react";
@@ -23,13 +24,17 @@ interface NotesResponse {
 
 function NotesList() {
     const navigate = useNavigate();
+    const { getToken } = useAuth();
     const [exportingBotId, setExportingBotId] = useState<string | null>(null);
     const [currentPage, setCurrentPage] = useState(1);
 
     const { data, isPending } = useQuery<NotesResponse>({
         queryKey: ["notes"],
         queryFn: async () => {
-            const res = await fetch("/api/notes");
+            const token = await getToken();
+            const res = await fetch("/api/notes", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
             if (!res.ok) throw new Error(await res.text());
             return res.json();
         },
@@ -48,7 +53,10 @@ function NotesList() {
     const handleExportTranscript = async (botId: string, meetingTitle: string | null) => {
         setExportingBotId(botId);
         try {
-            const res = await fetch(`/api/notes/${botId}`);
+            const token = await getToken();
+            const res = await fetch(`/api/notes/${botId}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
             if (!res.ok) throw new Error(await res.text());
             const data: { utterances: { participant: string; words: { text: string }[]; timestamp: string }[]; done: boolean } = await res.json();
 
