@@ -179,30 +179,48 @@ export async function handleNotesList(): Promise<{
     }
     const meetings = [...grouped.values()];
 
-    // Enrich ALL bot_ids (not just the grouped representative)
-    const everyBotId = rows.map((r) => r.bot_id);
-    const metaMap = await buildBotMetadataMap(everyBotId);
+    // For TITLES: only use grouped bot_ids (one per meeting) to avoid
+    // overwhelming the Recall calendar API with hundreds of bot_ids.
+    // For PARTICIPANTS: use ALL bot_ids so speakers from sibling bots are merged.
+    const groupedBotIds = meetings.map((m) => m.bot_id);
+    const everyBotId = [...new Set(rows.map((r) => r.bot_id))];
+
+    // Build title map from grouped bots only (fast — fewer calendar API calls)
+    const titleMeta = new Map<string, { title: string | null; participants: string[] }>();
+    for (const id of groupedBotIds) {
+        titleMeta.set(id, { title: null, participants: [] });
+    }
+    // Build participant map from ALL bots (fast — single Supabase query)
+    const participantMeta = new Map<string, { title: string | null; participants: string[] }>();
+    for (const id of everyBotId) {
+        participantMeta.set(id, { title: null, participants: [] });
+    }
+
+    await Promise.all([
+        enrichParticipants(everyBotId, participantMeta),
+        enrichTitles(groupedBotIds, titleMeta),
+    ]);
 
     return {
         meetings: meetings.map((m) => {
             const key = m.meeting_url ?? m.bot_id;
             const relatedBotIds = allBotIdsByKey.get(key) ?? [m.bot_id];
 
-            // Merge participants and titles from all related bots
+            // Merge participants from all related bots
             const allParticipants = new Set<string>();
-            let title: string | null = null;
-
             for (const bid of relatedBotIds) {
-                const enrichment = metaMap.get(bid);
-                if (enrichment) {
-                    enrichment.participants.forEach((p) => allParticipants.add(p));
-                    if (enrichment.title && !title) title = enrichment.title;
+                const pEntry = participantMeta.get(bid);
+                if (pEntry) {
+                    pEntry.participants.forEach((p) => allParticipants.add(p));
                 }
             }
 
+            // Title from the grouped (representative) bot
+            const titleEntry = titleMeta.get(m.bot_id);
+
             return {
                 ...m,
-                title,
+                title: titleEntry?.title ?? null,
                 participants: [...allParticipants],
             };
         }),
