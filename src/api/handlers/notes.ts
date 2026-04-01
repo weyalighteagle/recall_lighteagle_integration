@@ -159,19 +159,9 @@ export async function handleNotesList(): Promise<{
     };
     const rows: Row[] = data ?? [];
 
-    // Group by meeting_url, keeping preferred bot for display
-    // but tracking ALL bot_ids per meeting for complete enrichment
     const grouped = new Map<string, Row>();
-    const allBotIdsByKey = new Map<string, string[]>();
-
     for (const row of rows) {
         const key = row.meeting_url ?? row.bot_id;
-
-        if (!allBotIdsByKey.has(key)) {
-            allBotIdsByKey.set(key, []);
-        }
-        allBotIdsByKey.get(key)!.push(row.bot_id);
-
         const existing = grouped.get(key);
         if (!existing || row.bot_type === "voice_agent") {
             grouped.set(key, row);
@@ -179,49 +169,16 @@ export async function handleNotesList(): Promise<{
     }
     const meetings = [...grouped.values()];
 
-    // For TITLES: only use grouped bot_ids (one per meeting) to avoid
-    // overwhelming the Recall calendar API with hundreds of bot_ids.
-    // For PARTICIPANTS: use ALL bot_ids so speakers from sibling bots are merged.
-    const groupedBotIds = meetings.map((m) => m.bot_id);
-    const everyBotId = [...new Set(rows.map((r) => r.bot_id))];
-
-    // Build title map from grouped bots only (fast — fewer calendar API calls)
-    const titleMeta = new Map<string, { title: string | null; participants: string[] }>();
-    for (const id of groupedBotIds) {
-        titleMeta.set(id, { title: null, participants: [] });
-    }
-    // Build participant map from ALL bots (fast — single Supabase query)
-    const participantMeta = new Map<string, { title: string | null; participants: string[] }>();
-    for (const id of everyBotId) {
-        participantMeta.set(id, { title: null, participants: [] });
-    }
-
-    await Promise.all([
-        enrichParticipants(everyBotId, participantMeta),
-        enrichTitles(groupedBotIds, titleMeta),
-    ]);
+    const botIds = meetings.map((m) => m.bot_id);
+    const metaMap = await buildBotMetadataMap(botIds);
 
     return {
         meetings: meetings.map((m) => {
-            const key = m.meeting_url ?? m.bot_id;
-            const relatedBotIds = allBotIdsByKey.get(key) ?? [m.bot_id];
-
-            // Merge participants from all related bots
-            const allParticipants = new Set<string>();
-            for (const bid of relatedBotIds) {
-                const pEntry = participantMeta.get(bid);
-                if (pEntry) {
-                    pEntry.participants.forEach((p) => allParticipants.add(p));
-                }
-            }
-
-            // Title from the grouped (representative) bot
-            const titleEntry = titleMeta.get(m.bot_id);
-
+            const enrichment = metaMap.get(m.bot_id);
             return {
                 ...m,
-                title: titleEntry?.title ?? null,
-                participants: [...allParticipants],
+                title: enrichment?.title ?? null,
+                participants: enrichment?.participants ?? [],
             };
         }),
     };
