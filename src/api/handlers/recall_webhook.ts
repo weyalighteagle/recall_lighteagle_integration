@@ -348,25 +348,26 @@ async function handleBotDone(body: any): Promise<void> {
     `[handleBotDone] merged total: ${segments.length} segments from ${downloadUrls.length} URL(s)`,
   );
 
-  // Step 3: Supplement real-time utterances — do NOT delete existing rows.
-  // The transcript.data webhook is the primary insertion path and is already working.
-  // handleBotDone only adds utterances that are missing (e.g. bot's own audio stream
-  // which doesn't arrive via transcript.data). If real-time rows already exist for this
-  // bot_id, we skip the insert entirely to avoid duplicates.
+  // Step 3: Supplement real-time utterances with the async (recorded) transcript.
+  // The transcript.data webhook is the primary path, but it can miss utterances
+  // due to network issues or delivery failures. The recorded transcript from
+  // Recall is the authoritative source. If it has MORE segments than what we
+  // received in real-time, replace with the complete version.
   if (segments.length > 0) {
-    // Check whether real-time utterances already exist for this bot
     const { count: existingCount } = await supabase
       .from("utterances")
       .select("id", { count: "exact", head: true })
       .eq("bot_id", botId);
 
-    if ((existingCount ?? 0) > 0) {
+    const realTimeCount = existingCount ?? 0;
+
+    if (realTimeCount > 0 && segments.length <= realTimeCount) {
       console.log(
-        `[handleBotDone] ${existingCount} real-time utterances already exist for bot ${botId} — skipping async insert to avoid overwrite`,
+        `[handleBotDone] real-time has ${realTimeCount} rows, async has ${segments.length} — real-time is complete, skipping`,
       );
     } else {
-      // No real-time rows arrived (e.g. transcript.data webhooks were missed).
-      // Safe to insert the async transcript as a fallback.
+      // Either no real-time rows, or async transcript has more segments.
+      // Replace with the complete recorded version.
       try {
         const rows = segments.map((seg) => {
           const raw = seg.participant?.name ?? seg.speaker ?? "";
@@ -385,9 +386,27 @@ async function handleBotDone(body: any): Promise<void> {
         });
 
         const speakers = [...new Set(rows.map((r) => r.speaker))];
-        console.log(
-          `[handleBotDone] no real-time rows found — inserting ${rows.length} async utterances, speakers: ${JSON.stringify(speakers)}`,
-        );
+
+        if (realTimeCount > 0) {
+          // Delete incomplete real-time rows before inserting complete version
+          console.log(
+            `[handleBotDone] async has ${segments.length} segments vs ${realTimeCount} real-time — replacing with complete transcript`,
+          );
+          const { error: deleteError } = await supabase
+            .from("utterances")
+            .delete()
+            .eq("bot_id", botId);
+          if (deleteError) {
+            console.error(
+              `[handleBotDone] failed to delete old utterances for bot ${botId}:`,
+              deleteError,
+            );
+          }
+        } else {
+          console.log(
+            `[handleBotDone] no real-time rows — inserting ${rows.length} async utterances`,
+          );
+        }
 
         const { error: insertError, data: insertData } = await supabase
           .from("utterances")
@@ -401,7 +420,7 @@ async function handleBotDone(body: any): Promise<void> {
           );
         } else {
           console.log(
-            `[handleBotDone] Supabase insert OK — ${insertData?.length ?? rows.length} rows written for bot ${botId}`,
+            `[handleBotDone] Supabase insert OK — ${insertData?.length ?? rows.length} rows written for bot ${botId}, speakers: ${JSON.stringify(speakers)}`,
           );
         }
       } catch (err) {
@@ -899,7 +918,34 @@ export async function schedule_bot_for_calendar_event(args: {
   );
   if (!response.ok) throw new Error(await response.text());
 
-  return CalendarEventSchema.parse(await response.json());
+  const updatedEvent = CalendarEventSchema.parse(await response.json());
+
+  // Pre-store the user association for each bot on this calendar event so that
+  // meetings.user_email is populated before transcript.data webhooks arrive.
+  // This lets the Notes page filter by user without a Recall API round-trip per request.
+  // ignoreDuplicates: true preserves user_email if the row already exists.
+  if (calendar.platform_email && updatedEvent.bots.length > 0) {
+    await Promise.all(
+      updatedEvent.bots.map((bot) =>
+        supabase
+          .from("meetings")
+          .upsert(
+            { bot_id: bot.bot_id, user_email: calendar.platform_email, done: false },
+            { onConflict: "bot_id", ignoreDuplicates: true },
+          )
+          .then(({ error }) => {
+            if (error) {
+              console.error(
+                `[schedule_bot] Failed to pre-store user_email for bot ${bot.bot_id}:`,
+                error,
+              );
+            }
+          }),
+      ),
+    );
+  }
+
+  return updatedEvent;
 }
 
 /**

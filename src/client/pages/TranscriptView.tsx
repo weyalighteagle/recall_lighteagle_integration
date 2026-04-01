@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Bot, Calendar, Download, FileText, Loader2, MessageSquare, User, Users } from "lucide-react";
@@ -27,11 +28,15 @@ interface NoteDetailResponse {
 function TranscriptView() {
     const { botId } = useParams<{ botId: string }>();
     const navigate = useNavigate();
+    const { getToken } = useAuth();
 
     const { data, isPending, isError } = useQuery<NoteDetailResponse>({
         queryKey: ["note-detail", botId],
         queryFn: async () => {
-            const res = await fetch(`/api/notes/${botId}`);
+            const token = await getToken();
+            const res = await fetch(`/api/notes/${botId}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
             if (!res.ok) throw new Error(await res.text());
             return res.json();
         },

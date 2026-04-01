@@ -237,7 +237,10 @@ body=${JSON.stringify(body)}
             }
             case "/api/bot/join": {
                 if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
+                if (!await requireAuth(req, res)) return;
                 if (!body?.meeting_url) throw new Error("meeting_url is required");
+
+                const userEmail: string = (req as any).userEmail;
 
                 // Use persisted bot_type from settings when caller doesn't specify one
                 let bot_type = body.bot_type;
@@ -246,7 +249,7 @@ body=${JSON.stringify(body)}
                     bot_type = settings.bot_mode === "voice_agent" ? "voice_agent" : "recording";
                 }
 
-                const result = await bot_join({ ...body, bot_type });
+                const result = await bot_join({ ...body, bot_type, user_email: userEmail });
                 console.log(`Ad-hoc bot created: ${JSON.stringify(result)}`);
 
                 res.writeHead(200, { "Content-Type": "application/json" });
@@ -380,8 +383,10 @@ body=${JSON.stringify(body)}
 
                 // GET /api/notes — enriched meetings list (titles + participants) for Notes page
                 if (pathname === "/api/notes" && req.method?.toUpperCase() === "GET") {
-                    const result = await handleNotesList();
-                    console.log(`Listed Notes: ${result.meetings.length} meetings`);
+                    if (!await requireAuth(req, res)) return;
+                    const userEmail: string = (req as any).userEmail;
+                    const result = await handleNotesList(userEmail);
+                    console.log(`Listed Notes for ${userEmail}: ${result.meetings.length} meetings`);
 
                     res.writeHead(200, {
                         "Content-Type": "application/json",
@@ -393,10 +398,12 @@ body=${JSON.stringify(body)}
 
                 // GET /api/notes/:botId — enriched transcript for Notes detail page
                 if (pathname.startsWith("/api/notes/") && req.method?.toUpperCase() === "GET") {
+                    if (!await requireAuth(req, res)) return;
+                    const userEmail: string = (req as any).userEmail;
                     const botId = pathname.replace("/api/notes/", "");
                     if (!botId) throw new Error("botId is required");
 
-                    const result = await handleNoteDetail(botId);
+                    const result = await handleNoteDetail(botId, userEmail);
                     console.log(`Retrieved note detail for bot ${botId}: ${result.utterances.length} utterances`);
 
                     res.writeHead(200, {
@@ -495,7 +502,8 @@ body=${JSON.stringify(body)}
         }
     } catch (error) {
         console.error(`${req.method} ${req.url}`, error);
-        res.writeHead(400, { "Content-Type": "application/json" });
+        const statusCode = (error as any)?.statusCode ?? 400;
+        res.writeHead(statusCode, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: error instanceof Error ? error.message : error }));
     }
 });
