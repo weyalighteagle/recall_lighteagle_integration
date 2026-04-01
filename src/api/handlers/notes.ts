@@ -1,7 +1,6 @@
 import { supabase } from "../config/supabase";
 import { calendars_list } from "./calendars_list";
 import { calendar_events_list } from "./calendar_events_list";
-import { handleGetTranscript } from "./transcript_webhook";
 
 /**
  * Build a map of bot_id → { title, participants } by cross-referencing
@@ -31,23 +30,34 @@ export async function buildBotMetadataMap(botIds: string[]): Promise<
 
 /**
  * Get unique speakers per bot_id from the utterances table.
- * We only need distinct speaker names, so 1000 rows is more than enough —
- * meetings rarely have more than a few dozen unique participants.
+ * Uses pagination to handle large numbers of bots/utterances.
  */
 async function enrichParticipants(
     botIds: string[],
     meta: Map<string, { title: string | null; participants: string[] }>,
 ): Promise<void> {
-    const { data: utteranceRows } = await supabase
-        .from("utterances")
-        .select("bot_id, speaker")
-        .in("bot_id", botIds)
-        .limit(1000);
+    const PAGE_SIZE = 1000;
+    let allRows: { bot_id: string; speaker: string }[] = [];
+    let offset = 0;
+    let hasMore = true;
 
-    if (!utteranceRows || utteranceRows.length === 0) return;
+    while (hasMore) {
+        const { data } = await supabase
+            .from("utterances")
+            .select("bot_id, speaker")
+            .in("bot_id", botIds)
+            .range(offset, offset + PAGE_SIZE - 1);
+
+        const rows = data ?? [];
+        allRows = allRows.concat(rows);
+        hasMore = rows.length === PAGE_SIZE;
+        offset += PAGE_SIZE;
+    }
+
+    if (allRows.length === 0) return;
 
     const speakersByBot = new Map<string, Set<string>>();
-    for (const row of utteranceRows) {
+    for (const row of allRows) {
         if (!speakersByBot.has(row.bot_id)) {
             speakersByBot.set(row.bot_id, new Set());
         }
@@ -121,6 +131,8 @@ async function enrichTitles(
 /**
  * GET /api/notes
  * Returns all meetings enriched with calendar titles and participant names.
+ * When multiple bots exist for the same meeting (e.g. recording + voice_agent),
+ * participants are merged from ALL bots so no speakers are lost.
  */
 export async function handleNotesList(): Promise<{
     meetings: {
@@ -133,7 +145,6 @@ export async function handleNotesList(): Promise<{
         participants: string[];
     }[];
 }> {
-    // Fetch meetings (same grouping logic as /api/transcripts)
     const { data } = await supabase
         .from("meetings")
         .select("bot_id, bot_type, meeting_url, done, created_at")
@@ -147,9 +158,20 @@ export async function handleNotesList(): Promise<{
         created_at: string;
     };
     const rows: Row[] = data ?? [];
+
+    // Group by meeting_url, keeping preferred bot for display
+    // but tracking ALL bot_ids per meeting for complete enrichment
     const grouped = new Map<string, Row>();
+    const allBotIdsByKey = new Map<string, string[]>();
+
     for (const row of rows) {
         const key = row.meeting_url ?? row.bot_id;
+
+        if (!allBotIdsByKey.has(key)) {
+            allBotIdsByKey.set(key, []);
+        }
+        allBotIdsByKey.get(key)!.push(row.bot_id);
+
         const existing = grouped.get(key);
         if (!existing || row.bot_type === "voice_agent") {
             grouped.set(key, row);
@@ -157,17 +179,31 @@ export async function handleNotesList(): Promise<{
     }
     const meetings = [...grouped.values()];
 
-    // Enrich with titles and participants
-    const botIds = meetings.map((m) => m.bot_id);
-    const metaMap = await buildBotMetadataMap(botIds);
+    // Enrich ALL bot_ids (not just the grouped representative)
+    const everyBotId = rows.map((r) => r.bot_id);
+    const metaMap = await buildBotMetadataMap(everyBotId);
 
     return {
         meetings: meetings.map((m) => {
-            const enrichment = metaMap.get(m.bot_id);
+            const key = m.meeting_url ?? m.bot_id;
+            const relatedBotIds = allBotIdsByKey.get(key) ?? [m.bot_id];
+
+            // Merge participants and titles from all related bots
+            const allParticipants = new Set<string>();
+            let title: string | null = null;
+
+            for (const bid of relatedBotIds) {
+                const enrichment = metaMap.get(bid);
+                if (enrichment) {
+                    enrichment.participants.forEach((p) => allParticipants.add(p));
+                    if (enrichment.title && !title) title = enrichment.title;
+                }
+            }
+
             return {
                 ...m,
-                title: enrichment?.title ?? null,
-                participants: enrichment?.participants ?? [],
+                title,
+                participants: [...allParticipants],
             };
         }),
     };
@@ -176,27 +212,102 @@ export async function handleNotesList(): Promise<{
 /**
  * GET /api/notes/:botId
  * Returns the transcript for a bot, enriched with meeting title and participants.
+ * When multiple bots exist for the same meeting (same meeting_url),
+ * utterances from ALL bots are merged into a single chronological transcript.
  */
 export async function handleNoteDetail(botId: string): Promise<{
     utterances: any[];
     done: boolean;
-    bot_type: string | null;
     title: string | null;
     participants: string[];
 }> {
-    // Get the base transcript data and bot_type in parallel
-    const [transcript, meetingMeta, metaMap] = await Promise.all([
-        handleGetTranscript(botId),
-        supabase.from("meetings").select("bot_type").eq("bot_id", botId).maybeSingle(),
-        buildBotMetadataMap([botId]),
-    ]);
+    // Look up this bot's meeting_url to find sibling bots
+    const { data: meetingRow } = await supabase
+        .from("meetings")
+        .select("meeting_url, done")
+        .eq("bot_id", botId)
+        .maybeSingle();
 
-    const enrichment = metaMap.get(botId);
+    let allBotIds = [botId];
+    let isDone = meetingRow?.done ?? false;
+
+    if (meetingRow?.meeting_url) {
+        const { data: siblings } = await supabase
+            .from("meetings")
+            .select("bot_id, done")
+            .eq("meeting_url", meetingRow.meeting_url);
+
+        if (siblings && siblings.length > 0) {
+            allBotIds = [...new Set(siblings.map((s) => s.bot_id))];
+            // Meeting is fully done only when ALL bots are done
+            isDone = siblings.every((s) => s.done);
+        }
+    }
+
+    // Fetch utterances from ALL related bots using pagination
+    const PAGE_SIZE = 1000;
+    let allUtteranceRows: { speaker: string; words: any; timestamp: string }[] =
+        [];
+
+    for (const bid of allBotIds) {
+        let offset = 0;
+        let hasMore = true;
+        while (hasMore) {
+            const { data, error } = await supabase
+                .from("utterances")
+                .select("speaker, words, timestamp")
+                .eq("bot_id", bid)
+                .range(offset, offset + PAGE_SIZE - 1);
+
+            if (error) {
+                console.error(
+                    `Error fetching utterances for bot ${bid} (offset ${offset}):`,
+                    error,
+                );
+                break;
+            }
+
+            const rows = data ?? [];
+            allUtteranceRows = allUtteranceRows.concat(rows);
+            hasMore = rows.length === PAGE_SIZE;
+            offset += PAGE_SIZE;
+        }
+    }
+
+    // Sort chronologically by speech time
+    allUtteranceRows.sort((a, b) => {
+        const aTime =
+            (a.words as any[])?.[0]?.end_timestamp?.absolute ??
+            new Date(a.timestamp).getTime() / 1000;
+        const bTime =
+            (b.words as any[])?.[0]?.end_timestamp?.absolute ??
+            new Date(b.timestamp).getTime() / 1000;
+        return aTime - bTime;
+    });
+
+    const utterances = allUtteranceRows.map((row) => ({
+        participant: row.speaker,
+        words: row.words,
+        timestamp: row.timestamp,
+    }));
+
+    // Enrich with metadata from all bots
+    const metaMap = await buildBotMetadataMap(allBotIds);
+    const allParticipants = new Set<string>();
+    let title: string | null = null;
+
+    for (const bid of allBotIds) {
+        const enrichment = metaMap.get(bid);
+        if (enrichment) {
+            enrichment.participants.forEach((p) => allParticipants.add(p));
+            if (enrichment.title && !title) title = enrichment.title;
+        }
+    }
 
     return {
-        ...transcript,
-        bot_type: meetingMeta.data?.bot_type ?? null,
-        title: enrichment?.title ?? null,
-        participants: enrichment?.participants ?? [],
+        utterances,
+        done: isDone,
+        title,
+        participants: [...allParticipants],
     };
 }
