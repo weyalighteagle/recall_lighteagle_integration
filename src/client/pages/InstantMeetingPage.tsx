@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useAuth } from "@clerk/react";
 import { Loader2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "../utils/cn";
@@ -19,6 +20,7 @@ const BOT_MODES: { value: BotMode; label: string }[] = [
 
 export default function InstantMeetingPage() {
   const [botMode, setBotMode] = useState<BotMode>("transcriptor");
+  const { getToken } = useAuth();
   const [kbDocuments, setKbDocuments] = useState<KbDoc[]>([]);
   const [selectedKbId, setSelectedKbId] = useState<string>("");
   const [kbLoading, setKbLoading] = useState(true);
@@ -69,9 +71,10 @@ export default function InstantMeetingPage() {
     if (!meetingUrl.trim()) return;
     setIsJoining(true);
     try {
+      const token = await getToken();
       const res = await fetch("/api/bot/join", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ meeting_url: meetingUrl.trim() }),
       });
       if (!res.ok) throw new Error(await res.text());
