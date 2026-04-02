@@ -81,6 +81,12 @@ export async function recall_webhook(payload: any): Promise<void> {
       const botSettings = await bot_settings_get();
       console.log(`[calendar.sync_events] bot_mode=${botSettings.bot_mode}`);
 
+      // Auto-join toggle kontrolü — kapalıysa webhook'tan otomatik bot schedule etme
+      if (!botSettings.auto_join_enabled) {
+        console.log("Auto-join disabled — skipping automatic bot scheduling");
+        return;
+      }
+
       let next: string | null = null;
       do {
         const { results, next: new_next } = await calendar_events_list({

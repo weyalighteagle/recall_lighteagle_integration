@@ -130,15 +130,17 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     // ── KB data — needed by per-meeting KB dropdowns on event cards ──────────
     const [kbDocuments, setKbDocuments] = useState<KbDoc[]>([]);
     const [selectedKbId, setSelectedKbId] = useState<string>("");
+    const [autoJoinEnabled, setAutoJoinEnabled] = useState<boolean>(true);
 
     useEffect(() => {
         Promise.all([
-            fetch("/api/bot-settings").then((r) => r.json()) as Promise<{ bot_mode: string; active_kb_id: string | null }>,
+            fetch("/api/bot-settings").then((r) => r.json()) as Promise<{ bot_mode: string; active_kb_id: string | null; auto_join_enabled?: boolean }>,
             fetch("/api/kb").then((r) => r.json()) as Promise<{ documents: KbDoc[] }>,
         ])
             .then(([settings, kbData]) => {
                 const docs = kbData.documents ?? [];
                 setKbDocuments(docs);
+                setAutoJoinEnabled(settings.auto_join_enabled ?? true);
                 const savedId = settings.active_kb_id;
                 if (savedId && docs.some((d) => d.id === savedId)) {
                     setSelectedKbId(savedId);
@@ -148,6 +150,15 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
             })
             .catch(console.error);
     }, []);
+
+    const handleAutoJoinToggle = (enabled: boolean) => {
+        setAutoJoinEnabled(enabled);
+        fetch("/api/bot-settings", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ auto_join_enabled: enabled }),
+        }).catch(console.error);
+    };
 
     // Her email adresi için ayrı tab
     const calendarsByEmail = useMemo(() => {
@@ -173,15 +184,27 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
         <div className="flex flex-col gap-4">
             <div className="flex items-center justify-between">
                 <h1 className="text-lg font-semibold">Your Calendars</h1>
-                <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowConnectDialog(true)}
-                    className="flex items-center gap-1"
-                >
-                    <Plus className="size-4" />
-                    Add Calendar
-                </Button>
+                <div className="flex items-center gap-4">
+                    <button
+                        onClick={() => handleAutoJoinToggle(!autoJoinEnabled)}
+                        className="flex items-center gap-2 text-sm"
+                        title={autoJoinEnabled ? "Auto-join is ON — bots join all meetings automatically" : "Auto-join is OFF — schedule bots manually per meeting"}
+                    >
+                        <span className="text-gray-600">Auto Join</span>
+                        <div className={`relative w-9 h-5 rounded-full transition-colors ${autoJoinEnabled ? "bg-green-500" : "bg-gray-300"}`}>
+                            <div className={`absolute top-0.5 size-4 bg-white rounded-full shadow transition-transform ${autoJoinEnabled ? "translate-x-4" : "translate-x-0.5"}`} />
+                        </div>
+                    </button>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowConnectDialog(true)}
+                        className="flex items-center gap-1"
+                    >
+                        <Plus className="size-4" />
+                        Add Calendar
+                    </Button>
+                </div>
 
                 <Dialog open={showConnectDialog} onOpenChange={setShowConnectDialog}>
                     <DialogContent>
