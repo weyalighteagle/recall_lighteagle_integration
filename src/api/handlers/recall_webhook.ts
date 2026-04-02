@@ -21,6 +21,25 @@ import { buildBotMetadataMap } from "./notes";
 // ─── Bot Type ───────────────────────────────────────────────
 type BotType = "recording" | "voice_agent";
 
+/**
+ * Normalize a calendar title to a snake_case meeting type key.
+ * e.g. "Yapay Zeka Takım Toplantısı" → "yapay_zeka_takim_toplantisi"
+ */
+export function normalizeMeetingType(title: string): string {
+  if (!title || title.trim() === "") return "general";
+  return title
+    .toLowerCase()
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ı/g, "i")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/[^a-z0-9\s]/g, "")
+    .trim()
+    .replace(/\s+/g, "_");
+}
+
 export async function recall_webhook(payload: any): Promise<void> {
   console.log(
     "[recall_webhook] RAW payload:",
@@ -502,6 +521,8 @@ async function handleBotDone(body: any): Promise<void> {
             );
           }
 
+          const meetingType = normalizeMeetingType(calendarTitle);
+
           const docTitle = participants.length > 0
             ? `${calendarTitle} — ${dateStr} — ${participants.join(", ")}`
             : `${calendarTitle} — ${dateStr}`;
@@ -518,7 +539,7 @@ async function handleBotDone(body: any): Promise<void> {
               `[handleBotDone] 'transcripts' category not found — run migration first`,
             );
           } else {
-            // Create KB document
+            // Create KB document — set created_at to actual meeting date so date filters work
             const { data: doc, error: docErr } = await supabase
               .from("kb_documents")
               .insert({
@@ -526,7 +547,13 @@ async function handleBotDone(body: any): Promise<void> {
                 category_id: cat.id,
                 source_type: "transcript",
                 content_hash: contentHash,
-                metadata: { botId, meetingDate: meetingDate.toISOString() },
+                metadata: {
+                  botId,
+                  meetingDate: meetingDate.toISOString(),
+                  meeting_type: meetingType,
+                  meeting_title: calendarTitle,
+                },
+                created_at: meetingDate.toISOString(),
               })
               .select("id")
               .single();
@@ -536,15 +563,17 @@ async function handleBotDone(body: any): Promise<void> {
             } else {
               // Chunk and embed
               const chunks = chunkText(transcriptText);
-              const embeddings = await createEmbeddings(chunks);
+// Prepend document title to each chunk for better semantic search
+const chunksWithTitle = chunks.map(chunk => `[${docTitle}]\n\n${chunk}`);
+const embeddings = await createEmbeddings(chunksWithTitle);
 
-              const chunkRows = chunks.map((chunk, i) => ({
-                document_id: doc.id,
-                chunk_index: i,
-                content: chunk,
-                token_count: Math.ceil(chunk.length / 4),
-                embedding: JSON.stringify(embeddings[i]),
-              }));
+const chunkRows = chunksWithTitle.map((chunk, i) => ({
+  document_id: doc.id,
+  chunk_index: i,
+  content: chunk,
+  token_count: Math.ceil(chunk.length / 4),
+  embedding: JSON.stringify(embeddings[i]),
+}));
 
               const { error: chunkErr } = await supabase
                 .from("kb_chunks")
