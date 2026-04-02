@@ -23,7 +23,7 @@ export async function bot_settings_get(): Promise<BotSettings> {
         .from("bot_settings")
         .select("bot_mode, active_kb_id, auto_join_enabled")
         .limit(1)
-        .maybeSingle();
+        .maybeSingle() as { data: { bot_mode: string; active_kb_id: string | null; auto_join_enabled: boolean } | null; error: any };
 
     if (!data) return { ...DEFAULTS };
     return {
@@ -40,9 +40,9 @@ export async function bot_settings_get(): Promise<BotSettings> {
 export async function bot_settings_update(patch: Partial<BotSettings>): Promise<BotSettings> {
     const { data: existing } = await supabase
         .from("bot_settings")
-        .select("id, bot_mode, active_kb_id")
+        .select("id, bot_mode, active_kb_id, auto_join_enabled")
         .limit(1)
-        .maybeSingle();
+        .maybeSingle() as { data: { id: string; bot_mode: string; active_kb_id: string | null; auto_join_enabled: boolean } | null; error: any };
 
     const merged: BotSettings = {
         bot_mode: patch.bot_mode ?? (existing?.bot_mode as BotMode) ?? DEFAULTS.bot_mode,
