@@ -31,18 +31,33 @@ export async function createEmbeddings(texts: string[]): Promise<number[][]> {
     return allEmbeddings;
 }
 
-export function chunkText(text: string, maxChars = 2000, overlapChars = 400): string[] {
+export function chunkText(text: string, maxChars = 1000, overlapChars = 200): string[] {
     const chunks: string[] = [];
-    const paragraphs = text.split(/\n\n+/);
+    // Split on single or double newlines — transcripts use single \n between utterances
+    const paragraphs = text.split(/\n+/);
     let currentChunk = "";
 
     for (const para of paragraphs) {
-        if (currentChunk.length + para.length + 2 > maxChars && currentChunk.length > 0) {
+        // If a single line is longer than maxChars, split it at character boundaries
+        if (para.length > maxChars) {
+            if (currentChunk.trim()) {
+                chunks.push(currentChunk.trim());
+                currentChunk = "";
+            }
+            let pos = 0;
+            while (pos < para.length) {
+                chunks.push(para.slice(pos, pos + maxChars).trim());
+                pos += maxChars - overlapChars;
+            }
+            continue;
+        }
+
+        if (currentChunk.length + para.length + 1 > maxChars && currentChunk.length > 0) {
             chunks.push(currentChunk.trim());
             const overlapStart = Math.max(0, currentChunk.length - overlapChars);
-            currentChunk = currentChunk.slice(overlapStart) + "\n\n" + para;
+            currentChunk = currentChunk.slice(overlapStart) + "\n" + para;
         } else {
-            currentChunk += (currentChunk ? "\n\n" : "") + para;
+            currentChunk += (currentChunk ? "\n" : "") + para;
         }
     }
     if (currentChunk.trim()) chunks.push(currentChunk.trim());
