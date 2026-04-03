@@ -72,7 +72,7 @@ function generate_outlook_calendar_oauth_url(args: { state: OAuthStateType }): U
         redirect_uri: env.OUTLOOK_OAUTH_REDIRECT_URI!,
         response_type: "code",
         scope: "offline_access openid email https://graph.microsoft.com/Calendars.Read",
-        prompt: "select_account",
+        prompt: "consent select_account",
         state: Buffer.from(JSON.stringify(state)).toString("base64"),
     };
 
