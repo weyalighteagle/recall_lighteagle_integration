@@ -14,6 +14,7 @@ import { handleVoiceAgentStatus } from "./handlers/voice_agent_status";
 import { bot_join } from "./handlers/bot_join";
 import { bot_settings_get, bot_settings_update } from "./handlers/bot_settings";
 import { voice_agent_config_get, voice_agent_config_update } from "./handlers/voice_agent_config";
+import { voice_agent_photo_upload, voice_agent_photo_delete } from "./handlers/voice_agent_photo";
 import { knowledge_bases_list, knowledge_base_by_slug } from "./handlers/knowledge_bases";
 import { meeting_kb_get, meeting_kb_upsert, meeting_kb_delete } from "./handlers/meeting_kb_override";
 import { supabase } from "./config/supabase";
@@ -212,6 +213,27 @@ body=${JSON.stringify(body)}
                         const updated = await bot_settings_update(body ?? {});
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify(updated));
+                        return;
+                    }
+                    default:
+                        throw new Error(`Method not allowed: ${req.method}`);
+                }
+            }
+            case "/api/voice-agent-config/photo": {
+                switch (req.method?.toUpperCase()) {
+                    case "POST": {
+                        if (!body?.image || !body?.content_type) {
+                            throw new Error("image (base64) and content_type are required");
+                        }
+                        const result = await voice_agent_photo_upload(body);
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify(result));
+                        return;
+                    }
+                    case "DELETE": {
+                        await voice_agent_photo_delete();
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ message: "Photo removed" }));
                         return;
                     }
                     default:
