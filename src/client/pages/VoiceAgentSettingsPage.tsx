@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Loader2, Bot } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Loader2, Bot, Camera, Upload, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
     Card,
@@ -33,17 +33,24 @@ interface Config {
     voice: string;
     language: string;
     wake_word: string | null;
+    photo_url: string | null;
 }
 
 export default function VoiceAgentSettingsPage() {
     const [config, setConfig] = useState<Config | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
+    const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+    const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         fetch("/api/voice-agent-config")
             .then((r) => r.json())
-            .then((data: Config) => setConfig(data))
+            .then((data: Config) => {
+                setConfig(data);
+                setPhotoUrl(data.photo_url ?? null);
+            })
             .catch(() => toast.error("Failed to load voice agent config"))
             .finally(() => setIsLoading(false));
     }, []);
@@ -69,6 +76,67 @@ export default function VoiceAgentSettingsPage() {
             toast.error("Failed to save configuration");
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const allowedTypes = ["image/png", "image/jpeg", "image/webp"];
+        if (!allowedTypes.includes(file.type)) {
+            toast.error("Please upload a PNG, JPEG, or WebP image.");
+            return;
+        }
+        if (file.size > 2 * 1024 * 1024) {
+            toast.error("Image must be smaller than 2MB.");
+            return;
+        }
+
+        setIsUploadingPhoto(true);
+        try {
+            const reader = new FileReader();
+            const base64 = await new Promise<string>((resolve, reject) => {
+                reader.onload = () => {
+                    const result = reader.result as string;
+                    const base64Data = result.split(",")[1];
+                    resolve(base64Data);
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+
+            const res = await fetch("/api/voice-agent-config/photo", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    image: base64,
+                    content_type: file.type,
+                }),
+            });
+
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            setPhotoUrl(data.photo_url);
+            toast.success("Photo uploaded!");
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to upload photo.");
+        } finally {
+            setIsUploadingPhoto(false);
+            if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+    };
+
+    const handlePhotoDelete = async () => {
+        try {
+            const res = await fetch("/api/voice-agent-config/photo", { method: "DELETE" });
+            if (!res.ok) throw new Error(await res.text());
+            setPhotoUrl(null);
+            toast.success("Photo removed.");
+        } catch (err) {
+            console.error(err);
+            toast.error("Failed to remove photo.");
         }
     };
 
@@ -98,6 +166,70 @@ export default function VoiceAgentSettingsPage() {
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-5">
+                        {/* Voice Agent Photo */}
+                        <div className="space-y-3">
+                            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+                                Agent Photo
+                            </p>
+                            <p className="text-xs text-gray-500">
+                                This photo is displayed as the voice agent's avatar during meetings.
+                            </p>
+
+                            <div className="flex items-center gap-4">
+                                {/* Photo preview */}
+                                <div className="relative">
+                                    {photoUrl ? (
+                                        <img
+                                            src={photoUrl}
+                                            alt="Voice Agent Avatar"
+                                            className="size-20 rounded-full object-cover border-2 border-gray-200"
+                                        />
+                                    ) : (
+                                        <div className="size-20 rounded-full bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center">
+                                            <Camera className="size-6 text-gray-400" />
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Upload / Remove buttons */}
+                                <div className="flex flex-col gap-2">
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept="image/png,image/jpeg,image/webp"
+                                        onChange={handlePhotoUpload}
+                                        className="hidden"
+                                    />
+                                    <button
+                                        onClick={() => fileInputRef.current?.click()}
+                                        disabled={isUploadingPhoto}
+                                        className="px-3 py-1.5 text-sm rounded-md border border-gray-300 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-2"
+                                    >
+                                        {isUploadingPhoto ? (
+                                            <>
+                                                <Loader2 className="size-4 animate-spin" />
+                                                Uploading…
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Upload className="size-4" />
+                                                {photoUrl ? "Change Photo" : "Upload Photo"}
+                                            </>
+                                        )}
+                                    </button>
+                                    {photoUrl && (
+                                        <button
+                                            onClick={handlePhotoDelete}
+                                            className="px-3 py-1.5 text-sm rounded-md text-red-600 hover:bg-red-50 flex items-center gap-2"
+                                        >
+                                            <Trash2 className="size-4" />
+                                            Remove
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
                         {/* Voice + Language row */}
                         <div className="flex gap-4">
                             <div className="flex-1 space-y-1.5">
