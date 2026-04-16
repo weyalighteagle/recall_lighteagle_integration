@@ -1,15 +1,16 @@
 import { useAuth, useUser } from "@clerk/react";
 import {
     Calendar as CalendarIcon,
+    Check,
     Clock,
     Download,
     FileText,
-    Mic,
-    Video,
-    Trash2,
     Loader2,
-    RefreshCw,
+    Mic,
     Plus,
+    RefreshCw,
+    Trash2,
+    Video,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
@@ -17,13 +18,7 @@ import type { CalendarType } from "../schemas/CalendarArtifactSchema";
 import type { CalendarEventType } from "../schemas/CalendarEventArtifactSchema";
 import { Button } from "./components/ui/Button";
 import { Calendar } from "./components/ui/Calendar";
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-} from "./components/ui/Card";
+import { Card, CardContent } from "./components/ui/Card";
 import {
     Dialog,
     DialogContent,
@@ -38,6 +33,7 @@ import { useCalendar } from "./hooks/use-calendar";
 import { useCalendarEvents } from "./hooks/use-calendar-events";
 import { useDeleteCalendar } from "./hooks/use-delete-calendar";
 import { useToggleRecording } from "./hooks/use-toggle-recording";
+import { cn } from "./utils/cn";
 
 function App() {
     const { isLoaded } = useAuth();
@@ -49,8 +45,8 @@ function App() {
     if (isPending) {
         return (
             <div className="flex items-center justify-center min-h-[60vh]">
-                <div className="flex flex-col items-center gap-3 text-gray-500">
-                    <RefreshCw className="size-6 animate-spin" />
+                <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                    <RefreshCw className="size-5 animate-spin" />
                     <p className="text-sm">Loading calendars…</p>
                 </div>
             </div>
@@ -78,17 +74,14 @@ export default App;
 
 function ConnectCalendar() {
     return (
-        <div className="flex flex-col items-center gap-4 p-8 bg-white rounded-lg border shadow-sm max-w-md">
-            <div className="flex items-center justify-center size-12 bg-gray-100 rounded-full">
-                <CalendarIcon className="size-6 text-gray-600" />
+        <div className="flex flex-col items-center gap-5 p-10 bg-card rounded-xl border border-border max-w-md">
+            <div className="flex items-center justify-center size-12 rounded-full bg-brand-50">
+                <CalendarIcon className="size-5 text-brand-700" />
             </div>
             <div className="text-center">
-                <h2 className="text-lg font-semibold">
-                    No calendars connected
-                </h2>
-                <p className="text-sm text-gray-500 mt-1">
-                    Connect your calendar to start scheduling bots for your
-                    meetings.
+                <h2 className="text-lg font-semibold">No calendars connected</h2>
+                <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+                    Connect your calendar to start scheduling bots for your meetings.
                 </p>
             </div>
             <div className="flex flex-col sm:flex-row gap-2 w-full">
@@ -96,8 +89,7 @@ function ConnectCalendar() {
                     className="flex-1"
                     variant="outline"
                     onClick={() => {
-                        window.location.href =
-                            "/api/calendar/oauth?platform=google_calendar";
+                        window.location.href = "/api/calendar/oauth?platform=google_calendar";
                     }}
                 >
                     Connect Google
@@ -106,8 +98,7 @@ function ConnectCalendar() {
                     className="flex-1"
                     variant="outline"
                     onClick={() => {
-                        window.location.href =
-                            "/api/calendar/oauth?platform=microsoft_outlook";
+                        window.location.href = "/api/calendar/oauth?platform=microsoft_outlook";
                     }}
                 >
                     Connect Outlook
@@ -127,14 +118,17 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     const { user } = useUser();
     const [showConnectDialog, setShowConnectDialog] = useState(false);
 
-    // ── KB data — needed by per-meeting KB dropdowns on event cards ──────────
     const [kbDocuments, setKbDocuments] = useState<KbDoc[]>([]);
     const [selectedKbId, setSelectedKbId] = useState<string>("");
     const [autoJoinEnabled, setAutoJoinEnabled] = useState<boolean>(true);
 
     useEffect(() => {
         Promise.all([
-            fetch("/api/bot-settings").then((r) => r.json()) as Promise<{ bot_mode: string; active_kb_id: string | null; auto_join_enabled?: boolean }>,
+            fetch("/api/bot-settings").then((r) => r.json()) as Promise<{
+                bot_mode: string;
+                active_kb_id: string | null;
+                auto_join_enabled?: boolean;
+            }>,
             fetch("/api/kb").then((r) => r.json()) as Promise<{ documents: KbDoc[] }>,
         ])
             .then(([settings, kbData]) => {
@@ -160,7 +154,6 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
         }).catch(console.error);
     };
 
-    // Her email adresi için ayrı tab
     const calendarsByEmail = useMemo(() => {
         const userEmail = user?.primaryEmailAddress?.emailAddress;
         const filtered = calendars.filter((cal) => cal.platform_email === userEmail);
@@ -181,35 +174,46 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     const defaultTab = calendarsByEmail[0]?.email || "";
 
     return (
-        <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-                <h1 className="text-lg font-semibold">Your Calendars</h1>
-                <div className="flex items-center gap-4">
+        <div className="flex flex-col gap-6">
+            {/* Page header */}
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                    <h1 className="text-2xl font-semibold tracking-tight">Calendars</h1>
+                    <p className="text-sm text-muted-foreground mt-1">
+                        Schedule bots automatically when meetings hit your calendar.
+                    </p>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                    {/* Auto-join pill */}
                     <button
                         onClick={() => handleAutoJoinToggle(!autoJoinEnabled)}
-                        className="flex items-center gap-2 text-sm"
-                        title={autoJoinEnabled ? "Auto-join is ON — bots join all meetings automatically" : "Auto-join is OFF — schedule bots manually per meeting"}
+                        className="flex items-center gap-2.5 h-9 px-3 text-sm border border-border rounded-md bg-card hover:bg-muted/50 transition-colors"
+                        title={
+                            autoJoinEnabled
+                                ? "Auto-join is ON — bots join all meetings automatically"
+                                : "Auto-join is OFF — schedule bots manually per meeting"
+                        }
                     >
-                        <span className="text-gray-600">Auto Join</span>
-                        <div className={`relative w-9 h-5 rounded-full transition-colors ${autoJoinEnabled ? "bg-green-500" : "bg-gray-300"}`}>
-                            <div className={`absolute top-0.5 size-4 bg-white rounded-full shadow transition-transform ${autoJoinEnabled ? "translate-x-4" : "translate-x-0.5"}`} />
-                        </div>
+                        <span className="text-muted-foreground">Auto-join</span>
+                        <Switch on={autoJoinEnabled} tone="success" />
                     </button>
+
                     <Button
                         variant="outline"
                         size="sm"
                         onClick={() => setShowConnectDialog(true)}
-                        className="flex items-center gap-1"
+                        className="h-9"
                     >
                         <Plus className="size-4" />
-                        Add Calendar
+                        Add calendar
                     </Button>
                 </div>
 
                 <Dialog open={showConnectDialog} onOpenChange={setShowConnectDialog}>
                     <DialogContent>
                         <DialogHeader>
-                            <DialogTitle>Connect Another Calendar</DialogTitle>
+                            <DialogTitle>Connect another calendar</DialogTitle>
                             <DialogDescription>
                                 Choose which calendar provider to connect.
                             </DialogDescription>
@@ -218,8 +222,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                             <Button
                                 variant="outline"
                                 onClick={() => {
-                                    window.location.href =
-                                        "/api/calendar/oauth?platform=google_calendar";
+                                    window.location.href = "/api/calendar/oauth?platform=google_calendar";
                                 }}
                             >
                                 Connect Google Calendar
@@ -227,8 +230,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                             <Button
                                 variant="outline"
                                 onClick={() => {
-                                    window.location.href =
-                                        "/api/calendar/oauth?platform=microsoft_outlook";
+                                    window.location.href = "/api/calendar/oauth?platform=microsoft_outlook";
                                 }}
                             >
                                 Connect Microsoft Outlook
@@ -238,18 +240,23 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                 </Dialog>
             </div>
 
+            {/* Tabs */}
             <Tabs defaultValue={defaultTab} className="w-full">
-                <TabsList>
+                <TabsList className="bg-transparent p-0 h-auto border-b border-border rounded-none w-full justify-start gap-1">
                     {calendarsByEmail.map((entry) => (
-                        <TabsTrigger key={entry.email} value={entry.email}>
+                        <TabsTrigger
+                            key={entry.email}
+                            value={entry.email}
+                            className="rounded-none bg-transparent border-b-2 border-transparent data-[state=active]:border-brand-600 data-[state=active]:bg-transparent data-[state=active]:shadow-none px-3 py-2 text-sm font-medium text-muted-foreground data-[state=active]:text-foreground hover:text-foreground transition-colors"
+                        >
                             {entry.email}
                         </TabsTrigger>
                     ))}
                 </TabsList>
 
                 {calendarsByEmail.map((entry) => (
-                    <TabsContent key={entry.email} value={entry.email}>
-                        <div className="flex flex-col gap-6 mt-4">
+                    <TabsContent key={entry.email} value={entry.email} className="mt-5">
+                        <div className="flex flex-col gap-6">
                             {entry.calendars.map((calendar) => (
                                 <CalendarDetails
                                     key={calendar.id}
@@ -266,46 +273,66 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     );
 }
 
-function CalendarDetails({ calendar, kbDocuments, globalKbId }: { calendar: CalendarType; kbDocuments: KbDoc[]; globalKbId: string }) {
+function Switch({ on, tone = "brand" }: { on: boolean; tone?: "brand" | "success" | "danger" | "violet" }) {
+    const toneClass = !on
+        ? "bg-muted-foreground/30"
+        : tone === "success"
+            ? "bg-success"
+            : tone === "danger"
+                ? "bg-danger"
+                : tone === "violet"
+                    ? "bg-brand-400"
+                    : "bg-brand-600";
+    return (
+        <span className={cn("relative inline-block w-8 h-[18px] rounded-full transition-colors", toneClass)}>
+            <span
+                className={cn(
+                    "absolute top-[2px] size-3.5 bg-white rounded-full shadow-sm transition-transform",
+                    on ? "translate-x-[14px]" : "translate-x-[2px]",
+                )}
+            />
+        </span>
+    );
+}
+
+function CalendarDetails({
+    calendar,
+    kbDocuments,
+    globalKbId,
+}: {
+    calendar: CalendarType;
+    kbDocuments: KbDoc[];
+    globalKbId: string;
+}) {
     const { user } = useUser();
     const [searchParams, setSearchParams] = useSearchParams();
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-    const { deleteCalendar, isDeleting } = useDeleteCalendar({
-        calendarId: calendar.id,
-    });
+    const { deleteCalendar, isDeleting } = useDeleteCalendar({ calendarId: calendar.id });
 
-    // Helper to get local midnight as UTC ISO string
     const getLocalMidnightAsUTC = useCallback((dayOffset: number = 0) => {
         const now = new Date();
-        // Create a date at local midnight, then convert to UTC via toISOString()
         return new Date(
             now.getFullYear(),
             now.getMonth(),
             now.getDate() + dayOffset,
-            0,
-            0,
-            0,
-            0,
+            0, 0, 0, 0,
         ).toISOString();
     }, []);
 
     const selectedStartDate = useMemo(() => {
         const param = searchParams.get("start_time__gte");
         if (param) return param;
-        // Default to local midnight today (expressed in UTC)
         return getLocalMidnightAsUTC(0);
     }, [searchParams, getLocalMidnightAsUTC]);
 
     const selectedEndDate = useMemo(() => {
         const param = searchParams.get("start_time__lte");
         if (param) return param;
-        // Default to local midnight tomorrow (expressed in UTC)
         return getLocalMidnightAsUTC(1);
     }, [searchParams, getLocalMidnightAsUTC]);
 
     const handleDateSelect = useCallback(
         (date: Date) => {
-            // Create dates at local midnight for the selected date and next day
             const y = date.getFullYear();
             const m = date.getMonth();
             const d = date.getDate();
@@ -323,151 +350,127 @@ function CalendarDetails({ calendar, kbDocuments, globalKbId }: { calendar: Cale
         [searchParams, setSearchParams],
     );
 
+    const latestStatus = calendar.status_changes.at(0)?.status ?? "connected";
+    const latestStatusDate = calendar.status_changes.at(0)?.created_at;
+
     return (
-        <div className="flex flex-col lg:flex-row gap-4">
-            {/* Left Column - Calendar Details */}
-            <div className="flex flex-col gap-4 min-w-[320px] shrink-0">
-                {/* Calendar Date Picker */}
-                <Card>
-                    <CardContent className="p-4 flex justify-center">
+        <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-5">
+            {/* Left column */}
+            <div className="flex flex-col gap-3">
+                <Card className="py-0">
+                    <CardContent className="p-3 flex justify-center">
                         <Calendar
                             mode="single"
                             required
-                            selected={
-                                selectedStartDate
-                                    ? new Date(selectedStartDate)
-                                    : undefined
-                            }
+                            selected={selectedStartDate ? new Date(selectedStartDate) : undefined}
                             onSelect={handleDateSelect}
                         />
                     </CardContent>
                 </Card>
 
-                {/* Calendar Status Card */}
-                <Card>
-                    <CardHeader>
-                        <div className="flex flex-col w-full">
-                            <div className="flex items-center justify-between w-full gap-3">
-                                <CardTitle className="text-base">
-                                    {user?.primaryEmailAddress?.emailAddress}
-                                </CardTitle>
-
-                                <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    disabled={isDeleting}
-                                    onClick={() => setShowDeleteDialog(true)}
-                                    className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                                >
-                                    <Trash2 className="size-4" />
-                                </Button>
-
-                                <Dialog
-                                    open={showDeleteDialog}
-                                    onOpenChange={setShowDeleteDialog}
-                                >
-                                    <DialogContent>
-                                        <DialogHeader>
-                                            <DialogTitle>
-                                                Disconnect Calendar
-                                            </DialogTitle>
-                                            <DialogDescription>
-                                                Are you sure you want to
-                                                disconnect{" "}
-                                                <span className="font-medium">
-                                                    {user?.primaryEmailAddress?.emailAddress}
-                                                </span>
-                                                ? This will stop syncing events
-                                                from this calendar.
-                                            </DialogDescription>
-                                        </DialogHeader>
-                                        <DialogFooter>
-                                            <Button
-                                                variant="outline"
-                                                onClick={() =>
-                                                    setShowDeleteDialog(false)
-                                                }
-                                            >
-                                                Cancel
-                                            </Button>
-                                            <Button
-                                                variant="destructive"
-                                                disabled={isDeleting}
-                                                onClick={() => {
-                                                    deleteCalendar();
-                                                    setShowDeleteDialog(false);
-                                                }}
-                                            >
-                                                {isDeleting
-                                                    ? "Disconnecting..."
-                                                    : "Disconnect"}
-                                            </Button>
-                                        </DialogFooter>
-                                    </DialogContent>
-                                </Dialog>
-                            </div>
+                {/* Connection status */}
+                <Card className="py-0">
+                    <CardContent className="p-4">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                                Connection
+                            </span>
+                            <StatusPill status={latestStatus} />
                         </div>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="space-y-2">
-                            <h4 className="text-sm font-medium text-gray-700">
-                                Status History
-                            </h4>
-                            <div className="space-y-1 max-h-48 overflow-y-auto">
-                                {[...calendar.status_changes]
-                                    .reverse()
-                                    .map((change, index) => {
-                                        const isConnected =
-                                            change.status === "connected";
-                                        return (
-                                            <div
-                                                key={index}
-                                                className={`flex items-center justify-between text-sm py-1.5 px-2 rounded ${
-                                                    isConnected
-                                                        ? "bg-green-50"
-                                                        : "bg-gray-50"
-                                                }`}
-                                            >
-                                                <span
-                                                    className={`capitalize ${
-                                                        isConnected
-                                                            ? "text-green-700 font-medium"
-                                                            : "text-gray-400"
-                                                    }`}
-                                                >
-                                                    {change.status}
-                                                </span>
-                                                <span
-                                                    className={`text-xs ${
-                                                        isConnected
-                                                            ? "text-green-600"
-                                                            : "text-gray-400"
-                                                    }`}
-                                                >
-                                                    {new Date(
-                                                        change.created_at,
-                                                    ).toLocaleString()}
-                                                </span>
-                                            </div>
-                                        );
-                                    })}
-                            </div>
+                        <p className="text-sm font-medium truncate">{user?.primaryEmailAddress?.emailAddress}</p>
+                        {latestStatusDate && (
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                                {new Date(latestStatusDate).toLocaleString([], {
+                                    month: "short",
+                                    day: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                })}
+                            </p>
+                        )}
+
+                        <div className="mt-3 pt-3 border-t border-border flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">Disconnect calendar</span>
+                            <button
+                                onClick={() => setShowDeleteDialog(true)}
+                                disabled={isDeleting}
+                                className="p-1.5 rounded-md text-muted-foreground hover:text-danger hover:bg-danger-subtle transition-colors disabled:opacity-50"
+                                aria-label="Disconnect calendar"
+                            >
+                                <Trash2 className="size-3.5" />
+                            </button>
                         </div>
                     </CardContent>
                 </Card>
+
+                <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>Disconnect calendar</DialogTitle>
+                            <DialogDescription>
+                                Are you sure you want to disconnect{" "}
+                                <span className="font-medium">{user?.primaryEmailAddress?.emailAddress}</span>? This
+                                will stop syncing events from this calendar.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
+                                Cancel
+                            </Button>
+                            <Button
+                                variant="destructive"
+                                disabled={isDeleting}
+                                onClick={() => {
+                                    deleteCalendar();
+                                    setShowDeleteDialog(false);
+                                }}
+                            >
+                                {isDeleting ? "Disconnecting…" : "Disconnect"}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             </div>
 
-            {/* Right Column - Events List */}
-            <div className="flex flex-col gap-4 flex-1 min-w-0">
-                <CalendarEventsList
-                    calendar={calendar}
-                    startTimeGte={selectedStartDate}
-                    startTimeLte={selectedEndDate}
-                    kbDocuments={kbDocuments}
-                    globalKbId={globalKbId}
-                />
-            </div>
+            {/* Right column */}
+            <CalendarEventsList
+                calendar={calendar}
+                startTimeGte={selectedStartDate}
+                startTimeLte={selectedEndDate}
+                kbDocuments={kbDocuments}
+                globalKbId={globalKbId}
+            />
         </div>
+    );
+}
+
+function StatusPill({ status }: { status: string }) {
+    const map: Record<string, { bg: string; text: string; dot: string; label: string }> = {
+        connected: {
+            bg: "bg-success-subtle",
+            text: "text-success-strong",
+            dot: "bg-success",
+            label: "Connected",
+        },
+        connecting: {
+            bg: "bg-warning-subtle",
+            text: "text-warning-strong",
+            dot: "bg-warning",
+            label: "Connecting",
+        },
+        disconnected: {
+            bg: "bg-muted",
+            text: "text-muted-foreground",
+            dot: "bg-muted-foreground/60",
+            label: "Disconnected",
+        },
+    };
+    const c = map[status] ?? map.disconnected;
+    return (
+        <span className={cn("inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full", c.bg, c.text)}>
+            <span className={cn("size-1.5 rounded-full", c.dot)} />
+            {c.label}
+        </span>
     );
 }
 
@@ -489,83 +492,73 @@ function CalendarEventsList({
 
     const { calendarEvents, isPending } = useCalendarEvents({
         calendarId: calendar.id,
-        startTimeGte: startTimeGte,
-        startTimeLte: startTimeLte,
+        startTimeGte,
+        startTimeLte,
     });
 
-    const formatTime = (dateString: string) => {
-        return new Date(dateString).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-        });
-    };
+    const formatTime = (dateString: string) =>
+        new Date(dateString).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
     const getEventTitle = (event: CalendarEventType) => {
-        // Try to extract title from raw data
         if (event.raw?.summary) return event.raw.summary;
         if (event.raw?.subject) return event.raw.subject;
-        return "Untitled Event";
+        return "Untitled event";
     };
 
+    const visibleEvents = calendarEvents.filter((e) => !e.is_deleted);
+    const formattedDate = startTimeGte
+        ? new Date(startTimeGte).toLocaleDateString([], {
+            weekday: "long",
+            month: "long",
+            day: "numeric",
+        })
+        : "All events";
+
     return (
-        <Card>
-            <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                    <Clock className="size-4" />
-                    Events for{" "}
-                    {startTimeGte
-                        ? new Date(startTimeGte).toLocaleDateString()
-                        : "all time"}
-                </CardTitle>
-                <CardDescription>
-                    {isConnecting
-                        ? "Syncing calendar..."
-                        : `${calendarEvents.length} event${
-                              calendarEvents.length !== 1 ? "s" : ""
-                          } scheduled`}
-                </CardDescription>
-            </CardHeader>
-            <CardContent>
-                <ScrollArea className="h-[400px] lg:h-[500px]">
+        <Card className="py-0">
+            <CardContent className="p-5">
+                <div className="flex items-center justify-between mb-4">
+                    <div>
+                        <h3 className="text-base font-semibold">{formattedDate}</h3>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                            {isConnecting
+                                ? "Syncing calendar…"
+                                : `${visibleEvents.length} event${visibleEvents.length !== 1 ? "s" : ""}`}
+                        </p>
+                    </div>
+                </div>
+
+                <ScrollArea className="h-[500px]">
                     {isConnecting ? (
-                        <div className="flex flex-col items-center justify-center h-full text-center py-8">
-                            <Loader2 className="size-8 text-yellow-500 mb-3 animate-spin" />
-                            <p className="text-sm font-medium text-gray-700">
-                                Connecting calendar...
-                            </p>
-                            <p className="text-xs text-gray-500 mt-1">
-                                Please reload the page in a few seconds
-                            </p>
-                        </div>
+                        <EmptyState
+                            icon={<Loader2 className="size-6 text-warning animate-spin" />}
+                            title="Connecting calendar…"
+                            description="Please reload the page in a few seconds."
+                        />
                     ) : isPending ? (
-                        <div className="flex flex-col items-center justify-center h-full text-center py-8">
-                            <Loader2 className="size-8 text-blue-500 mb-3 animate-spin" />
-                            <p className="text-sm font-medium text-gray-700">
-                                Loading events...
-                            </p>
-                        </div>
-                    ) : calendarEvents.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-center py-8">
-                            <CalendarIcon className="size-8 text-gray-300 mb-2" />
-                            <p className="text-sm text-gray-500">
-                                No events for this day
-                            </p>
-                        </div>
+                        <EmptyState
+                            icon={<Loader2 className="size-6 text-brand-600 animate-spin" />}
+                            title="Loading events…"
+                        />
+                    ) : visibleEvents.length === 0 ? (
+                        <EmptyState
+                            icon={<CalendarIcon className="size-6 text-muted-foreground" />}
+                            title="No events for this day"
+                            description="Pick another date, or wait for new meetings to sync."
+                        />
                     ) : (
-                        <div className="space-y-3 pr-4">
-                            {calendarEvents
-                                .filter((event) => !event.is_deleted)
-                                .map((event) => (
-                                    <CalendarEventCard
-                                        key={event.id}
-                                        event={event}
-                                        calendarId={calendar.id}
-                                        formatTime={formatTime}
-                                        getEventTitle={getEventTitle}
-                                        kbDocuments={kbDocuments}
-                                        globalKbId={globalKbId}
-                                    />
-                                ))}
+                        <div className="space-y-2 pr-3">
+                            {visibleEvents.map((event) => (
+                                <CalendarEventCard
+                                    key={event.id}
+                                    event={event}
+                                    calendarId={calendar.id}
+                                    formatTime={formatTime}
+                                    getEventTitle={getEventTitle}
+                                    kbDocuments={kbDocuments}
+                                    globalKbId={globalKbId}
+                                />
+                            ))}
                         </div>
                     )}
                 </ScrollArea>
@@ -574,9 +567,27 @@ function CalendarEventsList({
     );
 }
 
+function EmptyState({
+    icon,
+    title,
+    description,
+}: {
+    icon: React.ReactNode;
+    title: string;
+    description?: string;
+}) {
+    return (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="flex items-center justify-center size-12 rounded-full bg-muted mb-3">{icon}</div>
+            <p className="text-sm font-medium">{title}</p>
+            {description && <p className="text-xs text-muted-foreground mt-1 max-w-xs">{description}</p>}
+        </div>
+    );
+}
+
 function CalendarEventCard({
     event,
-    calendarId,
+    calendarId: _calendarId,
     formatTime,
     getEventTitle,
     kbDocuments,
@@ -584,36 +595,29 @@ function CalendarEventCard({
 }: {
     event: CalendarEventType;
     calendarId: string;
-    formatTime: (dateString: string) => string;
-    getEventTitle: (event: CalendarEventType) => string;
+    formatTime: (s: string) => string;
+    getEventTitle: (e: CalendarEventType) => string;
     kbDocuments: KbDoc[];
     globalKbId: string;
 }) {
-    // Recording bot toggle hook
-    const {
-        scheduleRecording,
-        unscheduleRecording,
-        isPending: isRecordingPending,
-    } = useToggleRecording({
-        calendarId,
+    const { scheduleRecording, unscheduleRecording, isPending: isRecordingPending } = useToggleRecording({
+        calendarId: _calendarId,
         calendarEventId: event.id,
         botType: "recording",
     });
 
-    // Voice agent bot toggle hook
     const {
         scheduleRecording: scheduleVoiceAgent,
         unscheduleRecording: unscheduleVoiceAgent,
         isPending: isVoiceAgentPending,
     } = useToggleRecording({
-        calendarId,
+        calendarId: _calendarId,
         calendarEventId: event.id,
         botType: "voice_agent",
     });
 
     const navigate = useNavigate();
     const [isExporting, setIsExporting] = useState(false);
-    // undefined = still loading, null = no override set
     const [eventKbId, setEventKbId] = useState<string | null | undefined>(undefined);
 
     const isInFuture = new Date(event.start_time) > new Date();
@@ -645,14 +649,20 @@ function CalendarEventCard({
         try {
             const res = await fetch(`/api/transcripts/${botId}`);
             if (!res.ok) throw new Error(await res.text());
-            const data: { utterances: { participant: string; words: { text: string }[]; timestamp: string }[]; done: boolean } = await res.json();
+            const data: {
+                utterances: { participant: string; words: { text: string }[]; timestamp: string }[];
+                done: boolean;
+            } = await res.json();
             const lines = data.utterances.map((u) => {
-                const time = new Date(u.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+                const time = new Date(u.timestamp).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                });
                 const text = u.words.map((w) => w.text).join(" ");
                 return `[${time}] ${u.participant}: ${text}`;
             });
-            const content = lines.join("\n");
-            const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+            const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
@@ -668,15 +678,12 @@ function CalendarEventCard({
         }
     };
 
-    // Dedup key prefix'ine bakarak bot tipini tespit et
     const hasRecordingBot = event.bots.some(
         (bot) => bot.deduplication_key.startsWith("rec-") && new Date(bot.start_time) > new Date(),
     );
     const hasVoiceAgentBot = event.bots.some(
         (bot) => bot.deduplication_key.startsWith("va-") && new Date(bot.start_time) > new Date(),
     );
-
-    // Geriye uyumluluk: eski format prefix'siz dedup key'ler recording sayılır
     const hasLegacyBot = event.bots.some(
         (bot) =>
             !bot.deduplication_key.startsWith("rec-") &&
@@ -687,154 +694,210 @@ function CalendarEventCard({
 
     const handleRecordingToggle = () => {
         if (isRecordingPending) return;
-        if (isRecordingScheduled) {
-            unscheduleRecording();
-        } else {
-            scheduleRecording();
-        }
+        if (isRecordingScheduled) unscheduleRecording();
+        else scheduleRecording();
     };
 
     const handleVoiceAgentToggle = () => {
         if (isVoiceAgentPending) return;
-        if (hasVoiceAgentBot) {
-            unscheduleVoiceAgent();
-        } else {
-            scheduleVoiceAgent();
-        }
+        if (hasVoiceAgentBot) unscheduleVoiceAgent();
+        else scheduleVoiceAgent();
     };
 
-    // Tek toggle satırı render eden yardımcı
-    const renderToggle = (
-        label: string,
-        isActive: boolean,
-        isPending: boolean,
-        onToggle: () => void,
-        activeColor: string,  // tailwind renk sınıfı, ör: "bg-red-500"
-    ) => (
+    // Accent bar color
+    const accentClass = !isInFuture
+        ? "bg-muted-foreground/40"
+        : hasVoiceAgentBot
+            ? "bg-brand-400"
+            : isRecordingScheduled
+                ? "bg-danger"
+                : "bg-brand-600";
+
+    const hasBots = event.bots.length > 0;
+
+    return (
+        <div
+            className={cn(
+                "rounded-lg border border-border bg-card p-3.5 transition-colors hover:border-border/80",
+                !isInFuture && "opacity-60",
+            )}
+        >
+            <div className="flex items-start gap-3">
+                {/* Accent bar */}
+                <div className={cn("w-[3px] self-stretch rounded-full shrink-0", accentClass)} />
+
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium truncate">{getEventTitle(event)}</p>
+                            <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
+                                <span className="inline-flex items-center gap-1">
+                                    <Clock className="size-3" />
+                                    {formatTime(event.start_time)} – {formatTime(event.end_time)}
+                                </span>
+                                {event.meeting_url ? (
+
+                                    href = { event.meeting_url }
+                    target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-brand-700 hover:text-brand-800 hover:underline max-w-[260px] truncate"
+                  >
+                                <Video className="size-3 shrink-0" />
+                                <span className="truncate">{event.meeting_url.replace(/^https?:\/\//, "")}</span>
+                            </a>
+                            ) : (
+                            <span className="text-muted-foreground/70">No meeting link</span>
+                )}
+                        </div>
+                    </div>
+
+                    {/* Toggles */}
+                    {canToggle ? (
+                        <div className="flex flex-col gap-1.5 items-end shrink-0">
+                            <ToggleRow
+                                label="Transcript"
+                                on={isRecordingScheduled}
+                                pending={isRecordingPending}
+                                onToggle={handleRecordingToggle}
+                                tone="danger"
+                            />
+                            <ToggleRow
+                                label="Voice agent"
+                                on={hasVoiceAgentBot}
+                                pending={isVoiceAgentPending}
+                                onToggle={handleVoiceAgentToggle}
+                                tone="violet"
+                            />
+                        </div>
+                    ) : !isInFuture ? (
+                        <span className="text-[11px] font-medium text-muted-foreground px-2 py-0.5 rounded-full bg-muted shrink-0">
+                            Past
+                        </span>
+                    ) : null}
+                </div>
+
+                {/* Footer row */}
+                {(canToggle && kbDocuments.length > 0) || hasBots ? (
+                    <div className="mt-3 pt-3 border-t border-dashed border-border flex items-center gap-3 flex-wrap">
+                        {canToggle && kbDocuments.length > 0 && (
+                            <div className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <span>KB</span>
+                                {eventKbId === undefined ? (
+                                    <Loader2 className="size-3 animate-spin" />
+                                ) : (
+                                    <select
+                                        value={eventKbId ?? globalKbId}
+                                        onChange={(e) => handleKbChange(e.target.value)}
+                                        className="text-xs border border-border rounded-md px-2 py-0.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring max-w-[180px]"
+                                    >
+                                        {kbDocuments.map((doc) => (
+                                            <option key={doc.id} value={doc.id}>
+                                                {doc.title}
+                                                {doc.id === globalKbId ? " (default)" : ""}
+                                            </option>
+                                        ))}
+                                    </select>
+                                )}
+                            </div>
+                        )}
+
+                        {isRecordingScheduled && (
+                            <Badge tone="danger">
+                                <Video className="size-3" /> Recording
+                            </Badge>
+                        )}
+                        {hasVoiceAgentBot && (
+                            <Badge tone="brand">
+                                <Mic className="size-3" /> Voice agent
+                            </Badge>
+                        )}
+
+                        {hasBots && (
+                            <div className="ml-auto flex items-center gap-3">
+                                <button
+                                    onClick={() => navigate(`/dashboard/notes/${event.bots[0].bot_id}`)}
+                                    className="inline-flex items-center gap-1 text-xs text-brand-700 hover:text-brand-800 hover:underline"
+                                >
+                                    <FileText className="size-3" />
+                                    View notes
+                                </button>
+                                <button
+                                    onClick={() => handleExportTranscript(event.bots[0].bot_id)}
+                                    disabled={isExporting}
+                                    className="inline-flex items-center gap-1 text-xs text-brand-700 hover:text-brand-800 hover:underline disabled:opacity-50"
+                                >
+                                    {isExporting ? (
+                                        <Loader2 className="size-3 animate-spin" />
+                                    ) : (
+                                        <Download className="size-3" />
+                                    )}
+                                    Export
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                ) : null}
+            </div>
+        </div>
+    </div >
+  );
+}
+
+function ToggleRow({
+    label,
+    on,
+    pending,
+    onToggle,
+    tone,
+}: {
+    label: string;
+    on: boolean;
+    pending: boolean;
+    onToggle: () => void;
+    tone: "danger" | "violet";
+}) {
+    return (
         <button
             onClick={onToggle}
-            disabled={isPending}
-            className="shrink-0 flex items-center gap-2 group"
-            title={isActive ? `Turn off ${label}` : `Turn on ${label}`}
+            disabled={pending}
+            className="inline-flex items-center gap-2 group disabled:opacity-60"
+            title={on ? `Turn off ${label.toLowerCase()}` : `Turn on ${label.toLowerCase()}`}
         >
-            <span className="text-xs text-gray-500 group-hover:text-gray-700">
+            <span className="text-[11px] text-muted-foreground group-hover:text-foreground transition-colors">
                 {label}
             </span>
-            <span className="min-w-9 min-h-5 flex items-center justify-center">
-                {isPending ? (
-                    <Loader2 className="size-4 animate-spin text-gray-400" />
+            <span className="min-w-[32px] flex items-center justify-center">
+                {pending ? (
+                    <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                 ) : (
-                    <div
-                        className={`relative w-9 h-5 rounded-full transition-colors ${
-                            isActive ? activeColor : "bg-gray-300"
-                        }`}
-                    >
-                        <div
-                            className={`absolute top-0.5 size-4 bg-white rounded-full shadow transition-transform ${
-                                isActive ? "translate-x-4" : "translate-x-0.5"
-                            }`}
-                        />
-                    </div>
+                    <Switch on={on} tone={tone === "danger" ? "danger" : "violet"} />
                 )}
             </span>
         </button>
     );
+}
 
+function Badge({
+    children,
+    tone,
+}: {
+    children: React.ReactNode;
+    tone: "brand" | "danger" | "success" | "muted";
+}) {
+    const toneClass =
+        tone === "brand"
+            ? "bg-brand-50 text-brand-800"
+            : tone === "danger"
+                ? "bg-danger-subtle text-danger-strong"
+                : tone === "success"
+                    ? "bg-success-subtle text-success-strong"
+                    : "bg-muted text-muted-foreground";
     return (
-        <div className="flex flex-col gap-1.5 p-4 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
-            <div className="flex items-start justify-between gap-2">
-                <h4 className="text-sm font-medium flex-1">
-                    {getEventTitle(event)}
-                </h4>
-
-                {/* Toggle'lar — sağ üst köşe */}
-                {canToggle ? (
-                    <div className="flex flex-col gap-1.5 shrink-0 items-end">
-                        {renderToggle("Transcriptor", isRecordingScheduled, isRecordingPending, handleRecordingToggle, "bg-red-500")}
-                        {renderToggle("Voice Agent", hasVoiceAgentBot, isVoiceAgentPending, handleVoiceAgentToggle, "bg-purple-500")}
-                    </div>
-                ) : !hasMeetingUrl ? (
-                    <span className="shrink-0 text-xs text-gray-400">
-                        No meeting link
-                    </span>
-                ) : !isInFuture ? (
-                    <span className="shrink-0 text-xs text-gray-400">Past</span>
-                ) : null}
-            </div>
-
-            <div className="flex flex-col gap-1 text-xs text-gray-500">
-                <span className="flex items-center gap-1">
-                    <Clock className="size-3" />
-                    {formatTime(event.start_time)} -{" "}
-                    {formatTime(event.end_time)}
-                </span>
-                {event.meeting_url && (
-                    <a
-                        href={event.meeting_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline truncate"
-                    >
-                        <Video className="size-3 shrink-0" />
-                        <span className="truncate">{event.meeting_url}</span>
-                    </a>
-                )}
-                {canToggle && kbDocuments.length > 0 && (
-                    <div className="flex items-center gap-1.5">
-                        <span className="text-gray-500">KB:</span>
-                        {eventKbId === undefined ? (
-                            <Loader2 className="size-3 animate-spin text-gray-400" />
-                        ) : (
-                            <select
-                                value={eventKbId ?? globalKbId}
-                                onChange={(e) => handleKbChange(e.target.value)}
-                                className="text-xs border rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[160px]"
-                            >
-                                {kbDocuments.map((doc) => (
-                                    <option key={doc.id} value={doc.id}>
-                                        {doc.title}{doc.id === globalKbId ? " (default)" : ""}
-                                    </option>
-                                ))}
-                            </select>
-                        )}
-                    </div>
-                )}
-            </div>
-
-            {/* Bot status badges + View Notes */}
-            {event.bots.length > 0 && (
-                <div className="mt-1 flex items-center gap-2 flex-wrap">
-                    {(isRecordingScheduled) && (
-                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700">
-                            <Video className="size-3" /> Recording
-                        </span>
-                    )}
-                    {hasVoiceAgentBot && (
-                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700">
-                            <Mic className="size-3" /> Voice Agent
-                        </span>
-                    )}
-                    <button
-                        onClick={() => navigate(`/dashboard/notes/${event.bots[0].bot_id}`)}
-                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:underline"
-                    >
-                        <FileText className="size-3" />
-                        View Notes
-                    </button>
-                    <button
-                        onClick={() => handleExportTranscript(event.bots[0].bot_id)}
-                        disabled={isExporting}
-                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50"
-                    >
-                        {isExporting ? (
-                            <Loader2 className="size-3 animate-spin" />
-                        ) : (
-                            <Download className="size-3" />
-                        )}
-                        Export
-                    </button>
-                </div>
-            )}
-        </div>
+        <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full", toneClass)}>
+            {children}
+        </span>
     );
 }
+
+// Unused but kept for TS cleanliness if referenced elsewhere
+export { Check };
