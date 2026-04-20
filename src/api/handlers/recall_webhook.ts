@@ -427,6 +427,35 @@ async function handleBotDone(body: any): Promise<void> {
       err,
     );
   }
+
+  // Step 4b: Flip done=true on sibling bots that share the same meeting_url.
+  // Covers the case where a calendar-scheduled bot and a webhook-upserted bot
+  // both attended the same meeting but carry different bot_ids.
+  if (botMeetingUrl && botMeetingUrl.trim() !== "") {
+    try {
+      const { error: siblingError } = await supabase
+        .from("meetings")
+        .update({ done: true })
+        .eq("meeting_url", botMeetingUrl)
+        .eq("done", false);
+
+      if (siblingError) {
+        console.error(
+          `[handleBotDone] failed to flip sibling bots done for meeting_url=${botMeetingUrl}:`,
+          siblingError,
+        );
+      } else {
+        console.log(
+          `[handleBotDone] sibling bots marked done for meeting_url=${botMeetingUrl}`,
+        );
+      }
+    } catch (err) {
+      console.error(
+        `[handleBotDone] unexpected error flipping sibling bots for meeting_url=${botMeetingUrl}:`,
+        err,
+      );
+    }
+  }
   console.log(
     `[handleBotDone] ── END bot_id=${botId} ───────────────────────────────`,
   );
