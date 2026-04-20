@@ -187,6 +187,7 @@ async function handleBotDone(body: any): Promise<void> {
   // Step 1: Fetch bot details from Recall v1 API to get transcript download URLs
   let downloadUrls: string[] = [];
   let botName: string = "";
+  let botMeetingUrl: string | null = null;
   try {
     const botResponse = await fetch_with_retry(
       `https://${env.RECALL_REGION}.recall.ai/api/v1/bot/${botId}/`,
@@ -243,7 +244,7 @@ async function handleBotDone(body: any): Promise<void> {
 
       // Backfill meeting_url, bot_type, and bot_name — important for calendar-scheduled bots
       // where these fields weren't available when the meetings row was first created.
-      const botMeetingUrl: string | null = botData?.meeting_url ?? null;
+      botMeetingUrl = botData?.meeting_url ?? null;
       botName = botData?.bot_name ?? "";
       const inferredBotType = botName.toUpperCase().includes("WEYA VOICE")
         ? "voice_agent"
