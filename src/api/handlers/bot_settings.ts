@@ -5,11 +5,13 @@ export type BotMode = "transcriptor" | "voice_agent";
 export interface BotSettings {
     bot_mode: BotMode;
     active_kb_id: string | null;
+    auto_join_enabled: boolean;
 }
 
 const DEFAULTS: BotSettings = {
     bot_mode: "transcriptor",
     active_kb_id: "d811bc5d-3644-4adf-9ab6-4797803e1b8e",
+    auto_join_enabled: true,
 };
 
 /**
@@ -19,14 +21,15 @@ const DEFAULTS: BotSettings = {
 export async function bot_settings_get(): Promise<BotSettings> {
     const { data } = await supabase
         .from("bot_settings")
-        .select("bot_mode, active_kb_id")
+        .select("bot_mode, active_kb_id, auto_join_enabled")
         .limit(1)
-        .maybeSingle();
+        .maybeSingle() as { data: { bot_mode: string; active_kb_id: string | null; auto_join_enabled: boolean } | null; error: any };
 
     if (!data) return { ...DEFAULTS };
     return {
         bot_mode: (data.bot_mode as BotMode) ?? DEFAULTS.bot_mode,
         active_kb_id: data.active_kb_id ?? null,
+        auto_join_enabled: data.auto_join_enabled ?? DEFAULTS.auto_join_enabled,
     };
 }
 
@@ -37,16 +40,18 @@ export async function bot_settings_get(): Promise<BotSettings> {
 export async function bot_settings_update(patch: Partial<BotSettings>): Promise<BotSettings> {
     const { data: existing } = await supabase
         .from("bot_settings")
-        .select("id, bot_mode, active_kb_id")
+        .select("id, bot_mode, active_kb_id, auto_join_enabled")
         .limit(1)
-        .maybeSingle();
+        .maybeSingle() as { data: { id: string; bot_mode: string; active_kb_id: string | null; auto_join_enabled: boolean } | null; error: any };
 
     const merged: BotSettings = {
         bot_mode: patch.bot_mode ?? (existing?.bot_mode as BotMode) ?? DEFAULTS.bot_mode,
-        // Preserve explicit null (clears KB) vs undefined (keep existing)
         active_kb_id: patch.active_kb_id !== undefined
             ? patch.active_kb_id
             : (existing?.active_kb_id ?? null),
+        auto_join_enabled: patch.auto_join_enabled !== undefined
+            ? patch.auto_join_enabled
+            : (existing?.auto_join_enabled ?? DEFAULTS.auto_join_enabled),
     };
 
     if (existing) {

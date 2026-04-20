@@ -147,21 +147,42 @@ export async function handleTranscriptWebhook(
 export async function handleGetTranscript(
   botId: string,
 ): Promise<{ utterances: any[]; done: boolean }> {
-  const [utterancesResult, meetingResult] = await Promise.all([
-    supabase
+  // Fetch ALL utterances using pagination to avoid Supabase's default 1000-row limit.
+  const PAGE_SIZE = 1000;
+  let allUtteranceRows: { speaker: string; words: any; timestamp: string }[] = [];
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
       .from("utterances")
       .select("speaker, words, timestamp")
-      .eq("bot_id", botId),
-    supabase.from("meetings").select("done").eq("bot_id", botId).maybeSingle(),
-  ]);
+      .eq("bot_id", botId)
+      .range(offset, offset + PAGE_SIZE - 1);
 
-  if (utterancesResult.error) {
-    console.error(
-      `Error fetching utterances for bot ${botId}:`,
-      utterancesResult.error,
-    );
-    throw utterancesResult.error;
+    if (error) {
+      console.error(
+        `Error fetching utterances for bot ${botId} (offset ${offset}):`,
+        error,
+      );
+      throw error;
+    }
+
+    const rows = data ?? [];
+    allUtteranceRows = allUtteranceRows.concat(rows);
+
+    if (rows.length < PAGE_SIZE) {
+      hasMore = false;
+    } else {
+      offset += PAGE_SIZE;
+    }
   }
+
+  const meetingResult = await supabase
+    .from("meetings")
+    .select("done")
+    .eq("bot_id", botId)
+    .maybeSingle();
 
   if (meetingResult.error) {
     console.error(
@@ -173,8 +194,7 @@ export async function handleGetTranscript(
 
   // Sort by the first word's end_timestamp.absolute (actual speech time).
   // Fall back to row timestamp if words array is empty or the field is missing.
-  const rows: { speaker: string; words: any; timestamp: string }[] =
-    utterancesResult.data ?? [];
+  const rows = allUtteranceRows;
   rows.sort((a, b) => {
     const aTime =
       (a.words as any[])?.[0]?.end_timestamp?.absolute ??

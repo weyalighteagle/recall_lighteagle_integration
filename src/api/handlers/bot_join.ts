@@ -15,6 +15,7 @@ export async function bot_join(args: {
     meeting_url: string;
     bot_name?: string;
     bot_type?: "recording" | "voice_agent";
+    user_email: string;   // required — caller must extract from Clerk auth before calling
 }) {
     const { meeting_url, bot_name } = z.object({
         meeting_url: z.string().url(),
@@ -114,7 +115,15 @@ export async function bot_join(args: {
     // Use ignoreDuplicates: false so that if handleTranscriptWebhook already created the row
     // (from the first transcript.data event), we still write bot_type, meeting_url, and bot_name.
     await supabase.from("meetings").upsert(
-        { bot_id: bot.id, done: false, created_at: new Date().toISOString(), bot_type: botType, meeting_url, bot_name: resolvedBotName },
+        {
+            bot_id: bot.id,
+            done: false,
+            created_at: new Date().toISOString(),
+            bot_type: botType,
+            meeting_url,
+            bot_name: resolvedBotName,
+            user_email: args.user_email,
+        },
         { onConflict: "bot_id", ignoreDuplicates: false },
     );
 

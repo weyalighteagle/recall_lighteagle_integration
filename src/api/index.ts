@@ -14,6 +14,7 @@ import { handleVoiceAgentStatus } from "./handlers/voice_agent_status";
 import { bot_join } from "./handlers/bot_join";
 import { bot_settings_get, bot_settings_update } from "./handlers/bot_settings";
 import { voice_agent_config_get, voice_agent_config_update } from "./handlers/voice_agent_config";
+import { voice_agent_photo_upload, voice_agent_photo_delete } from "./handlers/voice_agent_photo";
 import { knowledge_bases_list, knowledge_base_by_slug } from "./handlers/knowledge_bases";
 import { meeting_kb_get, meeting_kb_upsert, meeting_kb_delete } from "./handlers/meeting_kb_override";
 import { supabase } from "./config/supabase";
@@ -117,7 +118,8 @@ body=${JSON.stringify(body)}
                     case "GET": {
                         if (!await requireAuth(req, res)) return;
                         const email = (req as any).userEmail;
-                        const results = await calendars_list({ ...search_params, platform_email: email });
+                        const { calendars: allCalendars } = await calendars_list({ ...search_params, platform_email: email });
+                        const results = { calendars: allCalendars.filter((c) => c.platform_email === email) };
                         console.log(`Listed Calendars: ${JSON.stringify(results)}`);
 
                         res.writeHead(200, { "Content-Type": "application/json" });
@@ -217,6 +219,27 @@ body=${JSON.stringify(body)}
                         throw new Error(`Method not allowed: ${req.method}`);
                 }
             }
+            case "/api/voice-agent-config/photo": {
+                switch (req.method?.toUpperCase()) {
+                    case "POST": {
+                        if (!body?.image || !body?.content_type) {
+                            throw new Error("image (base64) and content_type are required");
+                        }
+                        const result = await voice_agent_photo_upload(body);
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify(result));
+                        return;
+                    }
+                    case "DELETE": {
+                        await voice_agent_photo_delete();
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ message: "Photo removed" }));
+                        return;
+                    }
+                    default:
+                        throw new Error(`Method not allowed: ${req.method}`);
+                }
+            }
             case "/api/voice-agent-config": {
                 switch (req.method?.toUpperCase()) {
                     case "GET": {
@@ -237,7 +260,15 @@ body=${JSON.stringify(body)}
             }
             case "/api/bot/join": {
                 if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
+                if (!await requireAuth(req, res)) return;
                 if (!body?.meeting_url) throw new Error("meeting_url is required");
+
+                const userEmail: string | undefined = (req as any).userEmail;
+                if (!userEmail) {
+                    res.writeHead(401, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "Unable to resolve user email from auth token" }));
+                    return;
+                }
 
                 // Use persisted bot_type from settings when caller doesn't specify one
                 let bot_type = body.bot_type;
@@ -246,7 +277,7 @@ body=${JSON.stringify(body)}
                     bot_type = settings.bot_mode === "voice_agent" ? "voice_agent" : "recording";
                 }
 
-                const result = await bot_join({ ...body, bot_type });
+                const result = await bot_join({ ...body, bot_type, user_email: userEmail });
                 console.log(`Ad-hoc bot created: ${JSON.stringify(result)}`);
 
                 res.writeHead(200, { "Content-Type": "application/json" });
@@ -380,8 +411,10 @@ body=${JSON.stringify(body)}
 
                 // GET /api/notes — enriched meetings list (titles + participants) for Notes page
                 if (pathname === "/api/notes" && req.method?.toUpperCase() === "GET") {
-                    const result = await handleNotesList();
-                    console.log(`Listed Notes: ${result.meetings.length} meetings`);
+                    if (!await requireAuth(req, res)) return;
+                    const userEmail: string = (req as any).userEmail;
+                    const result = await handleNotesList(userEmail);
+                    console.log(`Listed Notes for ${userEmail}: ${result.meetings.length} meetings`);
 
                     res.writeHead(200, {
                         "Content-Type": "application/json",
@@ -393,10 +426,12 @@ body=${JSON.stringify(body)}
 
                 // GET /api/notes/:botId — enriched transcript for Notes detail page
                 if (pathname.startsWith("/api/notes/") && req.method?.toUpperCase() === "GET") {
+                    if (!await requireAuth(req, res)) return;
+                    const userEmail: string = (req as any).userEmail;
                     const botId = pathname.replace("/api/notes/", "");
                     if (!botId) throw new Error("botId is required");
 
-                    const result = await handleNoteDetail(botId);
+                    const result = await handleNoteDetail(botId, userEmail);
                     console.log(`Retrieved note detail for bot ${botId}: ${result.utterances.length} utterances`);
 
                     res.writeHead(200, {
@@ -495,7 +530,8 @@ body=${JSON.stringify(body)}
         }
     } catch (error) {
         console.error(`${req.method} ${req.url}`, error);
-        res.writeHead(400, { "Content-Type": "application/json" });
+        const statusCode = (error as any)?.statusCode ?? 400;
+        res.writeHead(statusCode, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: error instanceof Error ? error.message : error }));
     }
 });

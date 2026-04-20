@@ -9,14 +9,38 @@ import {
 } from "../../schemas/CalendarEventArtifactSchema";
 import { CalendarSyncEventsEventSchema } from "../../schemas/CalendarSyncEventsEventSchema";
 import { CalendarUpdateEventSchema } from "../../schemas/CalendarUpdateEventSchema";
+import { createHash } from "crypto";
 import { env } from "../config/env";
 import { fetch_with_retry } from "../fetch_with_retry";
 import { supabase } from "../config/supabase";
 import { handleTranscriptWebhook } from "./transcript_webhook";
 import { bot_settings_get } from "./bot_settings";
+import { chunkText, createEmbeddings } from "./knowledge_base";
+import { buildBotMetadataMap } from "./notes";
+import { cleanTranscript } from "../lib/cleanTranscript";
+import { transcribeWithGladia } from "../lib/transcribeWithGladia";
 
 // ─── Bot Type ───────────────────────────────────────────────
 type BotType = "recording" | "voice_agent";
+
+/**
+ * Normalize a calendar title to a snake_case meeting type key.
+ * e.g. "Yapay Zeka Takım Toplantısı" → "yapay_zeka_takim_toplantisi"
+ */
+export function normalizeMeetingType(title: string): string {
+  if (!title || title.trim() === "") return "general";
+  return title
+    .toLowerCase()
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ı/g, "i")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/[^a-z0-9\s]/g, "")
+    .trim()
+    .replace(/\s+/g, "_");
+}
 
 export async function recall_webhook(payload: any): Promise<void> {
   console.log(
@@ -75,6 +99,12 @@ export async function recall_webhook(payload: any): Promise<void> {
       // Read global bot_settings once before processing the event batch
       const botSettings = await bot_settings_get();
       console.log(`[calendar.sync_events] bot_mode=${botSettings.bot_mode}`);
+
+      // Auto-join toggle kontrolü — kapalıysa webhook'tan otomatik bot schedule etme
+      if (!botSettings.auto_join_enabled) {
+        console.log("Auto-join disabled — skipping automatic bot scheduling");
+        return;
+      }
 
       let next: string | null = null;
       do {
@@ -188,6 +218,8 @@ async function handleBotDone(body: any): Promise<void> {
   let downloadUrls: string[] = [];
   let botName: string = "";
   let botMeetingUrl: string | null = null;
+  let botData: any = null;
+  let inferredBotType: string = "recording";
   try {
     const botResponse = await fetch_with_retry(
       `https://${env.RECALL_REGION}.recall.ai/api/v1/bot/${botId}/`,
@@ -206,7 +238,7 @@ async function handleBotDone(body: any): Promise<void> {
         await botResponse.text(),
       );
     } else {
-      const botData = await botResponse.json();
+      botData = await botResponse.json();
 
       // ── STEP 1 DIAGNOSTICS ──────────────────────────────────────────────────
       console.log(
@@ -246,7 +278,7 @@ async function handleBotDone(body: any): Promise<void> {
       // where these fields weren't available when the meetings row was first created.
       botMeetingUrl = botData?.meeting_url ?? null;
       botName = botData?.bot_name ?? "";
-      const inferredBotType = botName.toUpperCase().includes("WEYA VOICE")
+      inferredBotType = botName.toUpperCase().includes("WEYA VOICE")
         ? "voice_agent"
         : "recording";
       try {
@@ -342,25 +374,26 @@ async function handleBotDone(body: any): Promise<void> {
     `[handleBotDone] merged total: ${segments.length} segments from ${downloadUrls.length} URL(s)`,
   );
 
-  // Step 3: Supplement real-time utterances — do NOT delete existing rows.
-  // The transcript.data webhook is the primary insertion path and is already working.
-  // handleBotDone only adds utterances that are missing (e.g. bot's own audio stream
-  // which doesn't arrive via transcript.data). If real-time rows already exist for this
-  // bot_id, we skip the insert entirely to avoid duplicates.
+  // Step 3: Supplement real-time utterances with the async (recorded) transcript.
+  // The transcript.data webhook is the primary path, but it can miss utterances
+  // due to network issues or delivery failures. The recorded transcript from
+  // Recall is the authoritative source. If it has MORE segments than what we
+  // received in real-time, replace with the complete version.
   if (segments.length > 0) {
-    // Check whether real-time utterances already exist for this bot
     const { count: existingCount } = await supabase
       .from("utterances")
       .select("id", { count: "exact", head: true })
       .eq("bot_id", botId);
 
-    if ((existingCount ?? 0) > 0) {
+    const realTimeCount = existingCount ?? 0;
+
+    if (realTimeCount > 0 && segments.length <= realTimeCount) {
       console.log(
-        `[handleBotDone] ${existingCount} real-time utterances already exist for bot ${botId} — skipping async insert to avoid overwrite`,
+        `[handleBotDone] real-time has ${realTimeCount} rows, async has ${segments.length} — real-time is complete, skipping`,
       );
     } else {
-      // No real-time rows arrived (e.g. transcript.data webhooks were missed).
-      // Safe to insert the async transcript as a fallback.
+      // Either no real-time rows, or async transcript has more segments.
+      // Replace with the complete recorded version.
       try {
         const rows = segments.map((seg) => {
           const raw = seg.participant?.name ?? seg.speaker ?? "";
@@ -379,9 +412,27 @@ async function handleBotDone(body: any): Promise<void> {
         });
 
         const speakers = [...new Set(rows.map((r) => r.speaker))];
-        console.log(
-          `[handleBotDone] no real-time rows found — inserting ${rows.length} async utterances, speakers: ${JSON.stringify(speakers)}`,
-        );
+
+        if (realTimeCount > 0) {
+          // Delete incomplete real-time rows before inserting complete version
+          console.log(
+            `[handleBotDone] async has ${segments.length} segments vs ${realTimeCount} real-time — replacing with complete transcript`,
+          );
+          const { error: deleteError } = await supabase
+            .from("utterances")
+            .delete()
+            .eq("bot_id", botId);
+          if (deleteError) {
+            console.error(
+              `[handleBotDone] failed to delete old utterances for bot ${botId}:`,
+              deleteError,
+            );
+          }
+        } else {
+          console.log(
+            `[handleBotDone] no real-time rows — inserting ${rows.length} async utterances`,
+          );
+        }
 
         const { error: insertError, data: insertData } = await supabase
           .from("utterances")
@@ -395,7 +446,7 @@ async function handleBotDone(body: any): Promise<void> {
           );
         } else {
           console.log(
-            `[handleBotDone] Supabase insert OK — ${insertData?.length ?? rows.length} rows written for bot ${botId}`,
+            `[handleBotDone] Supabase insert OK — ${insertData?.length ?? rows.length} rows written for bot ${botId}, speakers: ${JSON.stringify(speakers)}`,
           );
         }
       } catch (err) {
@@ -405,6 +456,44 @@ async function handleBotDone(body: any): Promise<void> {
         );
       }
     }
+  }
+
+  // Step 3b — Gladia post-meeting transcription (voice agent only)
+  // Recording bot transcripts arrive cleanly via transcript.data — Gladia not needed.
+  if (inferredBotType === "voice_agent") {
+    try {
+      // Mirror the exact same pattern used in Step 1 for transcript URLs:
+      //   recordings[i].media_shortcuts.transcript.data.download_url
+      // Audio-only is preferred over video — smaller file, faster Gladia upload/processing.
+      // Fall back to video if audio shortcut is absent.
+      const recordingsForGladia: any[] = Array.isArray(botData?.recordings)
+        ? botData.recordings
+        : [];
+      let recordingUrl: string | null = null;
+      for (const r of recordingsForGladia) {
+        const url =
+          r?.media_shortcuts?.audio?.data?.download_url ??
+          r?.media_shortcuts?.video_mixed?.data?.download_url ??
+          r?.media_shortcuts?.video?.data?.download_url ??
+          null;
+        if (url) {
+          recordingUrl = url;
+          break;
+        }
+      }
+      console.log(`[handleBotDone] Gladia recording URL: ${recordingUrl ?? "NONE"}`);
+
+      if (recordingUrl) {
+        console.log(`[handleBotDone] Starting Gladia transcription for bot ${botId}`);
+        await transcribeWithGladia(recordingUrl, botId);
+      } else {
+        console.warn(`[handleBotDone] No recording URL found for bot ${botId} — skipping Gladia`);
+      }
+    } catch (err) {
+      console.error(`[handleBotDone] Gladia step failed for bot ${botId}:`, err);
+    }
+  } else {
+    console.log(`[handleBotDone] bot_type=${inferredBotType} — skipping Gladia (recording bot uses real-time transcript)`);
   }
 
   // Step 4: Mark the meeting as done (runs regardless of transcript availability)
@@ -457,6 +546,161 @@ async function handleBotDone(body: any): Promise<void> {
       );
     }
   }
+
+  // Step 5: Auto-ingest transcript into Knowledge Base (non-blocking)
+  // This enables the voice agent to answer questions about past meetings
+  try {
+    const { data: allUtterances } = await supabase
+      .from("utterances")
+      .select("speaker, words, timestamp")
+      .eq("bot_id", botId)
+      .order("timestamp", { ascending: true });
+
+    if (allUtterances && allUtterances.length > 0) {
+      // Build transcript text with speaker labels
+      const transcriptText = allUtterances
+        .map((row) => {
+          const text = Array.isArray(row.words)
+            ? row.words.map((w: any) => w.text).join(" ")
+            : "";
+          return `${row.speaker}: ${text}`;
+        })
+        .join("\n");
+
+      // Skip very short transcripts (likely failed recordings)
+      if (transcriptText.length < 100) {
+        console.log(
+          `[handleBotDone] Transcript too short (${transcriptText.length} chars) — skipping KB ingest`,
+        );
+      } else {
+        // Dedup check using content hash
+        const contentHash = createHash("sha256")
+          .update(transcriptText)
+          .digest("hex");
+        const { data: existing } = await supabase
+          .from("kb_documents")
+          .select("id")
+          .eq("content_hash", contentHash)
+          .maybeSingle();
+
+        if (existing) {
+          console.log(
+            `[handleBotDone] KB doc already exists for bot ${botId} (hash match) — skipping`,
+          );
+        } else {
+          // Build a rich title: "Meeting Title — 27 Mart 2026 Cuma — Gülfem, Yiğit"
+          const participants = [
+            ...new Set(allUtterances.map((r) => r.speaker)),
+          ].filter(
+            (name) =>
+              name !== "WEYA Voice Agent" &&
+              name !== "WEYA by Light Eagle" &&
+              name !== "Unknown",
+          );
+
+          const meetingDate = new Date(allUtterances[0].timestamp);
+          const dateStr = meetingDate.toLocaleDateString("tr-TR", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+            weekday: "long",
+          });
+
+          // Try to get calendar title
+          let calendarTitle = "Toplantı";
+          try {
+            const metaMap = await buildBotMetadataMap([botId]);
+            const meta = metaMap.get(botId);
+            if (meta?.title) calendarTitle = meta.title;
+          } catch (metaErr) {
+            console.error(
+              `[handleBotDone] Failed to get calendar title for KB ingest:`,
+              metaErr,
+            );
+          }
+
+          const meetingType = normalizeMeetingType(calendarTitle);
+
+          const docTitle = participants.length > 0
+            ? `${calendarTitle} — ${dateStr} — ${participants.join(", ")}`
+            : `${calendarTitle} — ${dateStr}`;
+
+          // Get transcripts category
+          const { data: cat } = await supabase
+            .from("kb_categories")
+            .select("id")
+            .eq("name", "transcripts")
+            .single();
+
+          if (!cat) {
+            console.error(
+              `[handleBotDone] 'transcripts' category not found — run migration first`,
+            );
+          } else {
+            // Create KB document — set created_at to actual meeting date so date filters work
+            const { data: doc, error: docErr } = await supabase
+              .from("kb_documents")
+              .insert({
+                title: docTitle,
+                category_id: cat.id,
+                source_type: "transcript",
+                content_hash: contentHash,
+                metadata: {
+                  botId,
+                  meetingDate: meetingDate.toISOString(),
+                  meeting_type: meetingType,
+                  meeting_title: calendarTitle,
+                },
+                created_at: meetingDate.toISOString(),
+              })
+              .select("id")
+              .single();
+
+            if (docErr) {
+              console.error(`[handleBotDone] KB doc insert failed:`, docErr);
+            } else {
+              // Chunk and embed
+              const chunks = chunkText(transcriptText);
+// Prepend document title to each chunk for better semantic search
+const chunksWithTitle = chunks.map(chunk => `[${docTitle}]\n\n${chunk}`);
+const embeddings = await createEmbeddings(chunksWithTitle);
+
+const chunkRows = chunksWithTitle.map((chunk, i) => ({
+  document_id: doc.id,
+  chunk_index: i,
+  content: chunk,
+  token_count: Math.ceil(chunk.length / 4),
+  embedding: JSON.stringify(embeddings[i]),
+}));
+
+              const { error: chunkErr } = await supabase
+                .from("kb_chunks")
+                .insert(chunkRows);
+
+              if (chunkErr) {
+                console.error(
+                  `[handleBotDone] KB chunks insert failed:`,
+                  chunkErr,
+                );
+              } else {
+                console.log(
+                  `[handleBotDone] ✅ Auto-ingested to KB: "${docTitle}" (${chunks.length} chunks, ${transcriptText.length} chars)`,
+                );
+              }
+            }
+          }
+        }
+      }
+    } else {
+      console.log(
+        `[handleBotDone] No utterances for bot ${botId} — skipping KB ingest`,
+      );
+    }
+  } catch (kbErr) {
+    // KB ingest failure must NEVER break the webhook — Recall expects 200
+    console.error(`[handleBotDone] KB auto-ingest failed (non-fatal):`, kbErr);
+  }
+
   console.log(
     `[handleBotDone] ── END bot_id=${botId} ───────────────────────────────`,
   );
@@ -648,7 +892,26 @@ export async function schedule_bot_for_calendar_event(args: {
       recording_config: {
         transcript: {
           provider: {
-            recallai_streaming: {},
+            recallai_streaming: {
+              language: "auto",
+              key_terms: [
+                "WEYA",
+                "Light Eagle",
+                "Onur",
+                "Heval",
+                "Gulfem",
+                "Yigit",
+                "Mehmet Cem",
+                "Vercel",
+                "Clerk",
+                "JWT",
+                "GitHub",
+                "TypeScript",
+                "pull request",
+                "deploy",
+                "webhook",
+              ],
+            },
           },
           diarization: {
             use_separate_streams_when_available: true,
@@ -673,7 +936,26 @@ export async function schedule_bot_for_calendar_event(args: {
       // meeting_url and start_time is automatically updated by Recall when we call the schedule bot for calendar event endpoint.
       recording_config: {
         transcript: {
-          provider: { recallai_streaming: {} },
+          provider: {
+            recallai_streaming: {
+              language: "auto",
+              key_terms: [
+                "WEYA",
+                "Heval",
+                "Gulfem",
+                "Yigit",
+                "Mehmet Cem",
+                "Vercel",
+                "Clerk",
+                "JWT",
+                "GitHub",
+                "TypeScript",
+                "pull request",
+                "deploy",
+                "webhook",
+              ],
+            },
+          },
         },
         realtime_endpoints: [
           {
@@ -702,7 +984,34 @@ export async function schedule_bot_for_calendar_event(args: {
   );
   if (!response.ok) throw new Error(await response.text());
 
-  return CalendarEventSchema.parse(await response.json());
+  const updatedEvent = CalendarEventSchema.parse(await response.json());
+
+  // Pre-store the user association for each bot on this calendar event so that
+  // meetings.user_email is populated before transcript.data webhooks arrive.
+  // This lets the Notes page filter by user without a Recall API round-trip per request.
+  // ignoreDuplicates: true preserves user_email if the row already exists.
+  if (calendar.platform_email && updatedEvent.bots.length > 0) {
+    await Promise.all(
+      updatedEvent.bots.map((bot) =>
+        supabase
+          .from("meetings")
+          .upsert(
+            { bot_id: bot.bot_id, user_email: calendar.platform_email, done: false },
+            { onConflict: "bot_id", ignoreDuplicates: true },
+          )
+          .then(({ error }) => {
+            if (error) {
+              console.error(
+                `[schedule_bot] Failed to pre-store user_email for bot ${bot.bot_id}:`,
+                error,
+              );
+            }
+          }),
+      ),
+    );
+  }
+
+  return updatedEvent;
 }
 
 /**

@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Bot, Calendar, Download, FileText, Loader2, MessageSquare, User, Users } from "lucide-react";
@@ -19,6 +20,7 @@ interface Utterance {
 interface NoteDetailResponse {
     utterances: Utterance[];
     done: boolean;
+    bot_type: string | null;
     title: string | null;
     participants: string[];
 }
@@ -26,20 +28,31 @@ interface NoteDetailResponse {
 function TranscriptView() {
     const { botId } = useParams<{ botId: string }>();
     const navigate = useNavigate();
+    const { getToken } = useAuth();
 
     const { data, isPending, isError } = useQuery<NoteDetailResponse>({
         queryKey: ["note-detail", botId],
         queryFn: async () => {
-            const res = await fetch(`/api/notes/${botId}`);
+            const token = await getToken();
+            const res = await fetch(`/api/notes/${botId}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
             if (!res.ok) throw new Error(await res.text());
             return res.json();
         },
         enabled: !!botId,
-        refetchInterval: 5000, // Poll every 5s for live updates
+        refetchInterval: (query) => {
+            const d = query.state.data as NoteDetailResponse | undefined;
+            // voice_agent: poll until done === true (Gladia result is all-or-nothing), then stop
+            if (d?.bot_type === "voice_agent") return d.done ? false : 5000;
+            // recording: always poll for live transcript updates during the meeting
+            return 5000;
+        },
     });
 
     const utterances = data?.utterances ?? [];
     const isDone = data?.done ?? false;
+    const isVoiceAgent = data?.bot_type === "voice_agent";
     const title = data?.title ?? "Untitled Meeting";
     const participants = data?.participants ?? [];
 
@@ -113,7 +126,7 @@ function TranscriptView() {
                                 Transcript complete
                             </span>
                         )}
-                        {!isDone && utterances.length > 0 && (
+                        {!isDone && !isVoiceAgent && utterances.length > 0 && (
                             <span className="text-blue-600 font-medium">
                                 Live (updating every 5s)
                             </span>
@@ -134,14 +147,21 @@ function TranscriptView() {
                                 Failed to load transcript. Please try again.
                             </p>
                         </div>
+                    ) : isVoiceAgent && !isDone ? (
+                        <div className="flex flex-col items-center justify-center py-12">
+                            <Loader2 className="size-8 text-blue-400 mb-3 animate-spin" />
+                            <p className="text-sm font-medium text-gray-700">
+                                Transcript is being processed.
+                            </p>
+                            <p className="text-xs text-gray-400 mt-1">
+                                This usually takes 2–5 minutes after the meeting ends.
+                            </p>
+                        </div>
                     ) : utterances.length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-12">
                             <MessageSquare className="size-8 text-gray-300 mb-2" />
                             <p className="text-sm text-gray-500">
-                                No transcript available yet
-                            </p>
-                            <p className="text-xs text-gray-400 mt-1">
-                                Transcript will appear here once the bot joins the meeting
+                                No transcript available
                             </p>
                         </div>
                     ) : (
