@@ -263,7 +263,12 @@ body=${JSON.stringify(body)}
                 if (!await requireAuth(req, res)) return;
                 if (!body?.meeting_url) throw new Error("meeting_url is required");
 
-                const userEmail: string = (req as any).userEmail;
+                const userEmail: string | undefined = (req as any).userEmail;
+                if (!userEmail) {
+                    res.writeHead(401, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "Unable to resolve user email from auth token" }));
+                    return;
+                }
 
                 // Use persisted bot_type from settings when caller doesn't specify one
                 let bot_type = body.bot_type;
