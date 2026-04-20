@@ -72,7 +72,7 @@ export async function cleanTranscript(botId: string): Promise<void> {
     .from("utterances")
     .select("id, speaker, words")
     .eq("bot_id", botId)
-    .order("created_at");
+    .order("timestamp");
 
   if (error || !utterances || utterances.length === 0) {
     console.warn(`[cleanTranscript] no utterances found for bot ${botId}`);
