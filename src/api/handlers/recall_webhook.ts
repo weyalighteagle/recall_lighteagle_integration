@@ -217,6 +217,7 @@ async function handleBotDone(body: any): Promise<void> {
   // Step 1: Fetch bot details from Recall v1 API to get transcript download URLs
   let downloadUrls: string[] = [];
   let botName: string = "";
+  let botMeetingUrl: string | null = null;
   let botData: any = null;
   let inferredBotType: string = "recording";
   try {
@@ -275,7 +276,7 @@ async function handleBotDone(body: any): Promise<void> {
 
       // Backfill meeting_url, bot_type, and bot_name — important for calendar-scheduled bots
       // where these fields weren't available when the meetings row was first created.
-      const botMeetingUrl: string | null = botData?.meeting_url ?? null;
+      botMeetingUrl = botData?.meeting_url ?? null;
       botName = botData?.bot_name ?? "";
       inferredBotType = botName.toUpperCase().includes("WEYA VOICE")
         ? "voice_agent"
@@ -516,6 +517,36 @@ async function handleBotDone(body: any): Promise<void> {
       err,
     );
   }
+
+  // Step 4b: Flip done=true on sibling bots that share the same meeting_url.
+  // Covers the case where a calendar-scheduled bot and a webhook-upserted bot
+  // both attended the same meeting but carry different bot_ids.
+  if (botMeetingUrl && botMeetingUrl.trim() !== "") {
+    try {
+      const { error: siblingError } = await supabase
+        .from("meetings")
+        .update({ done: true })
+        .eq("meeting_url", botMeetingUrl)
+        .eq("done", false);
+
+      if (siblingError) {
+        console.error(
+          `[handleBotDone] failed to flip sibling bots done for meeting_url=${botMeetingUrl}:`,
+          siblingError,
+        );
+      } else {
+        console.log(
+          `[handleBotDone] sibling bots marked done for meeting_url=${botMeetingUrl}`,
+        );
+      }
+    } catch (err) {
+      console.error(
+        `[handleBotDone] unexpected error flipping sibling bots for meeting_url=${botMeetingUrl}:`,
+        err,
+      );
+    }
+  }
+
   // Step 5: Auto-ingest transcript into Knowledge Base (non-blocking)
   // This enables the voice agent to answer questions about past meetings
   try {
