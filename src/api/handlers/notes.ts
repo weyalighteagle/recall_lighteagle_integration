@@ -119,17 +119,40 @@ export async function handleNotesList(): Promise<{
         created_at: string;
     };
     const rows: Row[] = data ?? [];
+
+    // Hoist utterance fetch before grouping so we can prefer the bot_id that
+    // actually received utterances when multiple bots share a meeting_url.
+    const allCandidateIds = rows.map((r) => r.bot_id);
+    const botsWithUtterances = new Set<string>();
+    if (allCandidateIds.length > 0) {
+        const { data: uRows } = await supabase
+            .from("utterances")
+            .select("bot_id")
+            .in("bot_id", allCandidateIds)
+            .limit(5000);
+        for (const r of uRows ?? []) botsWithUtterances.add(r.bot_id);
+    }
+
     const grouped = new Map<string, Row>();
     for (const row of rows) {
         const key = row.meeting_url ?? row.bot_id;
         const existing = grouped.get(key);
-        if (!existing || row.bot_type === "voice_agent") {
+        if (!existing) {
+            grouped.set(key, row);
+            continue;
+        }
+        const rowHasUtterances = botsWithUtterances.has(row.bot_id);
+        const existingHasUtterances = botsWithUtterances.has(existing.bot_id);
+        // Prefer the bot with utterances; break ties by preferring voice_agent.
+        if (rowHasUtterances && !existingHasUtterances) {
+            grouped.set(key, row);
+        } else if (rowHasUtterances === existingHasUtterances && row.bot_type === "voice_agent") {
             grouped.set(key, row);
         }
     }
     const meetings = [...grouped.values()];
 
-    // Enrich with titles and participants
+    // Enrich with titles and participants — scoped to the post-grouping bot_ids only.
     const botIds = meetings.map((m) => m.bot_id);
     const metaMap = await buildBotMetadataMap(botIds);
 
