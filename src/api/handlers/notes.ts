@@ -193,6 +193,9 @@ export async function handleNotesList(userEmail: string): Promise<{
                   .from("meetings")
                   .select("bot_id, bot_type, meeting_url, done, created_at")
                   .in("bot_id", calendarBotIds)
+                  .is("user_email", null)   // calendar path is for legacy/scheduled bots only;
+                                            // instant meeting bots (user_email set) are handled
+                                            // exclusively by the userResult query below
                   .order("created_at", { ascending: false })
             : Promise.resolve({ data: [] as MeetingRow[], error: null }),
         supabase
@@ -281,7 +284,13 @@ async function assertMeetingOwnership(botId: string, userEmail: string): Promise
         throw Object.assign(new Error("Forbidden"), { statusCode: 403 });
     }
 
-    // Legacy meeting (user_email = NULL): fall back to calendar cross-reference
+    // Legacy meeting (user_email = NULL): fall back to calendar cross-reference.
+    // Recall.ai /calendars endpoint ignores platform_email filter and returns all
+    // workspace calendars — never use it as the sole ownership check.
+    // This fallback is intentionally kept only for legacy calendar-scheduled bots
+    // (user_email = NULL rows created before user scoping was added). Instant meeting
+    // bots created via /api/bot/join always have user_email set (enforced in index.ts),
+    // so they never reach this branch.
     const calendarMeta = await fetchCalendarBotMeta(userEmail);
     if (!calendarMeta.has(botId)) {
         throw Object.assign(new Error("Forbidden"), { statusCode: 403 });
