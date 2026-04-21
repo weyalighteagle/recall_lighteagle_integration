@@ -451,6 +451,7 @@ async function handleBotDone(body: any): Promise<void> {
             bot_id: botId,
             speaker,
             words: seg.words,
+            source: "realtime",
           };
         });
 
