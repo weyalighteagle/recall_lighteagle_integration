@@ -225,26 +225,13 @@ export async function transcribeWithGladia(
         speaker: resolvedSpeaker,
         words,
         timestamp,
+        source: "gladia",
       };
     });
 
-    // Step 4: Replace existing utterances — insert first, then delete old rows.
-    // We capture the IDs of existing rows before inserting so the delete
-    // targets only pre-existing rows and never touches the Gladia rows we
-    // are about to write. This avoids any clock-skew issues with created_at.
-    const { data: existingRows, error: snapshotError } = await supabase
-      .from("utterances")
-      .select("id")
-      .eq("bot_id", botId);
-
-    if (snapshotError) {
-      throw new Error(
-        `Failed to snapshot existing utterances for bot ${botId}: ${snapshotError.message}`,
-      );
-    }
-
-    const existingIds = (existingRows ?? []).map((r: any) => r.id as string);
-
+    // Step 4: Insert Gladia rows, then delete any non-Gladia rows for this bot.
+    // The source filter makes this safe to run unconditionally — it never
+    // touches the rows we just inserted.
     const { error: insertError } = await supabase
       .from("utterances")
       .insert(gladiaRows);
@@ -255,16 +242,15 @@ export async function transcribeWithGladia(
       );
     }
 
-    if (existingIds.length > 0) {
-      const { error: deleteError } = await supabase
-        .from("utterances")
-        .delete()
-        .in("id", existingIds);
-      if (deleteError) {
-        console.warn(
-          `[gladia] cleanup delete warning for bot ${botId}: ${deleteError.message}`,
-        );
-      }
+    const { error: deleteError } = await supabase
+      .from("utterances")
+      .delete()
+      .eq("bot_id", botId)
+      .neq("source", "gladia");
+    if (deleteError) {
+      console.warn(
+        `[gladia] cleanup delete warning for bot ${botId}: ${deleteError.message}`,
+      );
     }
 
     console.log(
