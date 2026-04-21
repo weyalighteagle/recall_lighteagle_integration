@@ -695,17 +695,17 @@ async function handleBotDone(body: any): Promise<void> {
             } else {
               // Chunk and embed
               const chunks = chunkText(transcriptText);
-// Prepend document title to each chunk for better semantic search
-const chunksWithTitle = chunks.map(chunk => `[${docTitle}]\n\n${chunk}`);
-const embeddings = await createEmbeddings(chunksWithTitle);
+              // Prepend document title to each chunk for better semantic search
+              const chunksWithTitle = chunks.map(chunk => `[${docTitle}]\n\n${chunk}`);
+              const embeddings = await createEmbeddings(chunksWithTitle);
 
-const chunkRows = chunksWithTitle.map((chunk, i) => ({
-  document_id: doc.id,
-  chunk_index: i,
-  content: chunk,
-  token_count: Math.ceil(chunk.length / 4),
-  embedding: JSON.stringify(embeddings[i]),
-}));
+              const chunkRows = chunksWithTitle.map((chunk, i) => ({
+                document_id: doc.id,
+                chunk_index: i,
+                content: chunk,
+                token_count: Math.ceil(chunk.length / 4),
+                embedding: JSON.stringify(embeddings[i]),
+              }));
 
               const { error: chunkErr } = await supabase
                 .from("kb_chunks")
