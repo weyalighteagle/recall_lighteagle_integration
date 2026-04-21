@@ -306,9 +306,43 @@ async function handleBotDone(body: any): Promise<void> {
 
   if (downloadUrls.length === 0) {
     console.warn(
-      `[handleBotDone] No transcript URLs for bot ${botId} — marking done and exiting`,
+      `[handleBotDone] No transcript URLs for bot ${botId} — Recall returned empty/no recordings. Marking done and exiting.`,
     );
-    await supabase.from("meetings").update({ done: true }).eq("bot_id", botId);
+    try {
+      const { error } = await supabase
+        .from("meetings")
+        .update({ done: true })
+        .eq("bot_id", botId);
+      if (error) {
+        console.error(
+          `[handleBotDone] early-exit done flip failed for ${botId}, retrying:`,
+          error,
+        );
+        const { error: retryError } = await supabase
+          .from("meetings")
+          .update({ done: true })
+          .eq("bot_id", botId);
+        if (retryError) {
+          console.error(
+            `[handleBotDone] retry also failed for ${botId}:`,
+            retryError,
+          );
+        } else {
+          console.log(
+            `[handleBotDone] retry succeeded — marked ${botId} done via early-exit`,
+          );
+        }
+      } else {
+        console.log(
+          `[handleBotDone] marked ${botId} done via early-exit (Recall returned empty/no transcripts)`,
+        );
+      }
+    } catch (e) {
+      console.error(
+        `[handleBotDone] uncaught error in early-exit done flip for ${botId}:`,
+        e,
+      );
+    }
     return;
   }
 
