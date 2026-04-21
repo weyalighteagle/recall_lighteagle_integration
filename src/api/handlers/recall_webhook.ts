@@ -1020,18 +1020,39 @@ export async function schedule_bot_for_calendar_event(args: {
 
   const updatedEvent = CalendarEventSchema.parse(await response.json());
 
-  // Pre-store the user association for each bot on this calendar event so that
-  // meetings.user_email is populated before transcript.data webhooks arrive.
-  // This lets the Notes page filter by user without a Recall API round-trip per request.
-  // ignoreDuplicates: true preserves user_email if the row already exists.
+  // Extract attendee emails from the raw calendar event (Google: raw.attendees[].email,
+  // Outlook: raw.attendees[].emailAddress.address). Fall back to empty array if absent.
+  const rawAttendees: unknown[] = Array.isArray(calendar_event.raw?.attendees)
+    ? (calendar_event.raw.attendees as unknown[])
+    : [];
+  const attendeeEmails: string[] = rawAttendees.reduce<string[]>((acc, a) => {
+    if (a !== null && typeof a === "object") {
+      const obj = a as Record<string, unknown>;
+      const google = typeof obj["email"] === "string" ? obj["email"] : null;
+      const outlook =
+        obj["emailAddress"] !== null &&
+        typeof obj["emailAddress"] === "object" &&
+        typeof (obj["emailAddress"] as Record<string, unknown>)["address"] === "string"
+          ? ((obj["emailAddress"] as Record<string, unknown>)["address"] as string)
+          : null;
+      const email = google ?? outlook;
+      if (email) acc.push(email);
+    }
+    return acc;
+  }, []);
+
+  // Pre-store the user association and attendee list for each bot on this calendar event
+  // so that meetings.user_email and attendee_emails are populated before transcript.data
+  // webhooks arrive. ignoreDuplicates: false so existing rows get attendee_emails backfilled
+  // on the next webhook fire.
   if (calendar.platform_email && updatedEvent.bots.length > 0) {
     await Promise.all(
       updatedEvent.bots.map((bot) =>
         supabase
           .from("meetings")
           .upsert(
-            { bot_id: bot.bot_id, user_email: calendar.platform_email, done: false },
-            { onConflict: "bot_id", ignoreDuplicates: true },
+            { bot_id: bot.bot_id, user_email: calendar.platform_email, done: false, attendee_emails: attendeeEmails },
+            { onConflict: "bot_id", ignoreDuplicates: false },
           )
           .then(({ error }) => {
             if (error) {

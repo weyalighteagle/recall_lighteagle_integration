@@ -161,6 +161,7 @@ type MeetingRow = {
     meeting_url: string | null;
     done: boolean;
     created_at: string;
+    attendee_emails?: string[];
 };
 
 /**
@@ -185,9 +186,9 @@ export async function handleNotesList(userEmail: string): Promise<{
     const calendarMeta = await fetchCalendarBotMeta(userEmail);
     const calendarBotIds = [...calendarMeta.keys()];
 
-    // Two-pronged DB query: calendar-scoped bots + user_email-scoped bots (ad-hoc / newer records)
+    // Three-pronged DB query: calendar-scoped bots + user_email-scoped bots + guest-attended bots.
     // Separate queries to avoid complex PostgREST filter syntax.
-    const [calendarResult, userResult] = await Promise.all([
+    const [calendarResult, userResult, guestResult] = await Promise.all([
         calendarBotIds.length > 0
             ? supabase
                   .from("meetings")
@@ -203,6 +204,13 @@ export async function handleNotesList(userEmail: string): Promise<{
             .select("bot_id, bot_type, meeting_url, done, created_at")
             .eq("user_email", userEmail)
             .order("created_at", { ascending: false }),
+        // Guest path: meetings the user attended but didn't schedule
+        supabase
+            .from("meetings")
+            .select("bot_id, bot_type, meeting_url, done, created_at")
+            .contains("attendee_emails", [userEmail])
+            .neq("user_email", userEmail)
+            .order("created_at", { ascending: false }),
     ]);
 
     // Merge and deduplicate by bot_id, keeping newest ordering
@@ -210,6 +218,7 @@ export async function handleNotesList(userEmail: string): Promise<{
     for (const row of [
         ...((calendarResult.data as MeetingRow[] | null) ?? []),
         ...((userResult.data as MeetingRow[] | null) ?? []),
+        ...((guestResult.data as MeetingRow[] | null) ?? []),
     ]) {
         rowMap.set(row.bot_id, row);
     }
@@ -314,7 +323,7 @@ export async function handleNotesList(userEmail: string): Promise<{
 async function assertMeetingOwnership(botId: string, userEmail: string): Promise<void> {
     const { data: meeting } = await supabase
         .from("meetings")
-        .select("user_email")
+        .select("user_email, attendee_emails")
         .eq("bot_id", botId)
         .maybeSingle();
 
@@ -324,6 +333,10 @@ async function assertMeetingOwnership(botId: string, userEmail: string): Promise
 
     // Fast path: explicit user_email match
     if (meeting.user_email === userEmail) return;
+
+    // Guest path: user attended the meeting but didn't schedule the bot
+    const attendees: string[] = Array.isArray(meeting.attendee_emails) ? meeting.attendee_emails : [];
+    if (attendees.includes(userEmail)) return;
 
     // Another user's meeting — user_email is set but doesn't match
     if (meeting.user_email !== null) {
