@@ -220,6 +220,7 @@ async function handleBotDone(body: any): Promise<void> {
   let botMeetingUrl: string | null = null;
   let botData: any = null;
   let inferredBotType: string = "recording";
+  let meetingStartIso: string | null = null;
   try {
     const botResponse = await fetch_with_retry(
       `https://${env.RECALL_REGION}.recall.ai/api/v1/bot/${botId}/`,
@@ -281,6 +282,11 @@ async function handleBotDone(body: any): Promise<void> {
       inferredBotType = botName.toUpperCase().includes("WEYA VOICE")
         ? "voice_agent"
         : "recording";
+      // Use the moment the bot entered in_call_recording as the Gladia timestamp anchor.
+      meetingStartIso =
+        (botData?.status_changes as any[] | undefined)?.find(
+          (s: any) => s.code === "in_call_recording",
+        )?.created_at ?? null;
       try {
         await supabase
           .from("meetings")
@@ -302,6 +308,13 @@ async function handleBotDone(body: any): Promise<void> {
     }
   } catch (err) {
     console.error(`Unexpected error fetching bot details for ${botId}:`, err);
+  }
+
+  if (!botData) {
+    console.error(
+      `[handleBotDone] Could not fetch bot details from Recall for bot ${botId}. Skipping transcription. This needs manual review.`,
+    );
+    return;
   }
 
   if (downloadUrls.length === 0) {
@@ -413,7 +426,9 @@ async function handleBotDone(body: any): Promise<void> {
   // due to network issues or delivery failures. The recorded transcript from
   // Recall is the authoritative source. If it has MORE segments than what we
   // received in real-time, replace with the complete version.
-  if (segments.length > 0) {
+  // Voice agent bots skip Recall's async transcript entirely.
+  // Gladia post-meeting STT is the source of truth for this bot type.
+  if (inferredBotType !== "voice_agent" && segments.length > 0) {
     const { count: existingCount } = await supabase
       .from("utterances")
       .select("id", { count: "exact", head: true })
@@ -519,12 +534,24 @@ async function handleBotDone(body: any): Promise<void> {
 
       if (recordingUrl) {
         console.log(`[handleBotDone] Starting Gladia transcription for bot ${botId}`);
-        await transcribeWithGladia(recordingUrl, botId);
+        const gladiaResult = await transcribeWithGladia(recordingUrl, botId, meetingStartIso);
+        if (!gladiaResult.ok) {
+          console.error(
+            `[handleBotDone] Gladia transcription failed for bot ${botId}:`,
+            gladiaResult.error,
+          );
+          // Do not set done = true — return early so this meeting can be identified and retried manually.
+          return;
+        }
+        console.log(
+          `[handleBotDone] Gladia transcription succeeded for bot ${botId} — ${gladiaResult.utteranceCount} utterances inserted.`,
+        );
       } else {
         console.warn(`[handleBotDone] No recording URL found for bot ${botId} — skipping Gladia`);
       }
     } catch (err) {
       console.error(`[handleBotDone] Gladia step failed for bot ${botId}:`, err);
+      return;
     }
   } else {
     console.log(`[handleBotDone] bot_type=${inferredBotType} — skipping Gladia (recording bot uses real-time transcript)`);

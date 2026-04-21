@@ -3,11 +3,18 @@ import { supabase } from "../config/supabase";
 
 const POLL_INTERVAL_MS = 5_000;
 const MAX_POLL_MS = 20 * 60 * 1_000; // 20 minutes
+// Nearest-neighbour speaker matching: reject any match further than this.
+const SPEAKER_MAP_MAX_DELTA_MS = 60_000; // 60 seconds
+
+export type GladiaResult =
+  | { ok: true; utteranceCount: number }
+  | { ok: false; error: string };
 
 export async function transcribeWithGladia(
   recordingUrl: string,
   botId: string,
-): Promise<void> {
+  meetingStartIso: string | null,
+): Promise<GladiaResult> {
   try {
     console.log(
       `[gladia] START bot_id=${botId} — submitting audio to Gladia`,
@@ -108,13 +115,22 @@ export async function transcribeWithGladia(
     // Gladia returns numeric indices ("0", "1", "2") — we map them back to
     // real names (e.g. "Heval Söğüt", "WEYA Voice Agent") using the
     // real-time transcript.data rows that arrived during the meeting.
-    const { data: realtimeUtterances } = await supabase
+    const { data: realtimeUtterances, error: rtError } = await supabase
       .from("utterances")
       .select("speaker, words")
       .eq("bot_id", botId)
       .order("timestamp", { ascending: true });
 
-    // Step 3b: Find recording start time from the earliest absolute word timestamp.
+    if (rtError) {
+      throw new Error(
+        `Failed to fetch real-time utterances for bot ${botId}: ${rtError.message}`,
+      );
+    }
+
+    // Step 3b: Determine the absolute wall-clock anchor for Gladia's t=0.
+    // Gladia times are seconds-from-recording-start (float).
+    // We need an absolute wall-clock anchor to convert them.
+    // Priority: real-time utterance wall-clock > meeting scheduled start.
     let recordingStartMs: number | null = null;
     if (realtimeUtterances && realtimeUtterances.length > 0) {
       for (const u of realtimeUtterances) {
@@ -128,18 +144,33 @@ export async function transcribeWithGladia(
       }
     }
 
+    let anchorMs: number;
+    if (recordingStartMs !== null) {
+      anchorMs = recordingStartMs;
+    } else if (meetingStartIso !== null) {
+      anchorMs = new Date(meetingStartIso).getTime();
+    } else {
+      throw new Error(
+        `Cannot anchor Gladia timestamps: no real-time utterances and no meeting start time. Bot ID: ${botId}`,
+      );
+    }
+
     // Step 3c: Build speakerMap: Gladia index → real speaker name.
     // For each unique Gladia speaker index, find its absolute start time and
     // match it to the closest real-time utterance by wall-clock proximity.
     const speakerMap: Record<string, string> = {};
-    if (recordingStartMs !== null && realtimeUtterances && realtimeUtterances.length > 0) {
-      const uniqueIndices = [...new Set(gladiaUtterances.map((u: any) => String(u.speaker)))];
+    if (realtimeUtterances && realtimeUtterances.length > 0) {
+      const uniqueIndices = [
+        ...new Set(gladiaUtterances.map((u: any) => String(u.speaker))),
+      ];
 
       for (const idx of uniqueIndices) {
-        const sample = gladiaUtterances.find((u: any) => String(u.speaker) === idx);
+        const sample = gladiaUtterances.find(
+          (u: any) => String(u.speaker) === idx,
+        );
         if (!sample) continue;
 
-        const gladiaAbsMs = recordingStartMs + sample.start * 1000;
+        const gladiaAbsMs = anchorMs + sample.start * 1000;
 
         // Find the real-time utterance whose first word's absolute timestamp
         // is closest to this Gladia utterance's absolute start time.
@@ -156,17 +187,23 @@ export async function transcribeWithGladia(
           }
         }
 
-        if (bestName) {
+        if (bestName && bestDelta <= SPEAKER_MAP_MAX_DELTA_MS) {
           speakerMap[idx] = bestName;
+        } else {
+          speakerMap[idx] = `Speaker ${idx}`;
+          console.warn(
+            `[gladia] speakerMap: no real-time anchor within ${SPEAKER_MAP_MAX_DELTA_MS}ms` +
+              ` for Gladia speaker ${idx} (best delta: ${bestDelta}ms). Using fallback label.`,
+          );
         }
       }
     }
     console.log(`[gladia] speakerMap: ${JSON.stringify(speakerMap)}`);
 
     // Step 3d: Map Gladia utterances to our schema using resolved speaker names.
-    const rows = gladiaUtterances.map((utterance: any) => {
+    const gladiaRows = gladiaUtterances.map((utterance: any) => {
       const speakerIdx = String(utterance.speaker);
-      const resolvedSpeaker = speakerMap[speakerIdx] ?? utterance.speaker;
+      const resolvedSpeaker = speakerMap[speakerIdx] ?? `Speaker ${speakerIdx}`;
 
       const hasWordLevel =
         Array.isArray(utterance.words) && utterance.words.length > 0;
@@ -179,12 +216,9 @@ export async function transcribeWithGladia(
           }))
         : [{ text: utterance.transcription }];
 
-      // Compute absolute timestamp so utterances sort correctly in the UI.
-      // Fall back to raw Gladia seconds if no recording start time is available.
-      const timestamp =
-        recordingStartMs !== null
-          ? new Date(recordingStartMs + utterance.start * 1000).toISOString()
-          : new Date(utterance.start * 1000).toISOString();
+      const timestamp = new Date(
+        anchorMs + utterance.start * 1000,
+      ).toISOString();
 
       return {
         bot_id: botId,
@@ -194,33 +228,52 @@ export async function transcribeWithGladia(
       };
     });
 
-    // Step 4: Replace existing utterances for this bot
-    const { error: deleteError } = await supabase
+    // Step 4: Replace existing utterances — insert first, then delete old rows.
+    // We capture the IDs of existing rows before inserting so the delete
+    // targets only pre-existing rows and never touches the Gladia rows we
+    // are about to write. This avoids any clock-skew issues with created_at.
+    const { data: existingRows, error: snapshotError } = await supabase
       .from("utterances")
-      .delete()
+      .select("id")
       .eq("bot_id", botId);
 
-    if (deleteError) {
+    if (snapshotError) {
       throw new Error(
-        `Supabase delete failed for bot ${botId}: ${deleteError.message}`,
+        `Failed to snapshot existing utterances for bot ${botId}: ${snapshotError.message}`,
       );
     }
+
+    const existingIds = (existingRows ?? []).map((r: any) => r.id as string);
 
     const { error: insertError } = await supabase
       .from("utterances")
-      .insert(rows);
+      .insert(gladiaRows);
 
     if (insertError) {
       throw new Error(
-        `Supabase insert failed for bot ${botId}: ${insertError.message}`,
+        `Gladia utterance insert failed for bot ${botId}: ${insertError.message}`,
       );
     }
 
+    if (existingIds.length > 0) {
+      const { error: deleteError } = await supabase
+        .from("utterances")
+        .delete()
+        .in("id", existingIds);
+      if (deleteError) {
+        console.warn(
+          `[gladia] cleanup delete warning for bot ${botId}: ${deleteError.message}`,
+        );
+      }
+    }
+
     console.log(
-      `[gladia] DONE bot_id=${botId} — ${rows.length} utterances written to Supabase`,
+      `[gladia] DONE bot_id=${botId} — ${gladiaRows.length} utterances written to Supabase`,
     );
-  } catch (err) {
+    return { ok: true, utteranceCount: gladiaRows.length };
+  } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[gladia] ERROR bot_id=${botId} — ${message}`);
+    return { ok: false, error: message };
   }
 }
