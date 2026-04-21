@@ -124,61 +124,55 @@ export async function recall_webhook(payload: any): Promise<void> {
           // Skip calendar events that have already passed.
           if (new Date(calendar_event.start_time) <= new Date()) continue;
 
-          // Always schedule the recording bot (transcription)
+          // Schedule exactly one bot type — voice_agent takes priority over recording
+          const botTypeToSchedule: BotType = botSettings.bot_mode === "voice_agent"
+            ? "voice_agent"
+            : "recording";
+
+          // Voice agent requires env vars to be configured
+          if (
+            botTypeToSchedule === "voice_agent" &&
+            (!env.VOICE_AGENT_PAGE_URL || !env.VOICE_AGENT_WSS_URL)
+          ) {
+            console.warn(
+              `[bot_settings] Mode is voice_agent but VOICE_AGENT_PAGE_URL/VOICE_AGENT_WSS_URL are not configured — skipping voice agent scheduling`,
+            );
+            continue;
+          }
+
           try {
+            // Resolve KB override for voice_agent bots
+            let kb_id: string | undefined;
+            if (botTypeToSchedule === "voice_agent") {
+              const { data: kbOverride } = await supabase
+                .from("meeting_kb_overrides")
+                .select("kb_document_id")
+                .eq("calendar_event_id", calendar_event.id)
+                .maybeSingle();
+              kb_id =
+                kbOverride?.kb_document_id ??
+                botSettings.active_kb_id ??
+                undefined;
+              console.log(
+                `[calendar.sync_events] event=${calendar_event.id} effective_kb_id=${kb_id ?? "none"}`,
+              );
+            }
+
             await schedule_bot_for_calendar_event({
               calendar_event,
               calendar,
-              bot_type: "recording",
+              bot_type: botTypeToSchedule,
+              kb_id,
             });
             console.log(
-              `Scheduled recording bot for calendar event: ${calendar_event.id}`,
+              `[calendar_sync] Scheduled ${botTypeToSchedule} bot for event ` +
+              `${calendar_event.id} (meeting: ${calendar_event.meeting_url})`,
             );
           } catch (err) {
             console.error(
-              `Failed to schedule recording bot for calendar event ${calendar_event.id}:`,
+              `Failed to schedule ${botTypeToSchedule} bot for calendar event ${calendar_event.id}:`,
               err,
             );
-          }
-
-          // Schedule voice agent only when mode is voice_agent
-          if (botSettings.bot_mode === "voice_agent") {
-            if (env.VOICE_AGENT_PAGE_URL && env.VOICE_AGENT_WSS_URL) {
-              try {
-                // Check per-meeting KB override; fall back to global default
-                const { data: kbOverride } = await supabase
-                  .from("meeting_kb_overrides")
-                  .select("kb_document_id")
-                  .eq("calendar_event_id", calendar_event.id)
-                  .maybeSingle();
-                const effective_kb_id =
-                  kbOverride?.kb_document_id ??
-                  botSettings.active_kb_id ??
-                  undefined;
-                console.log(
-                  `[calendar.sync_events] event=${calendar_event.id} effective_kb_id=${effective_kb_id ?? "none"}`,
-                );
-
-                await schedule_bot_for_calendar_event({
-                  calendar_event,
-                  calendar,
-                  bot_type: "voice_agent",
-                  kb_id: effective_kb_id,
-                });
-                console.log(
-                  `Scheduled voice agent bot for calendar event: ${calendar_event.id}`,
-                );
-              } catch (err) {
-                console.error(
-                  `Failed to schedule voice agent bot for calendar event ${calendar_event.id}:`,
-                  err,
-                );
-              }
-            } else {
-              console.warn(
-                `[bot_settings] Mode is voice_agent but VOICE_AGENT_PAGE_URL/VOICE_AGENT_WSS_URL are not configured — skipping voice agent scheduling`,
-              );
-            }
           }
         }
         next = new_next;
@@ -1029,23 +1023,35 @@ export async function schedule_bot_for_calendar_event(args: {
     };
   }
 
-  const response = await fetch_with_retry(
-    `https://${env.RECALL_REGION}.recall.ai/api/v2/calendar-events/${calendar_event.id}/bot`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `${env.RECALL_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        deduplication_key,
-        bot_config,
-      }),
-    },
-  );
-  if (!response.ok) throw new Error(await response.text());
+  // Fix A2: If this calendar event already has bots scheduled, skip the Recall POST
+  // to avoid creating duplicate bots for the same event.
+  const existingBots = calendar_event.bots ?? [];
+  let updatedEvent: CalendarEventType;
 
-  const updatedEvent = CalendarEventSchema.parse(await response.json());
+  if (existingBots.length > 0) {
+    console.log(
+      `[schedule_bot] Event ${calendar_event.id} already has ` +
+      `${existingBots.length} bot(s) scheduled — skipping Recall API call.`,
+    );
+    updatedEvent = calendar_event;
+  } else {
+    const response = await fetch_with_retry(
+      `https://${env.RECALL_REGION}.recall.ai/api/v2/calendar-events/${calendar_event.id}/bot`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `${env.RECALL_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          deduplication_key,
+          bot_config,
+        }),
+      },
+    );
+    if (!response.ok) throw new Error(await response.text());
+    updatedEvent = CalendarEventSchema.parse(await response.json());
+  }
 
   // Extract attendee emails from the raw calendar event (Google: raw.attendees[].email,
   // Outlook: raw.attendees[].emailAddress.address). Fall back to empty array if absent.
@@ -1068,28 +1074,43 @@ export async function schedule_bot_for_calendar_event(args: {
     return acc;
   }, []);
 
-  // Pre-store the user association and attendee list for each bot on this calendar event
-  // so that meetings.user_email and attendee_emails are populated before transcript.data
-  // webhooks arrive. ignoreDuplicates: false so existing rows get attendee_emails backfilled
-  // on the next webhook fire.
-  if (calendar.platform_email && updatedEvent.bots.length > 0) {
+  // Fix A3: Only upsert the bot that matches the bot_type being scheduled.
+  // This prevents the recording-bot row from being written when scheduling a voice_agent
+  // (and vice versa), which was the root cause of ghost duplicate meetings.
+  const botsToUpsert = updatedEvent.bots.filter((bot) => {
+    const key: string = bot.deduplication_key ?? "";
+    return bot_type === "voice_agent" ? key.startsWith("va-") : key.startsWith("rec-");
+  });
+
+  if (botsToUpsert.length === 0) {
+    console.warn(
+      `[schedule_bot] No matching bot found in updatedEvent.bots[] for type ${bot_type} ` +
+      `on event ${calendar_event.id}. Dedup keys present: ` +
+      `[${updatedEvent.bots.map((b) => b.deduplication_key).join(", ")}]`,
+    );
+    return updatedEvent;
+  }
+
+  if (calendar.platform_email) {
     await Promise.all(
-      updatedEvent.bots.map((bot) =>
-        supabase
+      botsToUpsert.map(async (bot) => {
+        // ignoreDuplicates: true — never reset done=true on re-sync
+        const { error } = await supabase
           .from("meetings")
           .upsert(
             { bot_id: bot.bot_id, user_email: calendar.platform_email, done: false, attendee_emails: attendeeEmails },
-            { onConflict: "bot_id", ignoreDuplicates: false },
-          )
-          .then(({ error }) => {
-            if (error) {
-              console.error(
-                `[schedule_bot] Failed to pre-store user_email for bot ${bot.bot_id}:`,
-                error,
-              );
-            }
-          }),
-      ),
+            { onConflict: "bot_id", ignoreDuplicates: true },
+          );
+        if (error) {
+          console.error(`[schedule_bot] Failed to pre-store user_email for bot ${bot.bot_id}:`, error);
+        }
+        // Refresh attendee list on already-existing rows without touching done
+        await supabase
+          .from("meetings")
+          .update({ attendee_emails: attendeeEmails })
+          .eq("bot_id", bot.bot_id)
+          .eq("done", false);
+      }),
     );
   }
 
