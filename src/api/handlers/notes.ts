@@ -249,7 +249,31 @@ export async function handleNotesList(userEmail: string): Promise<{
             grouped.set(key, row);
         }
     }
-    const meetings = [...grouped.values()];
+    const groupedMeetings = [...grouped.values()];
+
+    // Hide recording-bot rows that have a voice_agent sibling in this user's scoped
+    // result set: same owner, created within 30 s, and the voice_agent has utterances.
+    // This suppresses the ghost "Processing" duplicate without deleting any data.
+    // The filter operates entirely on the already-ownership-scoped rowset — it never
+    // crosses user boundaries.
+    const vaWithUtterancesTimes = groupedMeetings
+        .filter((m) => m.bot_type === "voice_agent" && botsWithUtterances.has(m.bot_id))
+        .map((m) => new Date(m.created_at).getTime());
+
+    const meetings = groupedMeetings.filter((m) => {
+        if (m.bot_type !== "recording" || m.done || botsWithUtterances.has(m.bot_id)) {
+            return true;
+        }
+        const rowTime = new Date(m.created_at).getTime();
+        return !vaWithUtterancesTimes.some((vaTime) => Math.abs(vaTime - rowTime) <= 30_000);
+    });
+
+    const filteredCount = groupedMeetings.length - meetings.length;
+    if (filteredCount > 0) {
+        console.log(
+            `[handleNotesList] suppressed ${filteredCount} ghost recording-bot row(s) for ${userEmail} (voice_agent sibling present within 30s)`,
+        );
+    }
 
     // Enrich with titles and participants — scoped to the post-grouping bot_ids only.
     const botIds = meetings.map((m) => m.bot_id);
