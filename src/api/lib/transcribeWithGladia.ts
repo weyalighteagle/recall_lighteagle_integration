@@ -232,11 +232,18 @@ export async function transcribeWithGladia(
     // We capture the IDs of existing rows before inserting so the delete
     // targets only pre-existing rows and never touches the Gladia rows we
     // are about to write. This avoids any clock-skew issues with created_at.
-    const { data: existingRows } = await supabase
+    const { data: existingRows, error: snapshotError } = await supabase
       .from("utterances")
       .select("id")
       .eq("bot_id", botId);
-    const idsToDelete = (existingRows ?? []).map((r: any) => r.id as string);
+
+    if (snapshotError) {
+      throw new Error(
+        `Failed to snapshot existing utterances for bot ${botId}: ${snapshotError.message}`,
+      );
+    }
+
+    const existingIds = (existingRows ?? []).map((r: any) => r.id as string);
 
     const { error: insertError } = await supabase
       .from("utterances")
@@ -248,11 +255,11 @@ export async function transcribeWithGladia(
       );
     }
 
-    if (idsToDelete.length > 0) {
+    if (existingIds.length > 0) {
       const { error: deleteError } = await supabase
         .from("utterances")
         .delete()
-        .in("id", idsToDelete);
+        .in("id", existingIds);
       if (deleteError) {
         console.warn(
           `[gladia] cleanup delete warning for bot ${botId}: ${deleteError.message}`,
