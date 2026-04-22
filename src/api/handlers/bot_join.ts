@@ -123,6 +123,7 @@ export async function bot_join(args: {
             meeting_url,
             bot_name: resolvedBotName,
             user_email: args.user_email,
+            meeting_start_time: new Date().toISOString(),
         },
         { onConflict: "bot_id", ignoreDuplicates: false },
     );
