@@ -1099,7 +1099,14 @@ export async function schedule_bot_for_calendar_event(args: {
         const { error } = await supabase
           .from("meetings")
           .upsert(
-            { bot_id: bot.bot_id, user_email: calendar.platform_email, done: false, attendee_emails: attendeeEmails },
+            {
+              bot_id: bot.bot_id,
+              user_email: calendar.platform_email,
+              done: false,
+              attendee_emails: attendeeEmails,
+              meeting_start_time: calendar_event.start_time ?? null,
+              meeting_title: calendar_event.raw?.summary ?? calendar_event.raw?.subject ?? null,
+            },
             { onConflict: "bot_id", ignoreDuplicates: true },
           );
         if (error) {
