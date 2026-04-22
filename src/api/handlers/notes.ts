@@ -161,6 +161,7 @@ type MeetingRow = {
     meeting_url: string | null;
     done: boolean;
     created_at: string;
+    meeting_title: string | null;
 };
 
 /**
@@ -191,7 +192,7 @@ export async function handleNotesList(userEmail: string): Promise<{
         calendarBotIds.length > 0
             ? supabase
                   .from("meetings")
-                  .select("bot_id, bot_type, meeting_url, done, created_at")
+                  .select("bot_id, bot_type, meeting_url, done, created_at, meeting_title")
                   .in("bot_id", calendarBotIds)
                   .is("user_email", null)   // calendar path is for legacy/scheduled bots only;
                                             // instant meeting bots (user_email set) are handled
@@ -200,7 +201,7 @@ export async function handleNotesList(userEmail: string): Promise<{
             : Promise.resolve({ data: [] as MeetingRow[], error: null }),
         supabase
             .from("meetings")
-            .select("bot_id, bot_type, meeting_url, done, created_at")
+            .select("bot_id, bot_type, meeting_url, done, created_at, meeting_title")
             .eq("user_email", userEmail)
             .order("created_at", { ascending: false }),
     ]);
@@ -252,7 +253,8 @@ export async function handleNotesList(userEmail: string): Promise<{
     return {
         meetings: meetings.map((m) => ({
             ...m,
-            title: calendarMeta.get(m.bot_id)?.title ?? null,
+            // Resolution order: user-set DB title > calendar-API-derived title > null
+            title: m.meeting_title ?? calendarMeta.get(m.bot_id)?.title ?? null,
             participants: participantsMap.get(m.bot_id) ?? [],
         })),
     };
@@ -317,7 +319,7 @@ export async function handleNoteDetail(
 
     const [transcript, meetingMeta, metaMap] = await Promise.all([
         handleGetTranscript(botId),
-        supabase.from("meetings").select("bot_type").eq("bot_id", botId).maybeSingle(),
+        supabase.from("meetings").select("bot_type, meeting_title").eq("bot_id", botId).maybeSingle(),
         buildBotMetadataMap([botId]),
     ]);
 
@@ -326,7 +328,48 @@ export async function handleNoteDetail(
     return {
         ...transcript,
         bot_type: meetingMeta.data?.bot_type ?? null,
-        title: enrichment?.title ?? null,
+        // Resolution order: user-set DB title > calendar-API-derived title > null
+        // (identical ordering to handleNotesList — must stay in sync)
+        title: meetingMeta.data?.meeting_title ?? enrichment?.title ?? null,
         participants: enrichment?.participants ?? [],
     };
+}
+
+/**
+ * PATCH /api/notes/:botId
+ * Updates the user-editable meeting_title column for a meeting the caller owns.
+ * Returns the saved title so the client can reconcile its optimistic update.
+ */
+export async function handleMeetingTitleUpdate(
+    botId: string,
+    userEmail: string,
+    rawTitle: unknown,
+): Promise<{ title: string }> {
+    if (typeof rawTitle !== "string") {
+        throw Object.assign(new Error("title must be a string"), { statusCode: 400 });
+    }
+    const title = rawTitle.trim();
+    if (!title) {
+        throw Object.assign(new Error("Title cannot be empty"), { statusCode: 400 });
+    }
+    if (title.length > 200) {
+        throw Object.assign(new Error("Title cannot exceed 200 characters"), { statusCode: 400 });
+    }
+
+    await assertMeetingOwnership(botId, userEmail);
+
+    // TODO: KB chunks currently embed the old meeting title as a prefix for semantic
+    // retrieval of proper nouns. Renaming a meeting does not re-embed its chunks.
+    // Decision pending on whether rename should trigger re-embedding of associated
+    // kb_chunks rows. See Notion task: [Category-scoped KB] for broader context.
+    const { error } = await supabase
+        .from("meetings")
+        .update({ meeting_title: title })
+        .eq("bot_id", botId);
+
+    if (error) {
+        throw Object.assign(new Error("Failed to update meeting title"), { statusCode: 500 });
+    }
+
+    return { title };
 }

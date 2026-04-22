@@ -1,8 +1,9 @@
 import { useAuth } from "@clerk/react";
-import { useQuery } from "@tanstack/react-query";
-import { Calendar, ChevronLeft, ChevronRight, Download, FileText, Loader2, Users } from "lucide-react";
-import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Calendar, ChevronLeft, ChevronRight, Download, FileText, Loader2, Pencil, Users } from "lucide-react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 
@@ -25,8 +26,15 @@ interface NotesResponse {
 function NotesList() {
     const navigate = useNavigate();
     const { getToken } = useAuth();
+    const queryClient = useQueryClient();
     const [exportingBotId, setExportingBotId] = useState<string | null>(null);
     const [currentPage, setCurrentPage] = useState(1);
+    const [editingBotId, setEditingBotId] = useState<string | null>(null);
+    const [editValue, setEditValue] = useState("");
+    const [editError, setEditError] = useState<string | null>(null);
+    const [savingBotId, setSavingBotId] = useState<string | null>(null);
+    // Prevents the blur handler from firing a save after Enter or Escape already handled it.
+    const skipNextBlurRef = useRef(false);
 
     const { data, isPending } = useQuery<NotesResponse>({
         queryKey: ["notes"],
@@ -48,7 +56,7 @@ function NotesList() {
     );
 
     const sanitizeFilename = (name: string) =>
-        name.replace(/[^a-zA-Z0-9\u00C0-\u024F\u0400-\u04FF\s\-_]/g, "").trim().replace(/\s+/g, "-");
+        name.replace(/[^a-zA-Z0-9À-ɏЀ-ӿ\s\-_]/g, "").trim().replace(/\s+/g, "-");
 
     const handleExportTranscript = async (botId: string, meetingTitle: string | null) => {
         setExportingBotId(botId);
@@ -83,6 +91,81 @@ function NotesList() {
             console.error("Failed to export transcript:", err);
         } finally {
             setExportingBotId(null);
+        }
+    };
+
+    const startEdit = (meeting: Meeting) => {
+        setEditingBotId(meeting.bot_id);
+        setEditValue(meeting.title ?? "");
+        setEditError(null);
+    };
+
+    const cancelEdit = () => {
+        skipNextBlurRef.current = true;
+        setEditingBotId(null);
+        setEditError(null);
+    };
+
+    const saveTitleEdit = async (botId: string, oldTitle: string | null) => {
+        const trimmed = editValue.trim();
+        if (!trimmed) {
+            setEditError("Title cannot be empty");
+            return; // keep edit mode open
+        }
+
+        // Signal the blur handler (which fires as the input unmounts) to skip.
+        skipNextBlurRef.current = true;
+        setEditingBotId(null);
+        setEditError(null);
+
+        if (trimmed === (oldTitle ?? "")) return; // unchanged — no API call needed
+
+        // Optimistic update
+        queryClient.setQueryData<NotesResponse>(["notes"], (old) => {
+            if (!old) return old;
+            return {
+                meetings: old.meetings.map((m) =>
+                    m.bot_id === botId ? { ...m, title: trimmed } : m,
+                ),
+            };
+        });
+
+        setSavingBotId(botId);
+        try {
+            const token = await getToken();
+            const res = await fetch(`/api/notes/${botId}`, {
+                method: "PATCH",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ title: trimmed }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const { title: savedTitle }: { title: string } = await res.json();
+
+            // Reconcile with server-returned title
+            queryClient.setQueryData<NotesResponse>(["notes"], (old) => {
+                if (!old) return old;
+                return {
+                    meetings: old.meetings.map((m) =>
+                        m.bot_id === botId ? { ...m, title: savedTitle } : m,
+                    ),
+                };
+            });
+        } catch {
+            // Revert optimistic update and notify
+            queryClient.setQueryData<NotesResponse>(["notes"], (old) => {
+                if (!old) return old;
+                return {
+                    meetings: old.meetings.map((m) =>
+                        m.bot_id === botId ? { ...m, title: oldTitle } : m,
+                    ),
+                };
+            });
+            toast.error("Couldn't rename meeting");
+        } finally {
+            setSavingBotId(null);
         }
     };
 
@@ -128,9 +211,51 @@ function NotesList() {
                                     className="flex items-center justify-between py-3 gap-4"
                                 >
                                     <div className="flex flex-col gap-1 min-w-0">
-                                        <span className="text-sm font-medium text-gray-900 truncate">
-                                            {meeting.title ?? "Untitled Meeting"}
-                                        </span>
+                                        {editingBotId === meeting.bot_id ? (
+                                            <div className="flex flex-col gap-0.5">
+                                                <input
+                                                    className="text-sm font-medium text-gray-900 border border-blue-400 rounded px-1.5 py-0.5 outline-none focus:ring-2 focus:ring-blue-200 w-full"
+                                                    value={editValue}
+                                                    maxLength={200}
+                                                    autoFocus
+                                                    onFocus={(e) => e.target.select()}
+                                                    onChange={(e) => {
+                                                        setEditValue(e.target.value);
+                                                        setEditError(null);
+                                                    }}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === "Enter") saveTitleEdit(meeting.bot_id, meeting.title);
+                                                        if (e.key === "Escape") cancelEdit();
+                                                    }}
+                                                    onBlur={() => {
+                                                        if (skipNextBlurRef.current) {
+                                                            skipNextBlurRef.current = false;
+                                                            return;
+                                                        }
+                                                        saveTitleEdit(meeting.bot_id, meeting.title);
+                                                    }}
+                                                />
+                                                {editError && (
+                                                    <span className="text-xs text-red-500">{editError}</span>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                className="group flex items-center gap-1 text-left w-full"
+                                                onClick={() => startEdit(meeting)}
+                                                disabled={savingBotId === meeting.bot_id}
+                                            >
+                                                <span className={`text-sm font-medium truncate ${savingBotId === meeting.bot_id ? "text-gray-400" : "text-gray-900"}`}>
+                                                    {meeting.title ?? "Untitled Meeting"}
+                                                </span>
+                                                {savingBotId === meeting.bot_id ? (
+                                                    <Loader2 className="size-3 text-gray-400 animate-spin shrink-0" />
+                                                ) : (
+                                                    <Pencil className="size-3 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                                                )}
+                                            </button>
+                                        )}
                                         <div className="flex items-center gap-3 text-xs text-gray-500">
                                             <span className="flex items-center gap-1">
                                                 <Calendar className="size-3" />
