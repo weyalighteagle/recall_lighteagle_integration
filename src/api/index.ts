@@ -9,7 +9,7 @@ import { calendars_list } from "./handlers/calendars_list";
 import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event } from "./handlers/recall_webhook";
 import { kb_list, kb_create, kb_delete, kb_toggle, kb_get, kb_update } from "./handlers/knowledge_base";
 import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
-import { handleNotesList, handleNoteDetail } from "./handlers/notes";
+import { handleNotesList, handleNoteDetail, handleMeetingTitleUpdate } from "./handlers/notes";
 import { handleVoiceAgentStatus } from "./handlers/voice_agent_status";
 import { bot_join } from "./handlers/bot_join";
 import { bot_settings_get, bot_settings_update } from "./handlers/bot_settings";
@@ -433,6 +433,24 @@ body=${JSON.stringify(body)}
 
                     const result = await handleNoteDetail(botId, userEmail);
                     console.log(`Retrieved note detail for bot ${botId}: ${result.utterances.length} utterances`);
+
+                    res.writeHead(200, {
+                        "Content-Type": "application/json",
+                        "Access-Control-Allow-Origin": "*",
+                    });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // PATCH /api/notes/:botId — update meeting title
+                if (pathname.startsWith("/api/notes/") && req.method?.toUpperCase() === "PATCH") {
+                    if (!await requireAuth(req, res)) return;
+                    const userEmail: string = (req as any).userEmail;
+                    const botId = pathname.replace("/api/notes/", "");
+                    if (!botId) throw new Error("botId is required");
+
+                    const result = await handleMeetingTitleUpdate(botId, userEmail, body?.title);
+                    console.log(`Updated meeting title for bot ${botId}: "${result.title}"`);
 
                     res.writeHead(200, {
                         "Content-Type": "application/json",
