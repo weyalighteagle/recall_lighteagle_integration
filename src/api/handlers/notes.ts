@@ -161,7 +161,9 @@ type MeetingRow = {
     meeting_url: string | null;
     done: boolean;
     created_at: string;
-    meeting_title: string | null;
+meeting_title: string | null;
+    meeting_start_time: string | null;
+    attendee_emails?: string[];
 };
 
 /**
@@ -178,6 +180,7 @@ export async function handleNotesList(userEmail: string): Promise<{
         meeting_url: string | null;
         done: boolean;
         created_at: string;
+        meeting_start_time: string | null;
         title: string | null;
         participants: string[];
     }[];
@@ -186,24 +189,35 @@ export async function handleNotesList(userEmail: string): Promise<{
     const calendarMeta = await fetchCalendarBotMeta(userEmail);
     const calendarBotIds = [...calendarMeta.keys()];
 
-    // Two-pronged DB query: calendar-scoped bots + user_email-scoped bots (ad-hoc / newer records)
+    // Three-pronged DB query: calendar-scoped bots + user_email-scoped bots + guest-attended bots.
     // Separate queries to avoid complex PostgREST filter syntax.
-    const [calendarResult, userResult] = await Promise.all([
+    const nowIso = new Date().toISOString();
+    const [calendarResult, userResult, guestResult] = await Promise.all([
         calendarBotIds.length > 0
             ? supabase
                   .from("meetings")
-                  .select("bot_id, bot_type, meeting_url, done, created_at, meeting_title")
+.select("bot_id, bot_type, meeting_url, done, created_at, meeting_title, meeting_start_time")
                   .in("bot_id", calendarBotIds)
                   .is("user_email", null)   // calendar path is for legacy/scheduled bots only;
                                             // instant meeting bots (user_email set) are handled
                                             // exclusively by the userResult query below
-                  .order("created_at", { ascending: false })
+                  .or(`done.eq.true,meeting_start_time.lte.${nowIso}`)
+                  .order("meeting_start_time", { ascending: false, nullsFirst: false })
             : Promise.resolve({ data: [] as MeetingRow[], error: null }),
         supabase
             .from("meetings")
-            .select("bot_id, bot_type, meeting_url, done, created_at, meeting_title")
+.select("bot_id, bot_type, meeting_url, done, created_at, meeting_title, meeting_start_time")
             .eq("user_email", userEmail)
-            .order("created_at", { ascending: false }),
+            .or(`done.eq.true,meeting_start_time.lte.${nowIso}`)
+            .order("meeting_start_time", { ascending: false, nullsFirst: false }),
+        // Guest path: meetings the user attended but didn't schedule
+        supabase
+            .from("meetings")
+            .select("bot_id, bot_type, meeting_url, done, created_at, meeting_start_time")
+            .contains("attendee_emails", [userEmail])
+            .neq("user_email", userEmail)
+            .or(`done.eq.true,meeting_start_time.lte.${nowIso}`)
+            .order("meeting_start_time", { ascending: false, nullsFirst: false }),
     ]);
 
     // Merge and deduplicate by bot_id, keeping newest ordering
@@ -211,6 +225,7 @@ export async function handleNotesList(userEmail: string): Promise<{
     for (const row of [
         ...((calendarResult.data as MeetingRow[] | null) ?? []),
         ...((userResult.data as MeetingRow[] | null) ?? []),
+        ...((guestResult.data as MeetingRow[] | null) ?? []),
     ]) {
         rowMap.set(row.bot_id, row);
     }
@@ -218,19 +233,65 @@ export async function handleNotesList(userEmail: string): Promise<{
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
 
+    // Hoist utterance fetch before grouping so we can prefer the bot_id that
+    // actually received utterances when multiple bots share a meeting_url.
+    const allCandidateIds = allRows.map((r) => r.bot_id);
+    const botsWithUtterances = new Set<string>();
+    if (allCandidateIds.length > 0) {
+        const { data: uRows } = await supabase
+            .from("utterances")
+            .select("bot_id")
+            .in("bot_id", allCandidateIds)
+            .limit(5000);
+        for (const r of uRows ?? []) botsWithUtterances.add(r.bot_id);
+    }
+
     // Group by meeting_url — prefer voice_agent bot when both a recording and
     // voice_agent bot attended the same meeting URL.
     const grouped = new Map<string, MeetingRow>();
     for (const row of allRows) {
         const key = row.meeting_url ?? row.bot_id;
         const existing = grouped.get(key);
-        if (!existing || row.bot_type === "voice_agent") {
+        if (!existing) {
+            grouped.set(key, row);
+            continue;
+        }
+        const rowHasUtterances = botsWithUtterances.has(row.bot_id);
+        const existingHasUtterances = botsWithUtterances.has(existing.bot_id);
+        // Prefer the bot with utterances; break ties by preferring voice_agent.
+        if (rowHasUtterances && !existingHasUtterances) {
+            grouped.set(key, row);
+        } else if (rowHasUtterances === existingHasUtterances && row.bot_type === "voice_agent") {
             grouped.set(key, row);
         }
     }
-    const meetings = [...grouped.values()];
+    const groupedMeetings = [...grouped.values()];
 
-    // Enrich participants from utterances table
+    // Hide recording-bot rows that have a voice_agent sibling in this user's scoped
+    // result set: same owner, created within 30 s, and the voice_agent has utterances.
+    // This suppresses the ghost "Processing" duplicate without deleting any data.
+    // The filter operates entirely on the already-ownership-scoped rowset — it never
+    // crosses user boundaries.
+    const vaWithUtterancesTimes = groupedMeetings
+        .filter((m) => m.bot_type === "voice_agent" && botsWithUtterances.has(m.bot_id))
+        .map((m) => new Date(m.created_at).getTime());
+
+    const meetings = groupedMeetings.filter((m) => {
+        if (m.bot_type !== "recording" || m.done || botsWithUtterances.has(m.bot_id)) {
+            return true;
+        }
+        const rowTime = new Date(m.created_at).getTime();
+        return !vaWithUtterancesTimes.some((vaTime) => Math.abs(vaTime - rowTime) <= 30_000);
+    });
+
+    const filteredCount = groupedMeetings.length - meetings.length;
+    if (filteredCount > 0) {
+        console.log(
+            `[handleNotesList] suppressed ${filteredCount} ghost recording-bot row(s) for ${userEmail} (voice_agent sibling present within 30s)`,
+        );
+    }
+
+    // Enrich with titles and participants — scoped to the post-grouping bot_ids only.
     const botIds = meetings.map((m) => m.bot_id);
     const participantsMap = new Map<string, string[]>();
     for (const id of botIds) participantsMap.set(id, []);
@@ -253,8 +314,12 @@ export async function handleNotesList(userEmail: string): Promise<{
     return {
         meetings: meetings.map((m) => ({
             ...m,
+
             // Resolution order: user-set DB title > calendar-API-derived title > null
             title: m.meeting_title ?? calendarMeta.get(m.bot_id)?.title ?? null,
+            meeting_start_time: m.meeting_start_time ?? m.created_at,
+            title: calendarMeta.get(m.bot_id)?.title ?? null,
+
             participants: participantsMap.get(m.bot_id) ?? [],
         })),
     };
@@ -270,7 +335,7 @@ export async function handleNotesList(userEmail: string): Promise<{
 async function assertMeetingOwnership(botId: string, userEmail: string): Promise<void> {
     const { data: meeting } = await supabase
         .from("meetings")
-        .select("user_email")
+        .select("user_email, attendee_emails")
         .eq("bot_id", botId)
         .maybeSingle();
 
@@ -280,6 +345,10 @@ async function assertMeetingOwnership(botId: string, userEmail: string): Promise
 
     // Fast path: explicit user_email match
     if (meeting.user_email === userEmail) return;
+
+    // Guest path: user attended the meeting but didn't schedule the bot
+    const attendees: string[] = Array.isArray(meeting.attendee_emails) ? meeting.attendee_emails : [];
+    if (attendees.includes(userEmail)) return;
 
     // Another user's meeting — user_email is set but doesn't match
     if (meeting.user_email !== null) {

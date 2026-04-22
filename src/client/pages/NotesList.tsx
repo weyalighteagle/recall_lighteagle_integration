@@ -15,6 +15,7 @@ interface Meeting {
     meeting_url: string | null;
     done: boolean;
     created_at: string;
+    meeting_start_time?: string | null;
     title: string | null;
     participants: string[];
 }
@@ -259,7 +260,7 @@ function NotesList() {
                                         <div className="flex items-center gap-3 text-xs text-gray-500">
                                             <span className="flex items-center gap-1">
                                                 <Calendar className="size-3" />
-                                                {formatDate(meeting.created_at)} at {formatTime(meeting.created_at)}
+                                                {formatDate(meeting.meeting_start_time ?? meeting.created_at)} at {formatTime(meeting.meeting_start_time ?? meeting.created_at)}
                                             </span>
                                             {meeting.participants.length > 0 && (
                                                 <span className="flex items-center gap-1 truncate">
