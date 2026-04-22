@@ -196,7 +196,7 @@ export async function handleNotesList(userEmail: string): Promise<{
         calendarBotIds.length > 0
             ? supabase
                   .from("meetings")
-.select("bot_id, bot_type, meeting_url, done, created_at, meeting_title, meeting_start_time")
+                  .select("bot_id, bot_type, meeting_url, done, created_at, meeting_title, meeting_start_time")
                   .in("bot_id", calendarBotIds)
                   .is("user_email", null)   // calendar path is for legacy/scheduled bots only;
                                             // instant meeting bots (user_email set) are handled
@@ -206,7 +206,7 @@ export async function handleNotesList(userEmail: string): Promise<{
             : Promise.resolve({ data: [] as MeetingRow[], error: null }),
         supabase
             .from("meetings")
-.select("bot_id, bot_type, meeting_url, done, created_at, meeting_title, meeting_start_time")
+            .select("bot_id, bot_type, meeting_url, done, created_at, meeting_title, meeting_start_time")
             .eq("user_email", userEmail)
             .or(`done.eq.true,meeting_start_time.lte.${nowIso}`)
             .order("meeting_start_time", { ascending: false, nullsFirst: false }),
@@ -318,7 +318,6 @@ export async function handleNotesList(userEmail: string): Promise<{
             // Resolution order: user-set DB title > calendar-API-derived title > null
             title: m.meeting_title ?? calendarMeta.get(m.bot_id)?.title ?? null,
             meeting_start_time: m.meeting_start_time ?? m.created_at,
-            title: calendarMeta.get(m.bot_id)?.title ?? null,
 
             participants: participantsMap.get(m.bot_id) ?? [],
         })),
