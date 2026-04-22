@@ -161,6 +161,7 @@ type MeetingRow = {
     meeting_url: string | null;
     done: boolean;
     created_at: string;
+    meeting_start_time: string | null;
     attendee_emails?: string[];
 };
 
@@ -178,6 +179,7 @@ export async function handleNotesList(userEmail: string): Promise<{
         meeting_url: string | null;
         done: boolean;
         created_at: string;
+        meeting_start_time: string | null;
         title: string | null;
         participants: string[];
     }[];
@@ -188,29 +190,33 @@ export async function handleNotesList(userEmail: string): Promise<{
 
     // Three-pronged DB query: calendar-scoped bots + user_email-scoped bots + guest-attended bots.
     // Separate queries to avoid complex PostgREST filter syntax.
+    const nowIso = new Date().toISOString();
     const [calendarResult, userResult, guestResult] = await Promise.all([
         calendarBotIds.length > 0
             ? supabase
                   .from("meetings")
-                  .select("bot_id, bot_type, meeting_url, done, created_at")
+                  .select("bot_id, bot_type, meeting_url, done, created_at, meeting_start_time")
                   .in("bot_id", calendarBotIds)
                   .is("user_email", null)   // calendar path is for legacy/scheduled bots only;
                                             // instant meeting bots (user_email set) are handled
                                             // exclusively by the userResult query below
-                  .order("created_at", { ascending: false })
+                  .or(`done.eq.true,meeting_start_time.lte.${nowIso}`)
+                  .order("meeting_start_time", { ascending: false, nullsFirst: false })
             : Promise.resolve({ data: [] as MeetingRow[], error: null }),
         supabase
             .from("meetings")
-            .select("bot_id, bot_type, meeting_url, done, created_at")
+            .select("bot_id, bot_type, meeting_url, done, created_at, meeting_start_time")
             .eq("user_email", userEmail)
-            .order("created_at", { ascending: false }),
+            .or(`done.eq.true,meeting_start_time.lte.${nowIso}`)
+            .order("meeting_start_time", { ascending: false, nullsFirst: false }),
         // Guest path: meetings the user attended but didn't schedule
         supabase
             .from("meetings")
-            .select("bot_id, bot_type, meeting_url, done, created_at")
+            .select("bot_id, bot_type, meeting_url, done, created_at, meeting_start_time")
             .contains("attendee_emails", [userEmail])
             .neq("user_email", userEmail)
-            .order("created_at", { ascending: false }),
+            .or(`done.eq.true,meeting_start_time.lte.${nowIso}`)
+            .order("meeting_start_time", { ascending: false, nullsFirst: false }),
     ]);
 
     // Merge and deduplicate by bot_id, keeping newest ordering
@@ -307,6 +313,7 @@ export async function handleNotesList(userEmail: string): Promise<{
     return {
         meetings: meetings.map((m) => ({
             ...m,
+            meeting_start_time: m.meeting_start_time ?? m.created_at,
             title: calendarMeta.get(m.bot_id)?.title ?? null,
             participants: participantsMap.get(m.bot_id) ?? [],
         })),
