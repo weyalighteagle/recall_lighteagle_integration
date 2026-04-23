@@ -204,13 +204,14 @@ async function handleBotDone(body: any): Promise<void> {
     return;
   }
 
-  const { data: meeting } = await supabase
-    .from('meetings')
-    .select('done')
+  const { count } = await supabase
+    .from('utterances')
+    .select('id', { count: 'exact', head: true })
     .eq('bot_id', botId)
-    .single()
-  if (meeting?.done === true) {
-    console.log(`[handleBotDone] already processed bot_id=${botId}, skipping`)
+    .eq('source', 'gladia')
+
+  if (count && count > 0) {
+    console.log(`[handleBotDone] Gladia already ran for bot_id=${botId}, skipping`)
     return
   }
 
