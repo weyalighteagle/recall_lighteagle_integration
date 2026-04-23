@@ -527,9 +527,13 @@ async function handleBotDone(body: any): Promise<void> {
       }
       console.log(`[handleBotDone] Gladia recording URL: ${recordingUrl ?? "NONE"}`);
 
+      const speakerTimelineUrl: string | undefined =
+        recordingsForGladia[0]?.participant_events?.data?.speaker_timeline_download_url ?? undefined;
+      console.log(`[handleBotDone] speaker_timeline URL: ${speakerTimelineUrl ?? "NONE"}`);
+
       if (recordingUrl) {
         console.log(`[handleBotDone] Starting Gladia transcription for bot ${botId}`);
-        const gladiaResult = await transcribeWithGladia(recordingUrl, botId, meetingStartIso);
+        const gladiaResult = await transcribeWithGladia(recordingUrl, botId, meetingStartIso, speakerTimelineUrl);
         if (!gladiaResult.ok) {
           console.error(
             `[handleBotDone] Gladia transcription failed for bot ${botId}:`,
