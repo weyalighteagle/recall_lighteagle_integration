@@ -544,7 +544,7 @@ async function handleBotDone(body: any): Promise<void> {
 
       if (recordingUrl) {
         console.log(`[handleBotDone] Starting Gladia transcription for bot ${botId}`);
-        const gladiaResult = await transcribeWithGladia(recordingUrl, botId, meetingStartIso, speakerTimelineUrl);
+        const gladiaResult = await transcribeWithGladia(recordingUrl, botId, meetingStartIso, segments);
         if (!gladiaResult.ok) {
           console.error(
             `[handleBotDone] Gladia transcription failed for bot ${botId}:`,
