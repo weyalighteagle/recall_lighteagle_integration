@@ -167,20 +167,41 @@ export async function transcribeWithGladia(
       intervals: NameInterval[],
       textPreview?: string,
     ): string {
-      let bestName = "Unknown Speaker";
+      if (intervals.length === 0) {
+        console.warn(`[gladia] no Recall intervals at all for utterance at ${new Date(uStartMs).toISOString()} (text: "${textPreview ?? ''}") — falling back to "Unknown Speaker"`);
+        return "Unknown Speaker";
+      }
+
+      // Tier 1 — overlap match (preferred)
+      let bestOverlapName: string | null = null;
       let bestOverlap = 0;
       for (const interval of intervals) {
         const overlap = Math.max(0,
           Math.min(uEndMs, interval.endMs) - Math.max(uStartMs, interval.startMs));
         if (overlap > bestOverlap) {
           bestOverlap = overlap;
-          bestName = interval.name;
+          bestOverlapName = interval.name;
         }
       }
-      if (bestOverlap === 0) {
-        console.warn(`[gladia] no Recall overlap for utterance at ${new Date(uStartMs).toISOString()} (text: "${textPreview ?? ''}") — falling back to "Unknown Speaker"`);
+      if (bestOverlapName) return bestOverlapName;
+
+      // Tier 2 — nearest-neighbor by edge distance
+      // if utterance is after interval → uStartMs - interval.endMs
+      // if utterance is before interval → interval.startMs - uEndMs
+      let bestDistanceName = "Unknown Speaker";
+      let bestDistance = Infinity;
+      for (const interval of intervals) {
+        const distance = uStartMs > interval.endMs
+          ? uStartMs - interval.endMs
+          : interval.startMs - uEndMs;
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestDistanceName = interval.name;
+        }
       }
-      return bestName;
+
+      console.log(`[gladia] no Recall overlap for utterance at ${new Date(uStartMs).toISOString()} (text: "${textPreview ?? ''}") — using nearest neighbor "${bestDistanceName}" (distance: ${bestDistance}ms)`);
+      return bestDistanceName;
     }
 
     // Step 3d: Map Gladia utterances to our schema using resolved speaker names.
