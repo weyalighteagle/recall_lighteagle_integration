@@ -204,6 +204,16 @@ async function handleBotDone(body: any): Promise<void> {
     return;
   }
 
+  const { data: meeting } = await supabase
+    .from('meetings')
+    .select('done')
+    .eq('bot_id', botId)
+    .single()
+  if (meeting?.done === true) {
+    console.log(`[handleBotDone] already processed bot_id=${botId}, skipping`)
+    return
+  }
+
   console.log(
     `[handleBotDone] ── START bot_id=${botId} ─────────────────────────────`,
   );
