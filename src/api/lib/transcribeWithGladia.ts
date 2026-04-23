@@ -159,79 +159,40 @@ export async function transcribeWithGladia(
     const uniqueIntervalSpeakers = [...new Set(nameIntervals.map(i => i.name))];
     console.log(`[gladia] name intervals built: ${nameIntervals.length} segments from ${uniqueIntervalSpeakers.length} speakers`);
 
-    // Step 3c: Build speakerMap — 2-level resolution.
-    const speakerMap: Record<string, string> = {};
-    const uniqueIndices = [
-      ...new Set(gladiaUtterances.map((u: any) => String(u.speaker))),
-    ];
-
-    // Level 1 — Recall segment overlap (PRIMARY)
-    // For each Gladia speaker index, accumulate total overlap ms against every Recall
-    // name interval across ALL utterances for that index, then pick the winner.
-    const overlapScores: Record<string, Record<string, number>> = {};
-    if (nameIntervals.length > 0) {
-      for (const idx of uniqueIndices) {
-        const scores: Record<string, number> = {};
-        for (const utterance of gladiaUtterances.filter((u: any) => String(u.speaker) === idx)) {
-          const uStartMs = anchorMs + utterance.start * 1000;
-          const uEndMs   = anchorMs + utterance.end   * 1000;
-          for (const interval of nameIntervals) {
-            const overlapMs = Math.max(0,
-              Math.min(uEndMs, interval.endMs) - Math.max(uStartMs, interval.startMs));
-            if (overlapMs > 0) scores[interval.name] = (scores[interval.name] ?? 0) + overlapMs;
-          }
-        }
-        overlapScores[idx] = scores;
-      }
-
-      // First-pass: pick best name per index.
-      const assignments: Record<string, { name: string; score: number }> = {};
-      for (const idx of uniqueIndices) {
-        const best = Object.entries(overlapScores[idx] ?? {})
-          .sort((a, b) => b[1] - a[1])[0];
-        if (best) assignments[idx] = { name: best[0], score: best[1] };
-      }
-
-      // Uniqueness guard: if two indices claim the same name, keep the higher scorer
-      // and re-run for the loser excluding already-claimed names.
-      const nameToIndices: Record<string, string[]> = {};
-      for (const [idx, { name }] of Object.entries(assignments)) {
-        (nameToIndices[name] ??= []).push(idx);
-      }
-      const claimed = new Set<string>();
-      for (const [name, indices] of Object.entries(nameToIndices)) {
-        indices.sort((a, b) => (assignments[b]?.score ?? 0) - (assignments[a]?.score ?? 0));
-        speakerMap[indices[0]] = name;
-        claimed.add(name);
-        if (indices.length > 1) {
-          console.log(`[gladia] collision: ${indices.map(i => `idx ${i}`).join(' and ')} both matched "${name}"; idx ${indices[0]} kept (score ${assignments[indices[0]]?.score})`);
-          for (const loserIdx of indices.slice(1)) {
-            const alt = Object.entries(overlapScores[loserIdx] ?? {})
-              .filter(([n]) => !claimed.has(n))
-              .sort((a, b) => b[1] - a[1])[0];
-            if (alt) {
-              speakerMap[loserIdx] = alt[0];
-              claimed.add(alt[0]);
-              console.log(`[gladia] collision: idx ${loserIdx} reassigned to "${alt[0]}" (score ${alt[1]})`);
-            }
-          }
+    // Step 3c: Resolve speaker per utterance by temporal overlap with Recall intervals.
+    // Gladia's speaker index is ignored — Recall's diarization provides the names.
+    function resolveSpeakerByTime(
+      uStartMs: number,
+      uEndMs: number,
+      intervals: NameInterval[],
+      textPreview?: string,
+    ): string {
+      let bestName = "Unknown Speaker";
+      let bestOverlap = 0;
+      for (const interval of intervals) {
+        const overlap = Math.max(0,
+          Math.min(uEndMs, interval.endMs) - Math.max(uStartMs, interval.startMs));
+        if (overlap > bestOverlap) {
+          bestOverlap = overlap;
+          bestName = interval.name;
         }
       }
-      console.log(`[gladia] speakerMap via Recall segments: ${JSON.stringify(speakerMap)}`);
-    }
-
-    // Level 2 — "Speaker N" (LAST RESORT)
-    for (const idx of uniqueIndices) {
-      if (!(idx in speakerMap)) {
-        speakerMap[idx] = `Speaker ${idx}`;
-        console.warn(`[gladia] speakerMap: unresolved speaker idx ${idx} — using fallback label "Speaker ${idx}"`);
+      if (bestOverlap === 0) {
+        console.warn(`[gladia] no Recall overlap for utterance at ${new Date(uStartMs).toISOString()} (text: "${textPreview ?? ''}") — falling back to "Unknown Speaker"`);
       }
+      return bestName;
     }
 
     // Step 3d: Map Gladia utterances to our schema using resolved speaker names.
     const gladiaRows = gladiaUtterances.map((utterance: any) => {
-      const speakerIdx = String(utterance.speaker);
-      const resolvedSpeaker = speakerMap[speakerIdx] ?? `Speaker ${speakerIdx}`;
+      const uStartMs = anchorMs + utterance.start * 1000;
+      const uEndMs   = anchorMs + utterance.end   * 1000;
+      const textPreview = (utterance.words ?? [])
+        .slice(0, 5)
+        .map((w: any) => w.word)
+        .join(' ')
+        .slice(0, 50);
+      const speakerName = resolveSpeakerByTime(uStartMs, uEndMs, nameIntervals, textPreview);
 
       const hasWordLevel =
         Array.isArray(utterance.words) && utterance.words.length > 0;
@@ -244,18 +205,22 @@ export async function transcribeWithGladia(
           }))
         : [{ text: utterance.transcription }];
 
-      const timestamp = new Date(
-        anchorMs + utterance.start * 1000,
-      ).toISOString();
+      const timestamp = new Date(uStartMs).toISOString();
 
       return {
         bot_id: botId,
-        speaker: resolvedSpeaker,
+        speaker: speakerName,
         words,
         timestamp,
         source: "gladia",
       };
     });
+
+    const speakerCounts: Record<string, number> = {};
+    for (const row of gladiaRows) {
+      speakerCounts[row.speaker] = (speakerCounts[row.speaker] ?? 0) + 1;
+    }
+    console.log(`[gladia] speaker assignments by time-overlap: ${JSON.stringify(speakerCounts)}`);
 
     // Step 4: Insert Gladia rows, then delete any non-Gladia rows for this bot.
     // The source filter makes this safe to run unconditionally — it never
