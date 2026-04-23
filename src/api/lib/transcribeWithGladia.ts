@@ -234,7 +234,7 @@ export async function transcribeWithGladia(
     // touches the rows we just inserted.
     const { error: insertError } = await supabase
       .from("utterances")
-      .insert(gladiaRows);
+      .upsert(gladiaRows, { onConflict: 'bot_id,speaker,timestamp', ignoreDuplicates: true });
 
     if (insertError) {
       throw new Error(

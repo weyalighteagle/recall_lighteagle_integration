@@ -79,7 +79,10 @@ export async function handleTranscriptWebhook(
     try {
       const { data: utteranceData, error: utteranceError } = await supabase
         .from("utterances")
-        .insert({ bot_id: botId, speaker, words });
+        .upsert(
+          { bot_id: botId, speaker, words, timestamp: new Date().toISOString() },
+          { onConflict: 'bot_id,speaker,timestamp', ignoreDuplicates: true },
+        );
 
       if (utteranceError) {
         console.error("Supabase utterances insert failed:", {
