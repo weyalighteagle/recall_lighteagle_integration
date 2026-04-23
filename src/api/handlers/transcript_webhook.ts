@@ -111,19 +111,29 @@ export async function handleTranscriptWebhook(
 
   if (event === "transcript.done") {
     try {
-      const { error } = await supabase
-        .from("meetings")
-        .update({ done: true })
-        .eq("bot_id", botId);
+      const { data: meeting } = await supabase
+        .from('meetings')
+        .select('bot_type')
+        .eq('bot_id', botId)
+        .single()
 
-      if (error) {
-        console.error("Supabase meetings update (done) failed:", {
-          bot_id: botId,
-          event,
-          error,
-        });
+      if (meeting?.bot_type === 'voice_agent') {
+        console.log(`[transcript_webhook] voice_agent bot — skipping done=true, Gladia will set it after transcription`);
       } else {
-        console.log(`Transcript done marked for bot ${botId}`);
+        const { error } = await supabase
+          .from("meetings")
+          .update({ done: true })
+          .eq("bot_id", botId);
+
+        if (error) {
+          console.error("Supabase meetings update (done) failed:", {
+            bot_id: botId,
+            event,
+            error,
+          });
+        } else {
+          console.log(`[transcript_webhook] recording bot — marking done=true`);
+        }
       }
     } catch (err) {
       console.error("Unexpected error marking transcript done:", {
