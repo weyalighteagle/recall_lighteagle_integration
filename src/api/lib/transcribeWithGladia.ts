@@ -14,6 +14,7 @@ export async function transcribeWithGladia(
   recordingUrl: string,
   botId: string,
   meetingStartIso: string | null,
+  speakerTimelineUrl?: string,
 ): Promise<GladiaResult> {
   try {
     console.log(
@@ -111,6 +112,23 @@ export async function transcribeWithGladia(
     const gladiaUtterances: any[] =
       result?.result?.transcription?.utterances ?? [];
 
+    // Fetch Recall speaker_timeline for primary speaker resolution (pre-signed S3, no auth needed)
+    type TimelineEvent = { type: string; timestamp: number };
+    type TimelineParticipant = { name: string; events: TimelineEvent[] };
+    let timelineRaw: TimelineParticipant[] = [];
+    if (speakerTimelineUrl) {
+      try {
+        const tlRes = await fetch(speakerTimelineUrl);
+        if (tlRes.ok) {
+          timelineRaw = await tlRes.json();
+        } else {
+          console.warn(`[gladia] speaker_timeline fetch failed (${tlRes.status}) — will fall back to real-time matching`);
+        }
+      } catch (tlErr) {
+        console.warn(`[gladia] speaker_timeline fetch error — will fall back:`, tlErr);
+      }
+    }
+
     // Step 3a: Fetch real-time utterances to resolve speaker names.
     // Gladia returns numeric indices ("0", "1", "2") — we map them back to
     // real names (e.g. "Heval Söğüt", "WEYA Voice Agent") using the
@@ -155,28 +173,62 @@ export async function transcribeWithGladia(
       );
     }
 
-    // Step 3c: Build speakerMap: Gladia index → real speaker name.
-    // For each unique Gladia speaker index, find its absolute start time and
-    // match it to the closest real-time utterance by wall-clock proximity.
+    // Build timeline segments in absolute ms from Recall's speaker_timeline.
+    // event.timestamp is seconds-from-recording-start, same coordinate as Gladia start/end.
+    type TimelineSegment = { name: string; startMs: number; endMs: number };
+    const timelineSegments: TimelineSegment[] = [];
+    for (const participant of timelineRaw) {
+      let speechStart: number | null = null;
+      for (const ev of participant.events ?? []) {
+        if (ev.type === 'speech_on') {
+          speechStart = anchorMs + ev.timestamp * 1000;
+        } else if (ev.type === 'speech_off' && speechStart !== null) {
+          timelineSegments.push({ name: participant.name, startMs: speechStart, endMs: anchorMs + ev.timestamp * 1000 });
+          speechStart = null;
+        }
+      }
+    }
+    const uniqueTimelineParticipants = [...new Set(timelineRaw.map(p => p.name))];
+    console.log(`[gladia] speaker_timeline loaded: ${timelineSegments.length} speech segments for ${uniqueTimelineParticipants.length} participants`);
+
+    // Step 3c: Build speakerMap with 3-level fallback chain.
+    console.log(`[gladia] real-time utterances available: ${realtimeUtterances?.length ?? 0}`);
     const speakerMap: Record<string, string> = {};
-    if (realtimeUtterances && realtimeUtterances.length > 0) {
-      const uniqueIndices = [
-        ...new Set(gladiaUtterances.map((u: any) => String(u.speaker))),
-      ];
+    const uniqueIndices = [
+      ...new Set(gladiaUtterances.map((u: any) => String(u.speaker))),
+    ];
 
+    // Level 1 — speaker_timeline (PRIMARY)
+    // Iterate all utterances for each speaker index; take first midpoint that
+    // lands inside a timeline segment (more robust than using only the first utterance).
+    if (timelineSegments.length > 0) {
+      const level1Resolved: Record<string, string> = {};
       for (const idx of uniqueIndices) {
-        const sample = gladiaUtterances.find(
-          (u: any) => String(u.speaker) === idx,
-        );
+        const utterancesForIdx = gladiaUtterances.filter((u: any) => String(u.speaker) === idx);
+        for (const utterance of utterancesForIdx) {
+          const midMs = anchorMs + utterance.start * 1000 + ((utterance.end - utterance.start) * 1000) / 2;
+          const seg = timelineSegments.find(s => s.startMs <= midMs && midMs <= s.endMs);
+          if (seg) {
+            speakerMap[idx] = seg.name;
+            level1Resolved[idx] = seg.name;
+            break;
+          }
+        }
+      }
+      console.log(`[gladia] speakerMap via timeline: ${JSON.stringify(level1Resolved)}`);
+    }
+
+    // Level 2 — real-time utterances (SECONDARY)
+    // Proximity-match against real-time rows for any index Level 1 did not resolve.
+    const unresolvedAfterLevel1 = uniqueIndices.filter(idx => !(idx in speakerMap));
+    if (unresolvedAfterLevel1.length > 0 && realtimeUtterances && realtimeUtterances.length > 0) {
+      const level2Resolved: Record<string, string> = {};
+      for (const idx of unresolvedAfterLevel1) {
+        const sample = gladiaUtterances.find((u: any) => String(u.speaker) === idx);
         if (!sample) continue;
-
         const gladiaAbsMs = anchorMs + sample.start * 1000;
-
-        // Find the real-time utterance whose first word's absolute timestamp
-        // is closest to this Gladia utterance's absolute start time.
         let bestName: string | null = null;
         let bestDelta = Infinity;
-
         for (const rt of realtimeUtterances) {
           const abs = (rt.words as any[])?.[0]?.start_timestamp?.absolute;
           if (!abs) continue;
@@ -186,19 +238,21 @@ export async function transcribeWithGladia(
             bestName = rt.speaker as string;
           }
         }
-
         if (bestName && bestDelta <= SPEAKER_MAP_MAX_DELTA_MS) {
           speakerMap[idx] = bestName;
-        } else {
-          speakerMap[idx] = `Speaker ${idx}`;
-          console.warn(
-            `[gladia] speakerMap: no real-time anchor within ${SPEAKER_MAP_MAX_DELTA_MS}ms` +
-              ` for Gladia speaker ${idx} (best delta: ${bestDelta}ms). Using fallback label.`,
-          );
+          level2Resolved[idx] = bestName;
         }
       }
+      console.log(`[gladia] speakerMap via realtime fallback: ${JSON.stringify(level2Resolved)}`);
     }
-    console.log(`[gladia] speakerMap: ${JSON.stringify(speakerMap)}`);
+
+    // Level 3 — "Speaker N" (LAST RESORT)
+    for (const idx of uniqueIndices) {
+      if (!(idx in speakerMap)) {
+        speakerMap[idx] = `Speaker ${idx}`;
+        console.warn(`[gladia] speakerMap: unresolved speaker idx ${idx} — using fallback label "Speaker ${idx}"`);
+      }
+    }
 
     // Step 3d: Map Gladia utterances to our schema using resolved speaker names.
     const gladiaRows = gladiaUtterances.map((utterance: any) => {
