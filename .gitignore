@@ -25,3 +25,7 @@ npm-debug.log*
 
 # Vercel
 .vercel/
+
+# Local tooling
+.claude/
+supabase/.temp/
