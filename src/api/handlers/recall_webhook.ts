@@ -558,9 +558,10 @@ async function handleBotDone(body: any): Promise<void> {
     }
   }
 
-  // Voice agent path: insert AssemblyAI segments directly.
-  // assembly_ai_async_chunked produces no real-time transcript.data events,
-  // so bot.done is the sole source of utterances for these bots.
+  // Voice agent path: voice agents now use recallai_streaming, so real-time
+  // transcript.data events are the primary source. This block is only reached if
+  // downloadUrls is non-empty, which won't happen with recallai_streaming (provider_data_download_url is absent).
+  // Kept for forward-compatibility if a future provider returns downloadable segments.
   if (inferredBotType === "voice_agent") {
     if (segments.length > 0) {
       try {
@@ -1034,10 +1035,8 @@ export async function schedule_bot_for_calendar_event(args: {
       recording_config: {
         transcript: {
           provider: {
-            assembly_ai_async_chunked: {
-              language_code: "tr",
-              speaker_labels: true,
-              speakers_expected: 3,
+            recallai_streaming: {
+              language: "tr",
             },
           },
         },
