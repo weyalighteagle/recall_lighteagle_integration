@@ -113,9 +113,9 @@ export async function handleTranscriptWebhook(
   }
 
   if (event === "transcript.done") {
-    const transcriptId: string | undefined = body?.data?.transcript?.id;
-
-    // Fetch and store utterances for voice_agent bots
+    // For voice_agent bots: download AssemblyAI transcript and store utterances.
+    // This runs in addition to the bot.done path so whichever fires first with real
+    // content wins. The delete+insert is idempotent — re-running just overwrites.
     try {
       const { data: meeting } = await supabase
         .from("meetings")
@@ -128,35 +128,98 @@ export async function handleTranscriptWebhook(
         (meeting?.bot_name ?? "").toUpperCase().includes("WEYA VOICE") ||
         (meeting?.bot_name ?? "").toUpperCase().includes("VOICE AGENT");
 
-      if (isVoiceAgent && transcriptId) {
-        console.log(`[transcript_webhook] voice_agent transcript.done — fetching transcript ${transcriptId} (bot_type=${meeting?.bot_type}, bot_name=${meeting?.bot_name})`);
+      if (isVoiceAgent) {
+        console.log(`[transcript_webhook] voice_agent transcript.done — fetching provider_data for bot ${botId}`);
 
         const recallApiKey = process.env.RECALL_API_KEY;
-        const transcriptRes = await fetch(
-          `https://api.recall.ai/api/v2/transcript/${transcriptId}/`,
-          {
-            headers: {
-              Authorization: `Token ${recallApiKey}`,
-              "Content-Type": "application/json",
-            },
-          },
+        const recallRegion = process.env.RECALL_REGION || "api";
+
+        // Use the v1 bot API to get provider_data_download_url from media_shortcuts
+        const botRes = await fetch(
+          `https://${recallRegion}.recall.ai/api/v1/bot/${botId}/`,
+          { headers: { Authorization: `${recallApiKey}`, "Content-Type": "application/json" } },
         );
 
-        if (!transcriptRes.ok) {
-          console.error(`[transcript_webhook] Recall transcript fetch failed: ${transcriptRes.status}`, await transcriptRes.text());
+        if (!botRes.ok) {
+          console.error(`[transcript_webhook] v1 bot fetch failed: ${botRes.status}`);
         } else {
-          const transcriptData = await transcriptRes.json();
-          // LOG FULL RAW RESPONSE — to inspect shape before parsing
-          console.log(`[transcript_webhook] RAW transcript response:`, JSON.stringify(transcriptData));
+          const botData = await botRes.json();
+          const botName: string = botData?.bot_name || "WEYA Voice Agent";
+          const recordings: any[] = Array.isArray(botData?.recordings) ? botData.recordings : [];
+
+          const providerUrls: string[] = recordings
+            .map((r: any) => r?.media_shortcuts?.transcript?.data?.provider_data_download_url)
+            .filter(Boolean);
+
+          console.log(`[transcript_webhook] provider_data URLs found: ${providerUrls.length}`);
+
+          let segments: { speaker: string; words: unknown[] }[] = [];
+
+          for (const url of providerUrls) {
+            try {
+              const dlRes = await fetch(url);
+              if (!dlRes.ok) {
+                console.error(`[transcript_webhook] download failed (${dlRes.status}): ${url.slice(0, 80)}`);
+                continue;
+              }
+              const rawText = await dlRes.text();
+              console.log(`[transcript_webhook] provider_data (first 300 chars): ${rawText.slice(0, 300)}`);
+
+              const json: unknown = JSON.parse(rawText);
+              if (Array.isArray(json)) {
+                segments.push(...(json as any[]));
+              } else if (json && typeof json === "object") {
+                const obj = json as any;
+                if (Array.isArray(obj.utterances)) {
+                  segments.push(...obj.utterances.map((u: any) => ({ speaker: u.speaker ?? "Unknown", words: u.words ?? [] })));
+                } else if (Array.isArray(obj.parts)) {
+                  segments.push(
+                    ...obj.parts.flatMap((part: any) => {
+                      if (Array.isArray(part.utterances)) {
+                        return part.utterances.map((u: any) => ({ speaker: u.speaker ?? "Unknown", words: u.words ?? [] }));
+                      }
+                      return part.speaker !== undefined
+                        ? [{ speaker: part.speaker ?? "Unknown", words: part.words ?? [] }]
+                        : [];
+                    }),
+                  );
+                } else {
+                  console.error(`[transcript_webhook] unrecognised shape: ${rawText.slice(0, 200)}`);
+                }
+              }
+            } catch (e) {
+              console.error(`[transcript_webhook] error processing URL:`, e);
+            }
+          }
+
+          console.log(`[transcript_webhook] parsed ${segments.length} segments`);
+
+          if (segments.length > 0) {
+            const rows = segments.map((seg) => {
+              const raw = (seg as any).participant?.name ?? seg.speaker ?? "";
+              const speaker = !raw || raw === "Unknown" ? botName : raw;
+              return { bot_id: botId, speaker, words: seg.words, source: "assemblyai" };
+            });
+            const speakers = [...new Set(rows.map((r) => r.speaker))];
+            await supabase.from("utterances").delete().eq("bot_id", botId);
+            const { error: insErr, data: insData } = await supabase.from("utterances").insert(rows).select("id");
+            if (insErr) {
+              console.error(`[transcript_webhook] utterances insert failed for bot ${botId}:`, insErr);
+            } else {
+              console.log(`[transcript_webhook] inserted ${insData?.length ?? rows.length} utterances for bot ${botId}, speakers: ${JSON.stringify(speakers)}`);
+            }
+          } else {
+            console.warn(`[transcript_webhook] 0 segments for voice_agent bot ${botId} — AssemblyAI returned empty content`);
+          }
         }
       } else {
-        console.log(`[transcript_webhook] not a voice_agent bot (bot_type=${meeting?.bot_type}, bot_name=${meeting?.bot_name}) — skipping transcript fetch`);
+        console.log(`[transcript_webhook] not a voice_agent (bot_type=${meeting?.bot_type}, bot_name=${meeting?.bot_name}) — skipping provider_data fetch`);
       }
     } catch (err) {
-      console.error(`[transcript_webhook] error fetching transcript:`, err);
+      console.error(`[transcript_webhook] error in transcript.done handler:`, err);
     }
 
-    // Mark done=true regardless
+    // Mark done=true regardless of transcript outcome
     try {
       const { error } = await supabase
         .from("meetings")
