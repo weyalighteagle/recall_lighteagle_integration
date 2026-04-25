@@ -113,6 +113,45 @@ export async function handleTranscriptWebhook(
   }
 
   if (event === "transcript.done") {
+    const transcriptId: string | undefined = body?.data?.transcript?.id;
+
+    // Fetch and store utterances for voice_agent bots
+    try {
+      const { data: meeting } = await supabase
+        .from("meetings")
+        .select("bot_type, bot_name")
+        .eq("bot_id", botId)
+        .single();
+
+      if (meeting?.bot_type === "voice_agent" && transcriptId) {
+        console.log(`[transcript_webhook] voice_agent transcript.done — fetching transcript ${transcriptId}`);
+
+        const recallApiKey = process.env.RECALL_API_KEY;
+        const transcriptRes = await fetch(
+          `https://api.recall.ai/api/v2/transcript/${transcriptId}/`,
+          {
+            headers: {
+              Authorization: `Token ${recallApiKey}`,
+              "Content-Type": "application/json",
+            },
+          },
+        );
+
+        if (!transcriptRes.ok) {
+          console.error(`[transcript_webhook] Recall transcript fetch failed: ${transcriptRes.status}`, await transcriptRes.text());
+        } else {
+          const transcriptData = await transcriptRes.json();
+          // LOG FULL RAW RESPONSE — to inspect shape before parsing
+          console.log(`[transcript_webhook] RAW transcript response:`, JSON.stringify(transcriptData));
+        }
+      } else {
+        console.log(`[transcript_webhook] bot_type=${meeting?.bot_type} — no utterance fetch needed on transcript.done`);
+      }
+    } catch (err) {
+      console.error(`[transcript_webhook] error fetching transcript:`, err);
+    }
+
+    // Mark done=true regardless
     try {
       const { error } = await supabase
         .from("meetings")
@@ -120,23 +159,14 @@ export async function handleTranscriptWebhook(
         .eq("bot_id", botId);
 
       if (error) {
-        console.error("Supabase meetings update (done) failed:", {
-          bot_id: botId,
-          event,
-          error,
-        });
+        console.error("Supabase meetings update (done) failed:", { bot_id: botId, event, error });
       } else {
         console.log(`[transcript_webhook] marking done=true for bot_id=${botId}`);
       }
     } catch (err) {
-      console.error("Unexpected error marking transcript done:", {
-        bot_id: botId,
-        event,
-        err,
-      });
+      console.error("Unexpected error marking transcript done:", { bot_id: botId, event, err });
     }
 
-    // Always return 200 — Recall must not retry transcript.done events on DB failures
     return { status: 200 };
   }
 
