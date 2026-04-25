@@ -123,8 +123,13 @@ export async function handleTranscriptWebhook(
         .eq("bot_id", botId)
         .single();
 
-      if (meeting?.bot_type === "voice_agent" && transcriptId) {
-        console.log(`[transcript_webhook] voice_agent transcript.done — fetching transcript ${transcriptId}`);
+      const isVoiceAgent =
+        meeting?.bot_type === "voice_agent" ||
+        (meeting?.bot_name ?? "").toUpperCase().includes("WEYA VOICE") ||
+        (meeting?.bot_name ?? "").toUpperCase().includes("VOICE AGENT");
+
+      if (isVoiceAgent && transcriptId) {
+        console.log(`[transcript_webhook] voice_agent transcript.done — fetching transcript ${transcriptId} (bot_type=${meeting?.bot_type}, bot_name=${meeting?.bot_name})`);
 
         const recallApiKey = process.env.RECALL_API_KEY;
         const transcriptRes = await fetch(
@@ -145,7 +150,7 @@ export async function handleTranscriptWebhook(
           console.log(`[transcript_webhook] RAW transcript response:`, JSON.stringify(transcriptData));
         }
       } else {
-        console.log(`[transcript_webhook] bot_type=${meeting?.bot_type} — no utterance fetch needed on transcript.done`);
+        console.log(`[transcript_webhook] not a voice_agent bot (bot_type=${meeting?.bot_type}, bot_name=${meeting?.bot_name}) — skipping transcript fetch`);
       }
     } catch (err) {
       console.error(`[transcript_webhook] error fetching transcript:`, err);
