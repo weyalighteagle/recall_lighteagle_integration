@@ -907,7 +907,7 @@ export async function schedule_bot_for_calendar_event(args: {
       recording_config: {
         transcript: {
           provider: {
-            assembly_ai_async: {
+            assembly_ai_async_chunked: {
               language_code: "tr",
               speaker_labels: true,
               speakers_expected: 3,
@@ -934,7 +934,7 @@ export async function schedule_bot_for_calendar_event(args: {
       recording_config: {
         transcript: {
           provider: {
-            assembly_ai_async: {
+            assembly_ai_async_chunked: {
               language_code: "tr",
               speaker_labels: true,
               speakers_expected: 3,
