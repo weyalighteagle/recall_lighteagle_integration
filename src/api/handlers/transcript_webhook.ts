@@ -113,12 +113,10 @@ export async function handleTranscriptWebhook(
   }
 
   if (event === "transcript.done") {
-    // Download and store transcript for bots that use assembly_ai_async_chunked.
-    // We detect this by calling the Recall bot API and checking for provider_data_download_url
-    // rather than querying the DB — avoids a race condition where bot_type hasn't been set yet
-    // when transcript.done fires concurrently with bot.done.
-    // Recording bots use recallai_streaming and have no provider_data_download_url, so they
-    // naturally skip the inner block. delete+insert makes this path idempotent alongside bot.done.
+    // Only process transcript.done for assembly_ai_async_chunked bots.
+    // recallai_streaming bots store utterances in real-time via transcript.data —
+    // processing transcript.done for them would overwrite those with a redundant delete+insert.
+    // We detect the provider from the Recall API directly to avoid a DB race with bot.done.
     try {
       const recallApiKey = process.env.RECALL_API_KEY;
       const recallRegion = process.env.RECALL_REGION || "api";
@@ -135,20 +133,28 @@ export async function handleTranscriptWebhook(
         const botName: string = botData?.bot_name || "WEYA Voice Agent";
         const recordings: any[] = Array.isArray(botData?.recordings) ? botData.recordings : [];
 
+        // Detect provider from Recall API — recallai_streaming returns {"parts":[]} for provider_data
+        // so checking URL existence is not enough; we must look at the provider field.
+        const transcriptProvider = recordings[0]?.media_shortcuts?.transcript?.data?.provider ?? {};
+        const isAssemblyAI = "assembly_ai_async_chunked" in (transcriptProvider as object);
+        console.log(`[transcript_webhook] transcript.done bot="${botName}" provider=${JSON.stringify(transcriptProvider)} isAssemblyAI=${isAssemblyAI}`);
+
+        if (!isAssemblyAI) {
+          console.log(`[transcript_webhook] recallai_streaming bot — skipping transcript.done (real-time utterances are authoritative)`);
+        } else {
         const providerUrls: string[] = recordings
           .map((r: any) => r?.media_shortcuts?.transcript?.data?.provider_data_download_url)
           .filter(Boolean);
 
-        // Recall native diarized transcript — fallback if AssemblyAI returns empty parts
+        // Recall native diarized transcript — fallback if AssemblyAI returned empty parts
         const nativeUrls: string[] = recordings
           .map((r: any) => r?.media_shortcuts?.transcript?.data?.download_url)
           .filter(Boolean);
 
-        console.log(`[transcript_webhook] transcript.done bot="${botName}" provider_data=${providerUrls.length} native=${nativeUrls.length}`);
+        console.log(`[transcript_webhook] AssemblyAI bot: provider_data_urls=${providerUrls.length} native_urls=${nativeUrls.length}`);
 
-        // Recording bots (recallai_streaming) have no provider_data — skip entirely
         if (providerUrls.length === 0 && nativeUrls.length === 0) {
-          console.log(`[transcript_webhook] no transcript URLs — skipping (recording bot)`);
+          console.log(`[transcript_webhook] no transcript URLs — skipping`);
         } else {
           let segments: { speaker: string; words: unknown[] }[] = [];
 
@@ -218,6 +224,7 @@ export async function handleTranscriptWebhook(
             console.warn(`[transcript_webhook] 0 segments for bot ${botId} — both AssemblyAI and Recall native returned empty`);
           }
         }
+        } // end isAssemblyAI else
       }
     } catch (err) {
       console.error(`[transcript_webhook] error in transcript.done handler:`, err);

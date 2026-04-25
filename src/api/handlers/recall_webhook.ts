@@ -265,23 +265,29 @@ async function handleBotDone(body: any): Promise<void> {
       // When include_bot_in_recording.audio is true, Recall creates a separate recordings
       // entry for the bot's own output audio stream in addition to the participant stream.
       // Hardcoding recordings[0] would miss the bot's utterances entirely.
-        const isVoiceAgentBot = (botData?.bot_name ?? "").toUpperCase().includes("WEYA VOICE") ||
-          (botData?.bot_name ?? "").toUpperCase().includes("VOICE AGENT");
 
-        // For voice agents: try AssemblyAI provider_data first; fall back to Recall's native
-        // diarized transcript (download_url) if AssemblyAI returns empty parts.
+        // Detect provider from the Recall API response — more reliable than checking bot name.
+        // recallai_streaming bots have provider_data_download_url too but it returns {"parts":[]}.
+        const transcriptProvider = recordings[0]?.media_shortcuts?.transcript?.data?.provider ?? {};
+        const isAssemblyAI = "assembly_ai_async_chunked" in (transcriptProvider as object);
+        console.log(`[handleBotDone] transcript provider: ${JSON.stringify(transcriptProvider)} isAssemblyAI=${isAssemblyAI}`);
+
+        // For AssemblyAI bots: use provider_data_download_url (contains diarized AssemblyAI output),
+        // fall back to Recall native download_url if AssemblyAI returned empty.
+        // For recallai_streaming bots: use download_url directly; real-time utterances are already
+        // stored via transcript.data events so bot.done just supplements if those were incomplete.
         downloadUrls = recordings
           .map((r: any, i: number) => {
             const transcriptShortcut = r?.media_shortcuts?.transcript?.data;
-            const url = isVoiceAgentBot
+            const url = isAssemblyAI
               ? transcriptShortcut?.provider_data_download_url ?? null
               : transcriptShortcut?.download_url ?? null;
-            // Collect Recall native URL as fallback for voice agents
-            if (isVoiceAgentBot && transcriptShortcut?.download_url) {
+            // Collect Recall native URL as fallback for AssemblyAI bots
+            if (isAssemblyAI && transcriptShortcut?.download_url) {
               fallbackUrls.push(transcriptShortcut.download_url);
             }
             console.log(
-              `[handleBotDone] recordings[${i}] transcript url (isVoiceAgent=${isVoiceAgentBot}): ${url ?? "NONE"}`,
+              `[handleBotDone] recordings[${i}] transcript url (isAssemblyAI=${isAssemblyAI}): ${url ?? "NONE"}`,
             );
             return url;
           })
@@ -296,9 +302,9 @@ async function handleBotDone(body: any): Promise<void> {
       // Zoom returns meeting_url as an object; only use string values for matching/storage.
       botMeetingUrl = typeof botData?.meeting_url === "string" ? botData.meeting_url : null;
       botName = botData?.bot_name ?? "";
-      inferredBotType = botName.toUpperCase().includes("WEYA VOICE")
-        ? "voice_agent"
-        : "recording";
+      // Use the provider field (already computed above) as the authoritative source.
+      // isAssemblyAI is true only when assembly_ai_async_chunked was requested at bot creation.
+      inferredBotType = isAssemblyAI ? "voice_agent" : "recording";
       // Use the moment the bot entered in_call_recording as the meeting start anchor.
       meetingStartIso =
         (botData?.status_changes as any[] | undefined)?.find(
