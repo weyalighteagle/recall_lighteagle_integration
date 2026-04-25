@@ -264,16 +264,22 @@ async function handleBotDone(body: any): Promise<void> {
       // When include_bot_in_recording.audio is true, Recall creates a separate recordings
       // entry for the bot's own output audio stream in addition to the participant stream.
       // Hardcoding recordings[0] would miss the bot's utterances entirely.
-      downloadUrls = recordings
-        .map((r: any, i: number) => {
-          const url =
-            r?.media_shortcuts?.transcript?.data?.download_url ?? null;
-          console.log(
-            `[handleBotDone] recordings[${i}] transcript download_url: ${url ?? "NONE"}`,
-          );
-          return url;
-        })
-        .filter((u: string | null): u is string => !!u);
+        const isVoiceAgentBot = (botData?.bot_name ?? "").toUpperCase().includes("WEYA VOICE") ||
+          (botData?.bot_name ?? "").toUpperCase().includes("VOICE AGENT");
+        downloadUrls = recordings
+          .map((r: any, i: number) => {
+            const transcriptShortcut = r?.media_shortcuts?.transcript?.data;
+            // Voice agent bots use AssemblyAI async — transcript is in provider_data_download_url.
+            // Recording bots use recallai_streaming — transcript is in download_url (diarized format).
+            const url = isVoiceAgentBot
+              ? transcriptShortcut?.provider_data_download_url ?? null
+              : transcriptShortcut?.download_url ?? null;
+            console.log(
+              `[handleBotDone] recordings[${i}] transcript url (isVoiceAgent=${isVoiceAgentBot}): ${url ?? "NONE"}`,
+            );
+            return url;
+          })
+          .filter((u: string | null): u is string => !!u);
 
       console.log(
         `[handleBotDone] transcript URLs found: ${downloadUrls.length} / ${recordings.length} recordings`,
@@ -399,14 +405,27 @@ async function handleBotDone(body: any): Promise<void> {
         continue;
       }
 
-      // Guard: transcript download must be a top-level array
-      if (!Array.isArray(rawJson)) {
-        console.error(
-          `[handleBotDone] transcript is not an array — shape:`,
-          JSON.stringify(rawJson).slice(0, 300),
-        );
-      } else {
-        const incoming = rawJson as TranscriptSegment[];
+        // Handle both formats:
+        // - Recall diarized format: top-level array of segments
+        // - AssemblyAI provider_data format: object with utterances array
+        let incoming: TranscriptSegment[] = [];
+        if (Array.isArray(rawJson)) {
+          incoming = rawJson as TranscriptSegment[];
+        } else if (rawJson && typeof rawJson === "object") {
+          const obj = rawJson as any;
+          if (Array.isArray(obj.utterances)) {
+            // AssemblyAI format: { utterances: [{ speaker, text, words, start, end }] }
+            incoming = obj.utterances.map((u: any) => ({
+              speaker: u.speaker ?? "Unknown",
+              words: u.words ?? [],
+            }));
+          } else {
+            console.error(
+              `[handleBotDone] unrecognised transcript shape:`,
+              JSON.stringify(rawJson).slice(0, 300),
+            );
+          }
+        }
         const speakers = [
           ...new Set(
             incoming.map((s) => s.participant?.name ?? s.speaker ?? "Unknown"),
@@ -416,7 +435,6 @@ async function handleBotDone(body: any): Promise<void> {
           `[handleBotDone] transcript ${urlIndex + 1}: ${incoming.length} segments, speakers: ${JSON.stringify(speakers)}`,
         );
         segments.push(...incoming);
-      }
     } catch (err) {
       console.error(`[handleBotDone] unexpected error for url=${url}:`, err);
     }
