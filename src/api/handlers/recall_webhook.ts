@@ -287,7 +287,8 @@ async function handleBotDone(body: any): Promise<void> {
 
       // Backfill meeting_url, bot_type, and bot_name — important for calendar-scheduled bots
       // where these fields weren't available when the meetings row was first created.
-      botMeetingUrl = botData?.meeting_url ?? null;
+      // Zoom returns meeting_url as an object; only use string values for matching/storage.
+      botMeetingUrl = typeof botData?.meeting_url === "string" ? botData.meeting_url : null;
       botName = botData?.bot_name ?? "";
       inferredBotType = botName.toUpperCase().includes("WEYA VOICE")
         ? "voice_agent"
@@ -298,13 +299,15 @@ async function handleBotDone(body: any): Promise<void> {
           (s: any) => s.code === "in_call_recording",
         )?.created_at ?? null;
       try {
+        const backfillUpdate: Record<string, any> = {
+          bot_type: inferredBotType,
+          bot_name: botName || null,
+        };
+        // Only overwrite meeting_url when the API returns a plain string (not Zoom's object shape)
+        if (botMeetingUrl) backfillUpdate.meeting_url = botMeetingUrl;
         await supabase
           .from("meetings")
-          .update({
-            meeting_url: botMeetingUrl,
-            bot_type: inferredBotType,
-            bot_name: botName || null,
-          })
+          .update(backfillUpdate)
           .eq("bot_id", botId);
         console.log(
           `Backfilled meeting_url=${botMeetingUrl} bot_type=${inferredBotType} bot_name="${botName}" for bot ${botId}`,
@@ -405,20 +408,34 @@ async function handleBotDone(body: any): Promise<void> {
         continue;
       }
 
-        // Handle both formats:
-        // - Recall diarized format: top-level array of segments
-        // - AssemblyAI provider_data format: object with utterances array
+        // Handle transcript formats:
+        // - Recall diarized: top-level array of segments
+        // - AssemblyAI flat: { utterances: [{ speaker, words }] }
+        // - AssemblyAI async_chunked: { parts: [{ utterances: [{ speaker, words }] }] }
         let incoming: TranscriptSegment[] = [];
         if (Array.isArray(rawJson)) {
           incoming = rawJson as TranscriptSegment[];
         } else if (rawJson && typeof rawJson === "object") {
           const obj = rawJson as any;
           if (Array.isArray(obj.utterances)) {
-            // AssemblyAI format: { utterances: [{ speaker, text, words, start, end }] }
             incoming = obj.utterances.map((u: any) => ({
               speaker: u.speaker ?? "Unknown",
               words: u.words ?? [],
             }));
+          } else if (Array.isArray(obj.parts)) {
+            // AssemblyAI async_chunked: each part is an audio chunk with its own utterances
+            incoming = obj.parts.flatMap((part: any) => {
+              if (Array.isArray(part.utterances)) {
+                return part.utterances.map((u: any) => ({
+                  speaker: u.speaker ?? "Unknown",
+                  words: u.words ?? [],
+                }));
+              }
+              // Fallback: part itself is a segment
+              return part.speaker !== undefined
+                ? [{ speaker: part.speaker ?? "Unknown", words: part.words ?? [] }]
+                : [];
+            });
           } else {
             console.error(
               `[handleBotDone] unrecognised transcript shape:`,
@@ -526,6 +543,41 @@ async function handleBotDone(body: any): Promise<void> {
           err,
         );
       }
+    }
+  }
+
+  // Voice agent path: insert AssemblyAI segments directly.
+  // assembly_ai_async_chunked produces no real-time transcript.data events,
+  // so bot.done is the sole source of utterances for these bots.
+  if (inferredBotType === "voice_agent") {
+    if (segments.length > 0) {
+      try {
+        const rows = segments.map((seg) => {
+          const raw = seg.participant?.name ?? seg.speaker ?? "";
+          const isFallback = !raw || raw === "Unknown";
+          const speaker = isFallback ? botName || "WEYA Voice Agent" : raw;
+          if (isFallback) {
+            console.log(`[handleBotDone] voice_agent speaker normalized: "${raw}" → "${speaker}"`);
+          }
+          return { bot_id: botId, speaker, words: seg.words, source: "assemblyai" };
+        });
+        const speakers = [...new Set(rows.map((r) => r.speaker))];
+        // Clear any stale rows before writing the authoritative async transcript
+        await supabase.from("utterances").delete().eq("bot_id", botId);
+        const { error: insertError, data: insertData } = await supabase
+          .from("utterances")
+          .insert(rows)
+          .select("id");
+        if (insertError) {
+          console.error(`[handleBotDone] voice_agent utterances insert failed for bot ${botId}:`, insertError);
+        } else {
+          console.log(`[handleBotDone] voice_agent inserted ${insertData?.length ?? rows.length} utterances for bot ${botId}, speakers: ${JSON.stringify(speakers)}`);
+        }
+      } catch (err) {
+        console.error(`[handleBotDone] voice_agent unexpected error inserting utterances for bot ${botId}:`, err);
+      }
+    } else {
+      console.warn(`[handleBotDone] voice_agent got 0 segments — AssemblyAI transcript was empty (meeting may have been too short, or AssemblyAI API key not configured in Recall account).`);
     }
   }
 
