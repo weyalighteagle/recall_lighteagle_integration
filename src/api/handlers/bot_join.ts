@@ -57,10 +57,8 @@ export async function bot_join(args: {
             recording_config: {
                 transcript: {
                     provider: {
-                        assembly_ai_async_chunked: {
-                            language_code: "tr",
-                            speaker_labels: true,
-                            speakers_expected: 3,
+                        recallai_streaming: {
+                            language: "tr",
                         },
                     },
                 },

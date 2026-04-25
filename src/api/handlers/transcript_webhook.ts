@@ -113,12 +113,11 @@ export async function handleTranscriptWebhook(
   }
 
   if (event === "transcript.done") {
-    // Download and store transcript for bots that use assembly_ai_async_chunked.
-    // We detect this by calling the Recall bot API and checking for provider_data_download_url
-    // rather than querying the DB — avoids a race condition where bot_type hasn't been set yet
-    // when transcript.done fires concurrently with bot.done.
-    // Recording bots use recallai_streaming and have no provider_data_download_url, so they
-    // naturally skip the inner block. delete+insert makes this path idempotent alongside bot.done.
+    // Download and store the post-processed transcript when available.
+    // We call the Recall bot API directly rather than querying the DB to avoid a race condition
+    // where bot_type hasn't been set yet when transcript.done fires concurrently with bot.done.
+    // If provider_data_download_url is present, try AssemblyAI first; fall back to Recall native.
+    // delete+insert makes this path idempotent alongside bot.done.
     try {
       const recallApiKey = process.env.RECALL_API_KEY;
       const recallRegion = process.env.RECALL_REGION || "api";
