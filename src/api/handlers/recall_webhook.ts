@@ -220,6 +220,7 @@ async function handleBotDone(body: any): Promise<void> {
 
   // Step 1: Fetch bot details from Recall v1 API to get transcript download URLs
   let downloadUrls: string[] = [];
+  let fallbackUrls: string[] = [];
   let botName: string = "";
   let botMeetingUrl: string | null = null;
   let botData: any = null;
@@ -266,14 +267,19 @@ async function handleBotDone(body: any): Promise<void> {
       // Hardcoding recordings[0] would miss the bot's utterances entirely.
         const isVoiceAgentBot = (botData?.bot_name ?? "").toUpperCase().includes("WEYA VOICE") ||
           (botData?.bot_name ?? "").toUpperCase().includes("VOICE AGENT");
+
+        // For voice agents: try AssemblyAI provider_data first; fall back to Recall's native
+        // diarized transcript (download_url) if AssemblyAI returns empty parts.
         downloadUrls = recordings
           .map((r: any, i: number) => {
             const transcriptShortcut = r?.media_shortcuts?.transcript?.data;
-            // Voice agent bots use AssemblyAI async — transcript is in provider_data_download_url.
-            // Recording bots use recallai_streaming — transcript is in download_url (diarized format).
             const url = isVoiceAgentBot
               ? transcriptShortcut?.provider_data_download_url ?? null
               : transcriptShortcut?.download_url ?? null;
+            // Collect Recall native URL as fallback for voice agents
+            if (isVoiceAgentBot && transcriptShortcut?.download_url) {
+              fallbackUrls.push(transcriptShortcut.download_url);
+            }
             console.log(
               `[handleBotDone] recordings[${i}] transcript url (isVoiceAgent=${isVoiceAgentBot}): ${url ?? "NONE"}`,
             );
@@ -282,7 +288,7 @@ async function handleBotDone(body: any): Promise<void> {
           .filter((u: string | null): u is string => !!u);
 
       console.log(
-        `[handleBotDone] transcript URLs found: ${downloadUrls.length} / ${recordings.length} recordings`,
+        `[handleBotDone] transcript URLs found: ${downloadUrls.length} / ${recordings.length} recordings (fallback: ${fallbackUrls.length})`,
       );
 
       // Backfill meeting_url, bot_type, and bot_name — important for calendar-scheduled bots
@@ -577,7 +583,52 @@ async function handleBotDone(body: any): Promise<void> {
         console.error(`[handleBotDone] voice_agent unexpected error inserting utterances for bot ${botId}:`, err);
       }
     } else {
-      console.warn(`[handleBotDone] voice_agent got 0 segments — AssemblyAI transcript was empty (meeting may have been too short, or AssemblyAI API key not configured in Recall account).`);
+      console.warn(`[handleBotDone] voice_agent got 0 segments from AssemblyAI — falling back to Recall native transcript`);
+      // AssemblyAI returned empty parts; download Recall's own diarized transcript as fallback
+      for (const url of fallbackUrls) {
+        try {
+          const fbRes = await fetch(url);
+          if (!fbRes.ok) {
+            console.error(`[handleBotDone] fallback download failed (${fbRes.status}): ${url.slice(0, 80)}`);
+            continue;
+          }
+          const rawText = await fbRes.text();
+          console.log(`[handleBotDone] fallback raw (first 300 chars): ${rawText.slice(0, 300)}`);
+          const rawJson: unknown = JSON.parse(rawText);
+          if (Array.isArray(rawJson)) {
+            segments.push(...(rawJson as TranscriptSegment[]));
+          } else if (rawJson && typeof rawJson === "object") {
+            const obj = rawJson as any;
+            if (Array.isArray(obj.utterances)) {
+              segments.push(...obj.utterances.map((u: any) => ({ speaker: u.speaker ?? "Unknown", words: u.words ?? [] })));
+            }
+          }
+        } catch (e) {
+          console.error(`[handleBotDone] fallback error:`, e);
+        }
+      }
+      console.log(`[handleBotDone] fallback yielded ${segments.length} segments`);
+
+      // Insert fallback segments if we got any
+      if (segments.length > 0) {
+        try {
+          const rows = segments.map((seg) => {
+            const raw = seg.participant?.name ?? seg.speaker ?? "";
+            const speaker = !raw || raw === "Unknown" ? botName || "WEYA Voice Agent" : raw;
+            return { bot_id: botId, speaker, words: seg.words, source: "recall_native" };
+          });
+          const speakers = [...new Set(rows.map((r) => r.speaker))];
+          await supabase.from("utterances").delete().eq("bot_id", botId);
+          const { error: insertError, data: insertData } = await supabase.from("utterances").insert(rows).select("id");
+          if (insertError) {
+            console.error(`[handleBotDone] voice_agent fallback insert failed:`, insertError);
+          } else {
+            console.log(`[handleBotDone] voice_agent fallback inserted ${insertData?.length ?? rows.length} utterances, speakers: ${JSON.stringify(speakers)}`);
+          }
+        } catch (err) {
+          console.error(`[handleBotDone] voice_agent fallback insert error:`, err);
+        }
+      }
     }
   }
 

@@ -113,92 +113,98 @@ export async function handleTranscriptWebhook(
   }
 
   if (event === "transcript.done") {
-    // For voice_agent bots: download AssemblyAI transcript and store utterances.
-    // This runs in addition to the bot.done path so whichever fires first with real
-    // content wins. The delete+insert is idempotent — re-running just overwrites.
+    // Download and store transcript for bots that use assembly_ai_async_chunked.
+    // We detect this by calling the Recall bot API and checking for provider_data_download_url
+    // rather than querying the DB — avoids a race condition where bot_type hasn't been set yet
+    // when transcript.done fires concurrently with bot.done.
+    // Recording bots use recallai_streaming and have no provider_data_download_url, so they
+    // naturally skip the inner block. delete+insert makes this path idempotent alongside bot.done.
     try {
-      const { data: meeting } = await supabase
-        .from("meetings")
-        .select("bot_type, bot_name")
-        .eq("bot_id", botId)
-        .single();
+      const recallApiKey = process.env.RECALL_API_KEY;
+      const recallRegion = process.env.RECALL_REGION || "api";
 
-      const isVoiceAgent =
-        meeting?.bot_type === "voice_agent" ||
-        (meeting?.bot_name ?? "").toUpperCase().includes("WEYA VOICE") ||
-        (meeting?.bot_name ?? "").toUpperCase().includes("VOICE AGENT");
+      const botRes = await fetch(
+        `https://${recallRegion}.recall.ai/api/v1/bot/${botId}/`,
+        { headers: { Authorization: `${recallApiKey}`, "Content-Type": "application/json" } },
+      );
 
-      if (isVoiceAgent) {
-        console.log(`[transcript_webhook] voice_agent transcript.done — fetching provider_data for bot ${botId}`);
+      if (!botRes.ok) {
+        console.error(`[transcript_webhook] v1 bot fetch failed: ${botRes.status}`);
+      } else {
+        const botData = await botRes.json();
+        const botName: string = botData?.bot_name || "WEYA Voice Agent";
+        const recordings: any[] = Array.isArray(botData?.recordings) ? botData.recordings : [];
 
-        const recallApiKey = process.env.RECALL_API_KEY;
-        const recallRegion = process.env.RECALL_REGION || "api";
+        const providerUrls: string[] = recordings
+          .map((r: any) => r?.media_shortcuts?.transcript?.data?.provider_data_download_url)
+          .filter(Boolean);
 
-        // Use the v1 bot API to get provider_data_download_url from media_shortcuts
-        const botRes = await fetch(
-          `https://${recallRegion}.recall.ai/api/v1/bot/${botId}/`,
-          { headers: { Authorization: `${recallApiKey}`, "Content-Type": "application/json" } },
-        );
+        // Recall native diarized transcript — fallback if AssemblyAI returns empty parts
+        const nativeUrls: string[] = recordings
+          .map((r: any) => r?.media_shortcuts?.transcript?.data?.download_url)
+          .filter(Boolean);
 
-        if (!botRes.ok) {
-          console.error(`[transcript_webhook] v1 bot fetch failed: ${botRes.status}`);
+        console.log(`[transcript_webhook] transcript.done bot="${botName}" provider_data=${providerUrls.length} native=${nativeUrls.length}`);
+
+        // Recording bots (recallai_streaming) have no provider_data — skip entirely
+        if (providerUrls.length === 0 && nativeUrls.length === 0) {
+          console.log(`[transcript_webhook] no transcript URLs — skipping (recording bot)`);
         } else {
-          const botData = await botRes.json();
-          const botName: string = botData?.bot_name || "WEYA Voice Agent";
-          const recordings: any[] = Array.isArray(botData?.recordings) ? botData.recordings : [];
-
-          const providerUrls: string[] = recordings
-            .map((r: any) => r?.media_shortcuts?.transcript?.data?.provider_data_download_url)
-            .filter(Boolean);
-
-          console.log(`[transcript_webhook] provider_data URLs found: ${providerUrls.length}`);
-
           let segments: { speaker: string; words: unknown[] }[] = [];
 
+          const parseJson = (rawText: string): { speaker: string; words: unknown[] }[] => {
+            const json: unknown = JSON.parse(rawText);
+            if (Array.isArray(json)) return json as any[];
+            if (json && typeof json === "object") {
+              const obj = json as any;
+              if (Array.isArray(obj.utterances)) {
+                return obj.utterances.map((u: any) => ({ speaker: u.speaker ?? "Unknown", words: u.words ?? [] }));
+              }
+              if (Array.isArray(obj.parts)) {
+                return obj.parts.flatMap((part: any) => {
+                  if (Array.isArray(part.utterances)) {
+                    return part.utterances.map((u: any) => ({ speaker: u.speaker ?? "Unknown", words: u.words ?? [] }));
+                  }
+                  return part.speaker !== undefined ? [{ speaker: part.speaker ?? "Unknown", words: part.words ?? [] }] : [];
+                });
+              }
+            }
+            return [];
+          };
+
+          // Try AssemblyAI provider_data first
           for (const url of providerUrls) {
             try {
               const dlRes = await fetch(url);
-              if (!dlRes.ok) {
-                console.error(`[transcript_webhook] download failed (${dlRes.status}): ${url.slice(0, 80)}`);
-                continue;
-              }
+              if (!dlRes.ok) { console.error(`[transcript_webhook] provider_data download failed (${dlRes.status})`); continue; }
               const rawText = await dlRes.text();
               console.log(`[transcript_webhook] provider_data (first 300 chars): ${rawText.slice(0, 300)}`);
+              segments.push(...parseJson(rawText));
+            } catch (e) { console.error(`[transcript_webhook] provider_data parse error:`, e); }
+          }
 
-              const json: unknown = JSON.parse(rawText);
-              if (Array.isArray(json)) {
-                segments.push(...(json as any[]));
-              } else if (json && typeof json === "object") {
-                const obj = json as any;
-                if (Array.isArray(obj.utterances)) {
-                  segments.push(...obj.utterances.map((u: any) => ({ speaker: u.speaker ?? "Unknown", words: u.words ?? [] })));
-                } else if (Array.isArray(obj.parts)) {
-                  segments.push(
-                    ...obj.parts.flatMap((part: any) => {
-                      if (Array.isArray(part.utterances)) {
-                        return part.utterances.map((u: any) => ({ speaker: u.speaker ?? "Unknown", words: u.words ?? [] }));
-                      }
-                      return part.speaker !== undefined
-                        ? [{ speaker: part.speaker ?? "Unknown", words: part.words ?? [] }]
-                        : [];
-                    }),
-                  );
-                } else {
-                  console.error(`[transcript_webhook] unrecognised shape: ${rawText.slice(0, 200)}`);
-                }
-              }
-            } catch (e) {
-              console.error(`[transcript_webhook] error processing URL:`, e);
+          // Fall back to Recall native diarized transcript if AssemblyAI returned nothing
+          if (segments.length === 0 && nativeUrls.length > 0) {
+            console.log(`[transcript_webhook] AssemblyAI empty — falling back to Recall native transcript`);
+            for (const url of nativeUrls) {
+              try {
+                const dlRes = await fetch(url);
+                if (!dlRes.ok) { console.error(`[transcript_webhook] native download failed (${dlRes.status})`); continue; }
+                const rawText = await dlRes.text();
+                console.log(`[transcript_webhook] native transcript (first 300 chars): ${rawText.slice(0, 300)}`);
+                segments.push(...parseJson(rawText));
+              } catch (e) { console.error(`[transcript_webhook] native parse error:`, e); }
             }
           }
 
           console.log(`[transcript_webhook] parsed ${segments.length} segments`);
 
           if (segments.length > 0) {
+            const source = segments.length > 0 && providerUrls.length > 0 ? "assemblyai" : "recall_native";
             const rows = segments.map((seg) => {
               const raw = (seg as any).participant?.name ?? seg.speaker ?? "";
               const speaker = !raw || raw === "Unknown" ? botName : raw;
-              return { bot_id: botId, speaker, words: seg.words, source: "assemblyai" };
+              return { bot_id: botId, speaker, words: seg.words, source };
             });
             const speakers = [...new Set(rows.map((r) => r.speaker))];
             await supabase.from("utterances").delete().eq("bot_id", botId);
@@ -206,14 +212,12 @@ export async function handleTranscriptWebhook(
             if (insErr) {
               console.error(`[transcript_webhook] utterances insert failed for bot ${botId}:`, insErr);
             } else {
-              console.log(`[transcript_webhook] inserted ${insData?.length ?? rows.length} utterances for bot ${botId}, speakers: ${JSON.stringify(speakers)}`);
+              console.log(`[transcript_webhook] inserted ${insData?.length ?? rows.length} utterances for bot ${botId} (source=${source}), speakers: ${JSON.stringify(speakers)}`);
             }
           } else {
-            console.warn(`[transcript_webhook] 0 segments for voice_agent bot ${botId} — AssemblyAI returned empty content`);
+            console.warn(`[transcript_webhook] 0 segments for bot ${botId} — both AssemblyAI and Recall native returned empty`);
           }
         }
-      } else {
-        console.log(`[transcript_webhook] not a voice_agent (bot_type=${meeting?.bot_type}, bot_name=${meeting?.bot_name}) — skipping provider_data fetch`);
       }
     } catch (err) {
       console.error(`[transcript_webhook] error in transcript.done handler:`, err);
