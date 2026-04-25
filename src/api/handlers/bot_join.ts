@@ -57,10 +57,11 @@ export async function bot_join(args: {
             recording_config: {
                 transcript: {
                     provider: {
-                        recallai_streaming: {},
-                    },
-                    diarization: {
-                        use_separate_streams_when_available: true,
+                        assembly_ai_async: {
+                            language_code: "tr",
+                            speaker_labels: true,
+                            speakers_expected: 3,
+                        },
                     },
                 },
                 realtime_endpoints: [
@@ -81,7 +82,13 @@ export async function bot_join(args: {
             bot_name: bot_name || "WEYA by Light Eagle",
             recording_config: {
                 transcript: {
-                    provider: { recallai_streaming: {} },
+                    provider: {
+                        assembly_ai_async: {
+                            language_code: "tr",
+                            speaker_labels: true,
+                            speakers_expected: 3,
+                        },
+                    },
                 },
                 realtime_endpoints: [
                     {

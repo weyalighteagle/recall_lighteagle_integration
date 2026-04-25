@@ -18,7 +18,6 @@ import { bot_settings_get } from "./bot_settings";
 import { chunkText, createEmbeddings } from "./knowledge_base";
 import { buildBotMetadataMap } from "./notes";
 import { cleanTranscript } from "../lib/cleanTranscript";
-import { transcribeWithGladia } from "../lib/transcribeWithGladia";
 
 // ─── Bot Type ───────────────────────────────────────────────
 type BotType = "recording" | "voice_agent";
@@ -204,14 +203,14 @@ async function handleBotDone(body: any): Promise<void> {
     return;
   }
 
-  const { count } = await supabase
-    .from('utterances')
-    .select('id', { count: 'exact', head: true })
+  const { data: meetingDoneCheck } = await supabase
+    .from('meetings')
+    .select('done')
     .eq('bot_id', botId)
-    .eq('source', 'gladia')
+    .single()
 
-  if (count && count > 0) {
-    console.log(`[handleBotDone] Gladia already ran for bot_id=${botId}, skipping`)
+  if (meetingDoneCheck?.done === true) {
+    console.log(`[handleBotDone] meeting already marked done for bot_id=${botId}, skipping`)
     return
   }
 
@@ -287,7 +286,7 @@ async function handleBotDone(body: any): Promise<void> {
       inferredBotType = botName.toUpperCase().includes("WEYA VOICE")
         ? "voice_agent"
         : "recording";
-      // Use the moment the bot entered in_call_recording as the Gladia timestamp anchor.
+      // Use the moment the bot entered in_call_recording as the meeting start anchor.
       meetingStartIso =
         (botData?.status_changes as any[] | undefined)?.find(
           (s: any) => s.code === "in_call_recording",
@@ -431,8 +430,7 @@ async function handleBotDone(body: any): Promise<void> {
   // due to network issues or delivery failures. The recorded transcript from
   // Recall is the authoritative source. If it has MORE segments than what we
   // received in real-time, replace with the complete version.
-  // Voice agent bots skip Recall's async transcript entirely.
-  // Gladia post-meeting STT is the source of truth for this bot type.
+  // Voice agent bots: AssemblyAI async transcript arrives via transcript.done — skip Recall's sync segment check.
   if (inferredBotType !== "voice_agent" && segments.length > 0) {
     const { count: existingCount } = await supabase
       .from("utterances")
@@ -511,60 +509,6 @@ async function handleBotDone(body: any): Promise<void> {
         );
       }
     }
-  }
-
-  // Step 3b — Gladia post-meeting transcription (voice agent only)
-  // Recording bot transcripts arrive cleanly via transcript.data — Gladia not needed.
-  if (inferredBotType === "voice_agent") {
-    try {
-      // Mirror the exact same pattern used in Step 1 for transcript URLs:
-      //   recordings[i].media_shortcuts.transcript.data.download_url
-      // Audio-only is preferred over video — smaller file, faster Gladia upload/processing.
-      // Fall back to video if audio shortcut is absent.
-      const recordingsForGladia: any[] = Array.isArray(botData?.recordings)
-        ? botData.recordings
-        : [];
-      let recordingUrl: string | null = null;
-      for (const r of recordingsForGladia) {
-        const url =
-          r?.media_shortcuts?.audio?.data?.download_url ??
-          r?.media_shortcuts?.video_mixed?.data?.download_url ??
-          r?.media_shortcuts?.video?.data?.download_url ??
-          null;
-        if (url) {
-          recordingUrl = url;
-          break;
-        }
-      }
-      console.log(`[handleBotDone] Gladia recording URL: ${recordingUrl ?? "NONE"}`);
-
-      const speakerTimelineUrl: string | undefined =
-        recordingsForGladia[0]?.participant_events?.data?.speaker_timeline_download_url ?? undefined;
-      console.log(`[handleBotDone] speaker_timeline URL: ${speakerTimelineUrl ?? "NONE"}`);
-
-      if (recordingUrl) {
-        console.log(`[handleBotDone] Starting Gladia transcription for bot ${botId}`);
-        const gladiaResult = await transcribeWithGladia(recordingUrl, botId, meetingStartIso, segments);
-        if (!gladiaResult.ok) {
-          console.error(
-            `[handleBotDone] Gladia transcription failed for bot ${botId}:`,
-            gladiaResult.error,
-          );
-          // Do not set done = true — return early so this meeting can be identified and retried manually.
-          return;
-        }
-        console.log(
-          `[handleBotDone] Gladia transcription succeeded for bot ${botId} — ${gladiaResult.utteranceCount} utterances inserted.`,
-        );
-      } else {
-        console.warn(`[handleBotDone] No recording URL found for bot ${botId} — skipping Gladia`);
-      }
-    } catch (err) {
-      console.error(`[handleBotDone] Gladia step failed for bot ${botId}:`, err);
-      return;
-    }
-  } else {
-    console.log(`[handleBotDone] bot_type=${inferredBotType} — skipping Gladia (recording bot uses real-time transcript)`);
   }
 
   // Step 4: Mark the meeting as done (runs regardless of transcript availability)
@@ -963,29 +907,11 @@ export async function schedule_bot_for_calendar_event(args: {
       recording_config: {
         transcript: {
           provider: {
-            recallai_streaming: {
-              language: "auto",
-              key_terms: [
-                "WEYA",
-                "Light Eagle",
-                "Onur",
-                "Heval",
-                "Gulfem",
-                "Yigit",
-                "Mehmet Cem",
-                "Vercel",
-                "Clerk",
-                "JWT",
-                "GitHub",
-                "TypeScript",
-                "pull request",
-                "deploy",
-                "webhook",
-              ],
+            assembly_ai_async: {
+              language_code: "tr",
+              speaker_labels: true,
+              speakers_expected: 3,
             },
-          },
-          diarization: {
-            use_separate_streams_when_available: true,
           },
         },
         realtime_endpoints: [
@@ -1008,23 +934,10 @@ export async function schedule_bot_for_calendar_event(args: {
       recording_config: {
         transcript: {
           provider: {
-            recallai_streaming: {
-              language: "auto",
-              key_terms: [
-                "WEYA",
-                "Heval",
-                "Gulfem",
-                "Yigit",
-                "Mehmet Cem",
-                "Vercel",
-                "Clerk",
-                "JWT",
-                "GitHub",
-                "TypeScript",
-                "pull request",
-                "deploy",
-                "webhook",
-              ],
+            assembly_ai_async: {
+              language_code: "tr",
+              speaker_labels: true,
+              speakers_expected: 3,
             },
           },
         },
