@@ -82,6 +82,15 @@ export async function recall_webhook(payload: any): Promise<void> {
     return;
   }
 
+  // Recall sends "transcript.failed" when async transcription fails (e.g. AssemblyAI rejection).
+  if (payload?.event === "transcript.failed") {
+    console.log(
+      `[recall_webhook] transcript.failed received — bot_id="${payload?.data?.bot?.id}" transcript_id="${payload?.data?.transcript?.id}"`,
+    );
+    await handleTranscriptFailed(payload);
+    return;
+  }
+
   const result = z
     .discriminatedUnion("event", [
       CalendarUpdateEventSchema,
@@ -818,8 +827,6 @@ async function handleRecordingDone(body: any): Promise<void> {
           provider: {
             assembly_ai_async: {
               language_code: "tr",
-              speaker_labels: true,
-              speakers_expected: 2,
             },
           },
           diarization: {
@@ -841,6 +848,65 @@ async function handleRecordingDone(body: any): Promise<void> {
     }
   } catch (err) {
     console.error(`[recording.done] unexpected error triggering AssemblyAI:`, err);
+  }
+}
+
+/**
+ * Handle transcript.failed webhook: fired when async transcription (e.g. AssemblyAI) fails.
+ * If real-time utterances are already in the DB we mark done and keep them.
+ * If there are no utterances we still mark done so the UI doesn't spin forever.
+ */
+async function handleTranscriptFailed(body: any): Promise<void> {
+  const botId: string | undefined = body?.data?.bot?.id;
+  const transcriptId: string | undefined = body?.data?.transcript?.id;
+  const subCode: string | undefined = body?.data?.data?.sub_code;
+
+  console.log(
+    `[transcript.failed] bot_id=${botId} transcript_id=${transcriptId} sub_code=${subCode ?? "none"}`,
+  );
+
+  if (!botId) {
+    console.error(`[transcript.failed] missing bot_id — cannot proceed`);
+    return;
+  }
+
+  const { data: meeting } = await supabase
+    .from("meetings")
+    .select("done, bot_type")
+    .eq("bot_id", botId)
+    .maybeSingle();
+
+  if (meeting?.done === true) {
+    console.log(`[transcript.failed] meeting already done for bot_id=${botId} — skipping`);
+    return;
+  }
+
+  const { count } = await supabase
+    .from("utterances")
+    .select("id", { count: "exact", head: true })
+    .eq("bot_id", botId);
+
+  const utteranceCount = count ?? 0;
+
+  if (utteranceCount > 0) {
+    console.log(
+      `[transcript.failed] ${utteranceCount} real-time utterances already in DB — marking done`,
+    );
+  } else {
+    console.log(
+      `[transcript.failed] no utterances in DB — transcript failed with no fallback`,
+    );
+  }
+
+  const { error } = await supabase
+    .from("meetings")
+    .update({ done: true })
+    .eq("bot_id", botId);
+
+  if (error) {
+    console.error(`[transcript.failed] failed to mark done for bot_id=${botId}:`, error);
+  } else {
+    console.log(`[transcript.failed] marked done=true for bot_id=${botId}`);
   }
 }
 
