@@ -72,6 +72,16 @@ export async function recall_webhook(payload: any): Promise<void> {
     return;
   }
 
+  // Recall sends "recording.done" when a recording is ready to be transcribed.
+  // For voice_agent bots we use this to trigger AssemblyAI async transcription.
+  if (payload?.event === "recording.done") {
+    console.log(
+      `[recall_webhook] recording.done received — bot_id="${payload?.data?.bot?.id}" recording_id="${payload?.data?.recording?.id}"`,
+    );
+    await handleRecordingDone(payload);
+    return;
+  }
+
   const result = z
     .discriminatedUnion("event", [
       CalendarUpdateEventSchema,
@@ -203,16 +213,20 @@ async function handleBotDone(body: any): Promise<void> {
     return;
   }
 
-  const { data: meetingDoneCheck } = await supabase
+  const { data: meetingRow } = await supabase
     .from('meetings')
-    .select('done')
+    .select('done, bot_type')
     .eq('bot_id', botId)
-    .single()
+    .single();
 
-  if (meetingDoneCheck?.done === true) {
-    console.log(`[handleBotDone] meeting already marked done for bot_id=${botId}, skipping`)
-    return
+  if (meetingRow?.done === true) {
+    console.log(`[handleBotDone] meeting already marked done for bot_id=${botId}, skipping`);
+    return;
   }
+
+  const inferredBotType: "voice_agent" | "recording" = meetingRow?.bot_type === "voice_agent"
+    ? "voice_agent"
+    : "recording";
 
   console.log(
     `[handleBotDone] ── START bot_id=${botId} ─────────────────────────────`,
@@ -220,11 +234,9 @@ async function handleBotDone(body: any): Promise<void> {
 
   // Step 1: Fetch bot details from Recall v1 API to get transcript download URLs
   let downloadUrls: string[] = [];
-  let fallbackUrls: string[] = [];
   let botName: string = "";
   let botMeetingUrl: string | null = null;
   let botData: any = null;
-  let inferredBotType: string = "recording";
   let meetingStartIso: string | null = null;
   try {
     const botResponse = await fetch_with_retry(
@@ -266,35 +278,23 @@ async function handleBotDone(body: any): Promise<void> {
       // entry for the bot's own output audio stream in addition to the participant stream.
       // Hardcoding recordings[0] would miss the bot's utterances entirely.
 
-        // Detect provider from the Recall API response — more reliable than checking bot name.
-        // recallai_streaming bots have provider_data_download_url too but it returns {"parts":[]}.
         const transcriptProvider = recordings[0]?.media_shortcuts?.transcript?.data?.provider ?? {};
-        const isAssemblyAI = "assembly_ai_async_chunked" in (transcriptProvider as object);
-        console.log(`[handleBotDone] transcript provider: ${JSON.stringify(transcriptProvider)} isAssemblyAI=${isAssemblyAI}`);
+        console.log(`[handleBotDone] transcript provider: ${JSON.stringify(transcriptProvider)}`);
 
-        // For AssemblyAI bots: use provider_data_download_url (contains diarized AssemblyAI output),
-        // fall back to Recall native download_url if AssemblyAI returned empty.
-        // For recallai_streaming bots: use download_url directly; real-time utterances are already
-        // stored via transcript.data events so bot.done just supplements if those were incomplete.
+        // All bots use recallai_streaming for real-time transcript.data during the call.
+        // Recording bots: supplement from Recall native download_url here.
+        // Voice agent bots: return early below — transcription handled by assembly_ai_async transcript.done.
         downloadUrls = recordings
           .map((r: any, i: number) => {
             const transcriptShortcut = r?.media_shortcuts?.transcript?.data;
-            const url = isAssemblyAI
-              ? transcriptShortcut?.provider_data_download_url ?? null
-              : transcriptShortcut?.download_url ?? null;
-            // Collect Recall native URL as fallback for AssemblyAI bots
-            if (isAssemblyAI && transcriptShortcut?.download_url) {
-              fallbackUrls.push(transcriptShortcut.download_url);
-            }
-            console.log(
-              `[handleBotDone] recordings[${i}] transcript url (isAssemblyAI=${isAssemblyAI}): ${url ?? "NONE"}`,
-            );
+            const url = transcriptShortcut?.download_url ?? null;
+            console.log(`[handleBotDone] recordings[${i}] transcript url: ${url ?? "NONE"}`);
             return url;
           })
           .filter((u: string | null): u is string => !!u);
 
       console.log(
-        `[handleBotDone] transcript URLs found: ${downloadUrls.length} / ${recordings.length} recordings (fallback: ${fallbackUrls.length})`,
+        `[handleBotDone] transcript URLs found: ${downloadUrls.length} / ${recordings.length} recordings`,
       );
 
       // Backfill meeting_url, bot_type, and bot_name — important for calendar-scheduled bots
@@ -302,9 +302,6 @@ async function handleBotDone(body: any): Promise<void> {
       // Zoom returns meeting_url as an object; only use string values for matching/storage.
       botMeetingUrl = typeof botData?.meeting_url === "string" ? botData.meeting_url : null;
       botName = botData?.bot_name ?? "";
-      // Use the provider field (already computed above) as the authoritative source.
-      // isAssemblyAI is true only when assembly_ai_async_chunked was requested at bot creation.
-      inferredBotType = isAssemblyAI ? "voice_agent" : "recording";
       // Use the moment the bot entered in_call_recording as the meeting start anchor.
       meetingStartIso =
         (botData?.status_changes as any[] | undefined)?.find(
@@ -339,6 +336,11 @@ async function handleBotDone(body: any): Promise<void> {
     console.error(
       `[handleBotDone] Could not fetch bot details from Recall for bot ${botId}. Skipping transcription. This needs manual review.`,
     );
+    return;
+  }
+
+  if (inferredBotType === "voice_agent") {
+    console.log(`[handleBotDone] voice_agent bot — transcript will arrive via assembly_ai_async transcript.done, skipping download`);
     return;
   }
 
@@ -477,8 +479,8 @@ async function handleBotDone(body: any): Promise<void> {
   // due to network issues or delivery failures. The recorded transcript from
   // Recall is the authoritative source. If it has MORE segments than what we
   // received in real-time, replace with the complete version.
-  // Voice agent bots: AssemblyAI async transcript arrives via transcript.done — skip Recall's sync segment check.
-  if (inferredBotType !== "voice_agent" && segments.length > 0) {
+  // Voice agent bots return early above; only recording bots reach here.
+  if (segments.length > 0) {
     const { count: existingCount } = await supabase
       .from("utterances")
       .select("id", { count: "exact", head: true })
@@ -554,87 +556,6 @@ async function handleBotDone(body: any): Promise<void> {
           `Unexpected error inserting async utterances for bot ${botId}:`,
           err,
         );
-      }
-    }
-  }
-
-  // Voice agent path: voice agents now use recallai_streaming, so real-time
-  // transcript.data events are the primary source. This block is only reached if
-  // downloadUrls is non-empty, which won't happen with recallai_streaming (provider_data_download_url is absent).
-  // Kept for forward-compatibility if a future provider returns downloadable segments.
-  if (inferredBotType === "voice_agent") {
-    if (segments.length > 0) {
-      try {
-        const rows = segments.map((seg) => {
-          const raw = seg.participant?.name ?? seg.speaker ?? "";
-          const isFallback = !raw || raw === "Unknown";
-          const speaker = isFallback ? botName || "WEYA Voice Agent" : raw;
-          if (isFallback) {
-            console.log(`[handleBotDone] voice_agent speaker normalized: "${raw}" → "${speaker}"`);
-          }
-          return { bot_id: botId, speaker, words: seg.words, source: "assemblyai" };
-        });
-        const speakers = [...new Set(rows.map((r) => r.speaker))];
-        // Clear any stale rows before writing the authoritative async transcript
-        await supabase.from("utterances").delete().eq("bot_id", botId);
-        const { error: insertError, data: insertData } = await supabase
-          .from("utterances")
-          .insert(rows)
-          .select("id");
-        if (insertError) {
-          console.error(`[handleBotDone] voice_agent utterances insert failed for bot ${botId}:`, insertError);
-        } else {
-          console.log(`[handleBotDone] voice_agent inserted ${insertData?.length ?? rows.length} utterances for bot ${botId}, speakers: ${JSON.stringify(speakers)}`);
-        }
-      } catch (err) {
-        console.error(`[handleBotDone] voice_agent unexpected error inserting utterances for bot ${botId}:`, err);
-      }
-    } else {
-      console.warn(`[handleBotDone] voice_agent got 0 segments from AssemblyAI — falling back to Recall native transcript`);
-      // AssemblyAI returned empty parts; download Recall's own diarized transcript as fallback
-      for (const url of fallbackUrls) {
-        try {
-          const fbRes = await fetch(url);
-          if (!fbRes.ok) {
-            console.error(`[handleBotDone] fallback download failed (${fbRes.status}): ${url.slice(0, 80)}`);
-            continue;
-          }
-          const rawText = await fbRes.text();
-          console.log(`[handleBotDone] fallback raw (first 300 chars): ${rawText.slice(0, 300)}`);
-          const rawJson: unknown = JSON.parse(rawText);
-          if (Array.isArray(rawJson)) {
-            segments.push(...(rawJson as TranscriptSegment[]));
-          } else if (rawJson && typeof rawJson === "object") {
-            const obj = rawJson as any;
-            if (Array.isArray(obj.utterances)) {
-              segments.push(...obj.utterances.map((u: any) => ({ speaker: u.speaker ?? "Unknown", words: u.words ?? [] })));
-            }
-          }
-        } catch (e) {
-          console.error(`[handleBotDone] fallback error:`, e);
-        }
-      }
-      console.log(`[handleBotDone] fallback yielded ${segments.length} segments`);
-
-      // Insert fallback segments if we got any
-      if (segments.length > 0) {
-        try {
-          const rows = segments.map((seg) => {
-            const raw = seg.participant?.name ?? seg.speaker ?? "";
-            const speaker = !raw || raw === "Unknown" ? botName || "WEYA Voice Agent" : raw;
-            return { bot_id: botId, speaker, words: seg.words, source: "recall_native" };
-          });
-          const speakers = [...new Set(rows.map((r) => r.speaker))];
-          await supabase.from("utterances").delete().eq("bot_id", botId);
-          const { error: insertError, data: insertData } = await supabase.from("utterances").insert(rows).select("id");
-          if (insertError) {
-            console.error(`[handleBotDone] voice_agent fallback insert failed:`, insertError);
-          } else {
-            console.log(`[handleBotDone] voice_agent fallback inserted ${insertData?.length ?? rows.length} utterances, speakers: ${JSON.stringify(speakers)}`);
-          }
-        } catch (err) {
-          console.error(`[handleBotDone] voice_agent fallback insert error:`, err);
-        }
       }
     }
   }
@@ -847,6 +768,80 @@ async function handleBotDone(body: any): Promise<void> {
   console.log(
     `[handleBotDone] ── END bot_id=${botId} ───────────────────────────────`,
   );
+}
+
+/**
+ * Handle recording.done webhook: for voice_agent bots, trigger AssemblyAI async transcription
+ * on the recording so that a transcript.done event fires when diarization is complete.
+ * Recording bots are not affected — their transcripts are already handled via bot.done.
+ */
+async function handleRecordingDone(body: any): Promise<void> {
+  const botId: string | undefined = body?.data?.bot?.id;
+  const recordingId: string | undefined = body?.data?.recording?.id;
+
+  if (!botId || !recordingId) {
+    console.error(
+      `[recording.done] missing bot_id or recording_id — bot_id=${botId} recording_id=${recordingId}`,
+    );
+    return;
+  }
+
+  console.log(`[recording.done] bot_id=${botId} recording_id=${recordingId}`);
+
+  const { data: meeting } = await supabase
+    .from("meetings")
+    .select("bot_type")
+    .eq("bot_id", botId)
+    .maybeSingle();
+
+  if (meeting?.bot_type !== "voice_agent") {
+    console.log(
+      `[recording.done] bot_type=${meeting?.bot_type ?? "unknown"} — not a voice_agent bot, skipping AssemblyAI async trigger`,
+    );
+    return;
+  }
+
+  console.log(
+    `[recording.done] voice_agent bot — triggering AssemblyAI async transcription for recording_id=${recordingId}`,
+  );
+
+  try {
+    const createTranscriptRes = await fetch(
+      `https://${env.RECALL_REGION}.recall.ai/api/v1/recording/${recordingId}/create_transcript/`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `${env.RECALL_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          provider: {
+            assembly_ai_async: {
+              language_code: "tr",
+              speaker_labels: true,
+              speakers_expected: 2,
+            },
+          },
+          diarization: {
+            use_separate_streams_when_available: true,
+          },
+        }),
+      },
+    );
+
+    const responseText = await createTranscriptRes.text();
+    if (createTranscriptRes.ok) {
+      console.log(
+        `[recording.done] AssemblyAI async transcript created — status=${createTranscriptRes.status} body=${responseText.slice(0, 200)}`,
+      );
+    } else {
+      console.error(
+        `[recording.done] create_transcript failed — status=${createTranscriptRes.status} body=${responseText.slice(0, 200)}`,
+      );
+    }
+  } catch (err) {
+    console.error(`[recording.done] unexpected error triggering AssemblyAI:`, err);
+  }
 }
 
 /**
@@ -1155,6 +1150,7 @@ export async function schedule_bot_for_calendar_event(args: {
               bot_id: bot.bot_id,
               user_email: calendar.platform_email,
               done: false,
+              bot_type,
               attendee_emails: attendeeEmails,
               meeting_start_time: calendar_event.start_time ?? null,
               meeting_title: calendar_event.raw?.summary ?? calendar_event.raw?.subject ?? null,

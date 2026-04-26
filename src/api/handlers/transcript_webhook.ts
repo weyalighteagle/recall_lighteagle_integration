@@ -113,134 +113,228 @@ export async function handleTranscriptWebhook(
   }
 
   if (event === "transcript.done") {
-    // Only process transcript.done for assembly_ai_async_chunked bots.
-    // recallai_streaming bots store utterances in real-time via transcript.data —
-    // processing transcript.done for them would overwrite those with a redundant delete+insert.
-    // We detect the provider from the Recall API directly to avoid a DB race with bot.done.
     try {
+      const transcriptId: string | undefined = body?.data?.transcript?.id;
+      if (!transcriptId) {
+        console.error(
+          `[transcript_webhook] transcript.done missing transcript_id — body=${JSON.stringify(body).slice(0, 200)}`,
+        );
+        return { status: 200 };
+      }
+
       const recallApiKey = process.env.RECALL_API_KEY;
       const recallRegion = process.env.RECALL_REGION || "api";
 
-      const botRes = await fetch(
-        `https://${recallRegion}.recall.ai/api/v1/bot/${botId}/`,
+      // Fetch the transcript object to determine the provider (recallai_streaming vs assembly_ai_async)
+      const transcriptRes = await fetch(
+        `https://${recallRegion}.recall.ai/api/v1/transcript/${transcriptId}/`,
         { headers: { Authorization: `${recallApiKey}`, "Content-Type": "application/json" } },
       );
 
-      if (!botRes.ok) {
-        console.error(`[transcript_webhook] v1 bot fetch failed: ${botRes.status}`);
-      } else {
-        const botData = await botRes.json();
-        const botName: string = botData?.bot_name || "WEYA Voice Agent";
-        const recordings: any[] = Array.isArray(botData?.recordings) ? botData.recordings : [];
+      if (!transcriptRes.ok) {
+        console.error(`[transcript_webhook] transcript fetch failed: ${transcriptRes.status} transcript_id=${transcriptId}`);
+        return { status: 200 };
+      }
 
-        // Detect provider from Recall API — recallai_streaming returns {"parts":[]} for provider_data
-        // so checking URL existence is not enough; we must look at the provider field.
-        const transcriptProvider = recordings[0]?.media_shortcuts?.transcript?.data?.provider ?? {};
-        const isAssemblyAI = "assembly_ai_async_chunked" in (transcriptProvider as object);
-        console.log(`[transcript_webhook] transcript.done bot="${botName}" provider=${JSON.stringify(transcriptProvider)} isAssemblyAI=${isAssemblyAI}`);
+      const transcriptObj = await transcriptRes.json();
+      const provider = transcriptObj?.provider ?? {};
+      const isRecallaiStreaming = "recallai_streaming" in (provider as object);
+      const isAssemblyAiAsync = "assembly_ai_async" in (provider as object);
 
-        if (!isAssemblyAI) {
-          console.log(`[transcript_webhook] recallai_streaming bot — skipping transcript.done (real-time utterances are authoritative)`);
+      console.log(
+        `[transcript_webhook] transcript.done transcript_id=${transcriptId} bot_id=${botId} provider=${JSON.stringify(provider)}`,
+      );
+
+      // ── CASE A: recallai_streaming ────────────────────────────────────────────
+      // Real-time utterances are authoritative for recording bots.
+      // Voice agent bots skip this — they wait for their assembly_ai_async transcript.done.
+      if (isRecallaiStreaming) {
+        const { data: meetingRow } = await supabase
+          .from("meetings")
+          .select("bot_type")
+          .eq("bot_id", botId)
+          .maybeSingle();
+
+        if (meetingRow?.bot_type === "voice_agent") {
+          console.log(
+            `[transcript_webhook] recallai_streaming for voice_agent bot — skipping, waiting for assembly_ai_async transcript.done`,
+          );
+          return { status: 200 };
+        }
+
+        // Recording bot: handleBotDone (triggered by bot.done) handles transcript download and done marking.
+        // transcript.done for recallai_streaming is a no-op here — same as previous behavior.
+        console.log(
+          `[transcript_webhook] recallai_streaming for recording bot — no-op, handleBotDone is authoritative`,
+        );
+        return { status: 200 };
+      }
+
+      // ── CASE B: assembly_ai_async ─────────────────────────────────────────────
+      // AssemblyAI diarized result for a voice_agent bot.
+      // Download, parse, replace real-time utterances, and mark done.
+      if (isAssemblyAiAsync) {
+        console.log(
+          `[transcript.done/assemblyai] processing transcript_id=${transcriptId} for bot_id=${botId}`,
+        );
+
+        const downloadUrl: string | undefined = transcriptObj?.data?.download_url;
+        if (!downloadUrl) {
+          console.error(
+            `[transcript.done/assemblyai] no download_url in transcript object — transcript_id=${transcriptId}`,
+          );
         } else {
-        const providerUrls: string[] = recordings
-          .map((r: any) => r?.media_shortcuts?.transcript?.data?.provider_data_download_url)
-          .filter(Boolean);
-
-        // Recall native diarized transcript — fallback if AssemblyAI returned empty parts
-        const nativeUrls: string[] = recordings
-          .map((r: any) => r?.media_shortcuts?.transcript?.data?.download_url)
-          .filter(Boolean);
-
-        console.log(`[transcript_webhook] AssemblyAI bot: provider_data_urls=${providerUrls.length} native_urls=${nativeUrls.length}`);
-
-        if (providerUrls.length === 0 && nativeUrls.length === 0) {
-          console.log(`[transcript_webhook] no transcript URLs — skipping`);
-        } else {
-          let segments: { speaker: string; words: unknown[] }[] = [];
-
-          const parseJson = (rawText: string): { speaker: string; words: unknown[] }[] => {
-            const json: unknown = JSON.parse(rawText);
-            if (Array.isArray(json)) return json as any[];
-            if (json && typeof json === "object") {
-              const obj = json as any;
-              if (Array.isArray(obj.utterances)) {
-                return obj.utterances.map((u: any) => ({ speaker: u.speaker ?? "Unknown", words: u.words ?? [] }));
-              }
-              if (Array.isArray(obj.parts)) {
-                return obj.parts.flatMap((part: any) => {
-                  if (Array.isArray(part.utterances)) {
-                    return part.utterances.map((u: any) => ({ speaker: u.speaker ?? "Unknown", words: u.words ?? [] }));
-                  }
-                  return part.speaker !== undefined ? [{ speaker: part.speaker ?? "Unknown", words: part.words ?? [] }] : [];
-                });
-              }
-            }
-            return [];
-          };
-
-          // Try AssemblyAI provider_data first
-          for (const url of providerUrls) {
-            try {
-              const dlRes = await fetch(url);
-              if (!dlRes.ok) { console.error(`[transcript_webhook] provider_data download failed (${dlRes.status})`); continue; }
-              const rawText = await dlRes.text();
-              console.log(`[transcript_webhook] provider_data (first 300 chars): ${rawText.slice(0, 300)}`);
-              segments.push(...parseJson(rawText));
-            } catch (e) { console.error(`[transcript_webhook] provider_data parse error:`, e); }
-          }
-
-          // Fall back to Recall native diarized transcript if AssemblyAI returned nothing
-          if (segments.length === 0 && nativeUrls.length > 0) {
-            console.log(`[transcript_webhook] AssemblyAI empty — falling back to Recall native transcript`);
-            for (const url of nativeUrls) {
-              try {
-                const dlRes = await fetch(url);
-                if (!dlRes.ok) { console.error(`[transcript_webhook] native download failed (${dlRes.status})`); continue; }
-                const rawText = await dlRes.text();
-                console.log(`[transcript_webhook] native transcript (first 300 chars): ${rawText.slice(0, 300)}`);
-                segments.push(...parseJson(rawText));
-              } catch (e) { console.error(`[transcript_webhook] native parse error:`, e); }
-            }
-          }
-
-          console.log(`[transcript_webhook] parsed ${segments.length} segments`);
-
-          if (segments.length > 0) {
-            const source = segments.length > 0 && providerUrls.length > 0 ? "assemblyai" : "recall_native";
-            const rows = segments.map((seg) => {
-              const raw = (seg as any).participant?.name ?? seg.speaker ?? "";
-              const speaker = !raw || raw === "Unknown" ? botName : raw;
-              return { bot_id: botId, speaker, words: seg.words, source };
-            });
-            const speakers = [...new Set(rows.map((r) => r.speaker))];
-            await supabase.from("utterances").delete().eq("bot_id", botId);
-            const { error: insErr, data: insData } = await supabase.from("utterances").insert(rows).select("id");
-            if (insErr) {
-              console.error(`[transcript_webhook] utterances insert failed for bot ${botId}:`, insErr);
+          try {
+            const dlRes = await fetch(downloadUrl);
+            if (!dlRes.ok) {
+              console.error(
+                `[transcript.done/assemblyai] download failed (${dlRes.status}): ${downloadUrl.slice(0, 80)}`,
+              );
             } else {
-              console.log(`[transcript_webhook] inserted ${insData?.length ?? rows.length} utterances for bot ${botId} (source=${source}), speakers: ${JSON.stringify(speakers)}`);
+              const rawText = await dlRes.text();
+              console.log(`[transcript.done/assemblyai] downloaded (first 300 chars): ${rawText.slice(0, 300)}`);
+
+              let rawJson: unknown = null;
+              try {
+                rawJson = JSON.parse(rawText);
+              } catch (e) {
+                console.error(`[transcript.done/assemblyai] JSON parse failed:`, e);
+              }
+
+              type Segment = { speaker: string; words: unknown[] };
+              let segments: Segment[] = [];
+              let formatDetected = "none";
+
+              if (rawJson && typeof rawJson === "object") {
+                const obj = rawJson as any;
+                if (Array.isArray(obj.utterances) && obj.utterances.length > 0) {
+                  // AssemblyAI native: { utterances: [{ speaker, text, start, end }] }
+                  formatDetected = "assemblyai_utterances";
+                  segments = obj.utterances.map((u: any) => ({
+                    speaker: u.speaker ?? "Unknown",
+                    words: [{
+                      text: u.text ?? "",
+                      start_timestamp: { absolute: (u.start ?? 0) / 1000 },
+                      end_timestamp: { absolute: (u.end ?? 0) / 1000 },
+                    }],
+                  }));
+                } else if (Array.isArray(obj.parts)) {
+                  // Recall-wrapped AssemblyAI: { parts: [{ utterances, words }] }
+                  formatDetected = "recall_wrapped_parts";
+                  segments = obj.parts.flatMap((part: any) => {
+                    if (Array.isArray(part.utterances)) {
+                      return part.utterances.map((u: any) => ({
+                        speaker: u.speaker ?? "Unknown",
+                        words: u.words ?? [],
+                      }));
+                    }
+                    return part.speaker !== undefined
+                      ? [{ speaker: part.speaker ?? "Unknown", words: part.words ?? [] }]
+                      : [];
+                  });
+                } else if (Array.isArray(rawJson)) {
+                  formatDetected = "array";
+                  segments = rawJson as Segment[];
+                }
+              }
+
+              console.log(
+                `[transcript.done/assemblyai] format=${formatDetected} segments=${segments.length}`,
+              );
+
+              if (segments.length === 0) {
+                console.error(
+                  `[transcript.done/assemblyai] 0 segments for bot_id=${botId} — raw shape: ${JSON.stringify(rawJson).slice(0, 200)}`,
+                );
+              } else {
+                // Speaker mapping: single uppercase letter → human caller / bot, named string → as-is
+                // In AssemblyAI output, "A" is the first speaker chronologically.
+                // For voice agent calls the human speaks first, so "A" = human, others = bot.
+                const { data: meetingMeta } = await supabase
+                  .from("meetings")
+                  .select("attendee_emails")
+                  .eq("bot_id", botId)
+                  .maybeSingle();
+                const attendeeEmails: string[] = Array.isArray(meetingMeta?.attendee_emails)
+                  ? (meetingMeta.attendee_emails as string[])
+                  : [];
+                const humanSpeakerName = attendeeEmails[0] ?? "Participant";
+
+                const rows = segments.map((seg) => {
+                  const raw = seg.speaker ?? "";
+                  let speaker: string;
+                  if (/^[A-Z]$/.test(raw)) {
+                    // Generic AssemblyAI label: "A" = human caller, anything else = bot turns
+                    speaker = raw === "A" ? humanSpeakerName : "WEYA Voice Agent";
+                  } else {
+                    speaker = raw || "Unknown";
+                  }
+                  return { bot_id: botId, speaker, words: seg.words, source: "assemblyai" };
+                });
+                const speakers = [...new Set(rows.map((r) => r.speaker))];
+
+                const { count: existingCount } = await supabase
+                  .from("utterances")
+                  .select("id", { count: "exact", head: true })
+                  .eq("bot_id", botId);
+                console.log(
+                  `[transcript.done/assemblyai] deleting ${existingCount ?? 0} existing utterances for bot_id=${botId}`,
+                );
+
+                await supabase.from("utterances").delete().eq("bot_id", botId);
+                const { error: insErr, data: insData } = await supabase
+                  .from("utterances")
+                  .insert(rows)
+                  .select("id");
+                if (insErr) {
+                  console.error(
+                    `[transcript.done/assemblyai] insert failed for bot_id=${botId}:`,
+                    insErr,
+                  );
+                } else {
+                  console.log(
+                    `[transcript.done/assemblyai] inserted ${insData?.length ?? rows.length} utterances for bot_id=${botId}, speakers=${JSON.stringify(speakers)}`,
+                  );
+                }
+              }
             }
-          } else {
-            console.warn(`[transcript_webhook] 0 segments for bot ${botId} — both AssemblyAI and Recall native returned empty`);
+          } catch (dlErr) {
+            console.error(`[transcript.done/assemblyai] download/parse error:`, dlErr);
           }
         }
-        } // end isAssemblyAI else
+
+        // Mark meeting done regardless of download outcome
+        const { error: doneErr } = await supabase
+          .from("meetings")
+          .update({ done: true })
+          .eq("bot_id", botId);
+        if (doneErr) {
+          console.error(`[transcript.done/assemblyai] failed to mark done for bot_id=${botId}:`, doneErr);
+        } else {
+          console.log(`[transcript.done/assemblyai] marked done=true for bot_id=${botId}`);
+        }
+
+        return { status: 200 };
       }
+
+      // Unknown provider — log and fall through to the done mark below
+      console.warn(
+        `[transcript_webhook] transcript.done with unknown provider: ${JSON.stringify(provider)} — marking done and skipping`,
+      );
     } catch (err) {
       console.error(`[transcript_webhook] error in transcript.done handler:`, err);
     }
 
-    // Mark done=true regardless of transcript outcome
+    // Fallback done mark — reached only on unknown provider or unhandled exception
     try {
       const { error } = await supabase
         .from("meetings")
         .update({ done: true })
         .eq("bot_id", botId);
-
       if (error) {
         console.error("Supabase meetings update (done) failed:", { bot_id: botId, event, error });
       } else {
-        console.log(`[transcript_webhook] marking done=true for bot_id=${botId}`);
+        console.log(`[transcript_webhook] marking done=true for bot_id=${botId} (fallback)`);
       }
     } catch (err) {
       console.error("Unexpected error marking transcript done:", { bot_id: botId, event, err });
