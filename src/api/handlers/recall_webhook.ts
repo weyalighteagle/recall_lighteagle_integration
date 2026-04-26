@@ -829,9 +829,6 @@ async function handleRecordingDone(body: any): Promise<void> {
               language_code: "tr",
             },
           },
-          diarization: {
-            use_separate_streams_when_available: true,
-          },
         }),
       },
     );
