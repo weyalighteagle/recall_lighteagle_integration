@@ -827,6 +827,7 @@ async function handleRecordingDone(body: any): Promise<void> {
           provider: {
             assembly_ai_async: {
               language_code: "tr",
+              speech_models: ["universal-2"],
             },
           },
         }),
