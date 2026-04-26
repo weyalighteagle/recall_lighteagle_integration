@@ -233,8 +233,12 @@ export async function handleTranscriptWebhook(
                       : [];
                   });
                 } else if (Array.isArray(rawJson)) {
-                  formatDetected = "array";
-                  segments = rawJson as Segment[];
+                  // Recall native diarized format: [{ participant: { name }, words: [...] }]
+                  formatDetected = "recall_native_array";
+                  segments = (rawJson as any[]).map((seg: any) => ({
+                    speaker: seg.participant?.name ?? seg.speaker ?? "Unknown",
+                    words: seg.words ?? [],
+                  }));
                 }
               }
 
@@ -260,7 +264,8 @@ export async function handleTranscriptWebhook(
                   : [];
                 const humanSpeakerName = attendeeEmails[0] ?? "Participant";
 
-                const rows = segments.map((seg) => {
+                const now = Date.now();
+                const rows = segments.map((seg, index) => {
                   const raw = seg.speaker ?? "";
                   let speaker: string;
                   if (/^[A-Z]$/.test(raw)) {
@@ -269,7 +274,13 @@ export async function handleTranscriptWebhook(
                   } else {
                     speaker = raw || "Unknown";
                   }
-                  return { bot_id: botId, speaker, words: seg.words, source: "assemblyai" };
+                  return {
+                    bot_id: botId,
+                    speaker,
+                    words: seg.words,
+                    source: "assemblyai",
+                    timestamp: new Date(now + index).toISOString(),
+                  };
                 });
                 const speakers = [...new Set(rows.map((r) => r.speaker))];
 
