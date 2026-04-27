@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
@@ -201,6 +202,7 @@ function InlineRename({
 
 function KnowledgeBase() {
     const queryClient = useQueryClient();
+    const { getToken } = useAuth();
 
     // ── Create form state ─────────────────────────────────────────────
     const [showForm, setShowForm] = useState(false);
@@ -362,9 +364,10 @@ function KnowledgeBase() {
 
     const createTagMutation = useMutation({
         mutationFn: async () => {
+            const token = await getToken();
             const res = await fetch("/api/kb/tags", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ name: newTagName, color: newTagColor }),
             });
             if (!res.ok) throw new Error(await res.text());
@@ -382,9 +385,10 @@ function KnowledgeBase() {
 
     const renameTagMutation = useMutation({
         mutationFn: async ({ id, name }: { id: string; name: string }) => {
+            const token = await getToken();
             const res = await fetch(`/api/kb/tags/${id}`, {
                 method: "PATCH",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ name }),
             });
             if (!res.ok) throw new Error(await res.text());
@@ -400,7 +404,11 @@ function KnowledgeBase() {
 
     const deleteTagMutation = useMutation({
         mutationFn: async (id: string) => {
-            const res = await fetch(`/api/kb/tags/${id}`, { method: "DELETE" });
+            const token = await getToken();
+            const res = await fetch(`/api/kb/tags/${id}`, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` },
+            });
             if (!res.ok) throw new Error(await res.text());
         },
         onSuccess: () => {
@@ -413,9 +421,10 @@ function KnowledgeBase() {
 
     const addDocTagMutation = useMutation({
         mutationFn: async ({ docId, tagId }: { docId: string; tagId: string }) => {
+            const token = await getToken();
             const res = await fetch(`/api/kb/${docId}/tags`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ tag_id: tagId }),
             });
             if (!res.ok) throw new Error(await res.text());
@@ -426,7 +435,11 @@ function KnowledgeBase() {
 
     const removeDocTagMutation = useMutation({
         mutationFn: async ({ docId, tagId }: { docId: string; tagId: string }) => {
-            const res = await fetch(`/api/kb/${docId}/tags/${tagId}`, { method: "DELETE" });
+            const token = await getToken();
+            const res = await fetch(`/api/kb/${docId}/tags/${tagId}`, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` },
+            });
             if (!res.ok) throw new Error(await res.text());
         },
         onSuccess: () => invalidateBoth(),
