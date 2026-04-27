@@ -518,3 +518,37 @@ export async function doc_tag_remove(docId: string, tagId: string): Promise<void
     await syncChunkTagIds(validDocId);
     console.log(`[kb] Removed tag ${validTagId} from document ${validDocId}`);
 }
+
+// ─── Meeting Tag Handlers ─────────────────────────────────────
+
+/** GET /api/meetings/:botId/tags — list tags assigned to a meeting */
+export async function meeting_tags_get(args: { botId: string }): Promise<{ tags: KbTag[] }> {
+    const { data, error } = await supabase
+        .from("meeting_tags")
+        .select("kb_tags(id, name, slug, color, created_by, created_at)")
+        .eq("bot_id", args.botId);
+
+    if (error) throw new Error(error.message);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tags = (data ?? []).map((row: any) => row.kb_tags).filter(Boolean) as KbTag[];
+    return { tags };
+}
+
+/** PUT /api/meetings/:botId/tags — replace all tags for a meeting (full replacement) */
+export async function meeting_tags_set(args: { botId: string; tag_ids: string[] }): Promise<{ tags: KbTag[] }> {
+    const { botId, tag_ids } = args;
+
+    const { error: deleteErr } = await supabase
+        .from("meeting_tags")
+        .delete()
+        .eq("bot_id", botId);
+    if (deleteErr) throw new Error(deleteErr.message);
+
+    if (tag_ids.length > 0) {
+        const rows = tag_ids.map((tag_id) => ({ bot_id: botId, tag_id }));
+        const { error: insertErr } = await supabase.from("meeting_tags").insert(rows);
+        if (insertErr) throw new Error(insertErr.message);
+    }
+
+    return meeting_tags_get({ botId });
+}
