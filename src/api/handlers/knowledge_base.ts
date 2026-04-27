@@ -64,11 +64,9 @@ export function chunkText(text: string, maxChars = 1000, overlapChars = 200): st
     return chunks;
 }
 
-async function getLightEagleOrgId(): Promise<string> {
-    const { data, error } = await supabase.from("orgs").select("id").eq("name", "Light Eagle").single();
-    if (error || !data) throw new Error("Light Eagle org not found");
-    return data.id as string;
-}
+// Hardcoded — avoids an async Supabase round-trip on every tag operation.
+// Source: SELECT id FROM orgs WHERE name = 'Light Eagle' on the weya-recallai project.
+const LIGHT_EAGLE_ORG_ID = "d6d7b0e1-cf72-4c17-b228-433571e8efbb";
 
 // After document tag changes, keep kb_chunks.tag_ids in sync for the Phase 5 RPC.
 async function syncChunkTagIds(documentId: string): Promise<void> {
@@ -184,7 +182,7 @@ export async function kb_create(body: {
         .single();
     if (!cat) throw new Error(`Kategori bulunamadı: ${category}`);
 
-    const orgId = await getLightEagleOrgId();
+    const orgId = LIGHT_EAGLE_ORG_ID;
 
     // Create document
     const { data: doc, error: docErr } = await supabase
@@ -381,7 +379,7 @@ export async function kb_update(args: {
 
 /** GET /api/kb/tags — list all tags for the org */
 export async function tag_list(): Promise<{ tags: KbTag[] }> {
-    const orgId = await getLightEagleOrgId();
+    const orgId = LIGHT_EAGLE_ORG_ID;
     const { data, error } = await supabase
         .from("kb_tags")
         .select("id, name, slug, color, created_by, created_at")
@@ -402,9 +400,10 @@ export async function tag_create(
         color: z.string().optional(),
     }).parse(body);
 
-    const orgId = await getLightEagleOrgId();
+    const orgId = LIGHT_EAGLE_ORG_ID;
     const slug = slugify(name);
 
+    console.log("[tag_create] inserting tag:", { name, slug, color: color ?? null, org_id: LIGHT_EAGLE_ORG_ID });
     const { data, error } = await supabase
         .from("kb_tags")
         .insert({
@@ -418,11 +417,12 @@ export async function tag_create(
         .single();
 
     if (error) {
+        console.error("[tag_create] supabase error:", error);
         if (error.code === "23505") throw new Error(`A tag named "${name}" already exists`);
         throw new Error(error.message);
     }
 
-    console.log(`[kb] Created tag "${name}" (${slug})`);
+    console.log("[tag_create] result:", data);
     return data as KbTag;
 }
 

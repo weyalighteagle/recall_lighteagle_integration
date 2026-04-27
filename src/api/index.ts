@@ -165,9 +165,15 @@ body=${JSON.stringify(body)}
             case "/api/kb": {
                 switch (req.method?.toUpperCase()) {
                     case "GET": {
-                        const results = await kb_list();
-                        res.writeHead(200, { "Content-Type": "application/json" });
-                        res.end(JSON.stringify(results));
+                        try {
+                            const results = await kb_list();
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify(results));
+                        } catch (err) {
+                            console.error("[/api/kb GET] ERROR:", err);
+                            res.writeHead(500, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify({ error: String(err) }));
+                        }
                         return;
                     }
                     case "POST": {
@@ -345,18 +351,30 @@ body=${JSON.stringify(body)}
                 if (pathname === "/api/kb/tags") {
                     switch (req.method?.toUpperCase()) {
                         case "GET": {
-                            const result = await tag_list();
-                            res.writeHead(200, { "Content-Type": "application/json" });
-                            res.end(JSON.stringify(result));
+                            try {
+                                const result = await tag_list();
+                                res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+                                res.end(JSON.stringify(result));
+                            } catch (err) {
+                                console.error("[/api/kb/tags GET] ERROR:", err);
+                                res.writeHead(500, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+                                res.end(JSON.stringify({ error: String(err) }));
+                            }
                             return;
                         }
                         case "POST": {
-                            if (!await requireAuth(req, res)) return;
-                            const userEmail: string = (req as any).userEmail;
-                            if (!body?.name) throw new Error("name is required");
-                            const tag = await tag_create(body, userEmail);
-                            res.writeHead(200, { "Content-Type": "application/json" });
-                            res.end(JSON.stringify(tag));
+                            try {
+                                if (!await requireAuth(req, res)) return;
+                                const userEmail: string = (req as any).userEmail;
+                                if (!body?.name) throw new Error("name is required");
+                                const tag = await tag_create(body, userEmail);
+                                res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+                                res.end(JSON.stringify(tag));
+                            } catch (err) {
+                                console.error("[/api/kb/tags POST] ERROR:", err);
+                                res.writeHead(500, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+                                res.end(JSON.stringify({ error: String(err) }));
+                            }
                             return;
                         }
                         default:
