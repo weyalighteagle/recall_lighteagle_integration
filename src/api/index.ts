@@ -7,7 +7,7 @@ import { calendar_oauth_callback } from "./handlers/calendar_oauth_callback";
 import { calendars_delete } from "./handlers/calendars_delete";
 import { calendars_list } from "./handlers/calendars_list";
 import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event } from "./handlers/recall_webhook";
-import { kb_list, kb_create, kb_delete, kb_toggle, kb_get, kb_update } from "./handlers/knowledge_base";
+import { kb_list, kb_create, kb_delete, kb_toggle, kb_get, kb_update, tag_list, tag_create, tag_update, tag_delete, doc_tag_add, doc_tag_remove } from "./handlers/knowledge_base";
 import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
 import { handleNotesList, handleNoteDetail, handleMeetingTitleUpdate } from "./handlers/notes";
 import { handleVoiceAgentStatus } from "./handlers/voice_agent_status";
@@ -341,6 +341,78 @@ body=${JSON.stringify(body)}
 
             /** Default endpoints */
             default: {
+                // ── /api/kb/tags — tag CRUD (must be before /api/kb/:id) ──────
+                if (pathname === "/api/kb/tags") {
+                    switch (req.method?.toUpperCase()) {
+                        case "GET": {
+                            const result = await tag_list();
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify(result));
+                            return;
+                        }
+                        case "POST": {
+                            if (!await requireAuth(req, res)) return;
+                            const userEmail: string = (req as any).userEmail;
+                            if (!body?.name) throw new Error("name is required");
+                            const tag = await tag_create(body, userEmail);
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify(tag));
+                            return;
+                        }
+                        default:
+                            throw new Error(`Method not allowed: ${req.method}`);
+                    }
+                }
+
+                // ── /api/kb/tags/:id — tag update / delete ────────────────────
+                if (pathname.startsWith("/api/kb/tags/")) {
+                    const tagId = pathname.replace("/api/kb/tags/", "");
+                    switch (req.method?.toUpperCase()) {
+                        case "PATCH": {
+                            if (!await requireAuth(req, res)) return;
+                            const tag = await tag_update(tagId, body ?? {});
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify(tag));
+                            return;
+                        }
+                        case "DELETE": {
+                            if (!await requireAuth(req, res)) return;
+                            await tag_delete(tagId);
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify({ message: "Tag deleted" }));
+                            return;
+                        }
+                        default:
+                            throw new Error(`Method not allowed: ${req.method}`);
+                    }
+                }
+
+                // ── /api/kb/:docId/tags/:tagId — remove tag from document ─────
+                // Must be checked before the generic /api/kb/:id handler
+                if (pathname.match(/^\/api\/kb\/[^/]+\/tags\/[^/]+$/)) {
+                    const parts = pathname.split("/"); // ["", "api", "kb", docId, "tags", tagId]
+                    const docId = parts[3]!;
+                    const tagId = parts[5]!;
+                    if (req.method?.toUpperCase() !== "DELETE") throw new Error(`Method not allowed: ${req.method}`);
+                    if (!await requireAuth(req, res)) return;
+                    await doc_tag_remove(docId, tagId);
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ message: "Tag removed" }));
+                    return;
+                }
+
+                // ── /api/kb/:docId/tags — add tag to document ─────────────────
+                if (pathname.match(/^\/api\/kb\/[^/]+\/tags$/)) {
+                    const docId = pathname.split("/")[3]!;
+                    if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
+                    if (!await requireAuth(req, res)) return;
+                    if (!body?.tag_id) throw new Error("tag_id is required");
+                    await doc_tag_add(docId, body.tag_id);
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ message: "Tag added" }));
+                    return;
+                }
+
                 // ── Single KB Document routes: /api/kb/:id ────────────────────
                 if (pathname.startsWith("/api/kb/") && pathname !== "/api/kb/") {
                     const docId = pathname.replace("/api/kb/", "");
