@@ -6,7 +6,7 @@ import { calendar_oauth } from "./handlers/calendar_oauth";
 import { calendar_oauth_callback } from "./handlers/calendar_oauth_callback";
 import { calendars_delete } from "./handlers/calendars_delete";
 import { calendars_list } from "./handlers/calendars_list";
-import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event } from "./handlers/recall_webhook";
+import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event, kb_retry_ingestion } from "./handlers/recall_webhook";
 import { kb_list, kb_create, kb_delete, kb_toggle, kb_get, kb_update, tag_list, tag_create, tag_update, tag_delete, doc_tag_add, doc_tag_remove } from "./handlers/knowledge_base";
 import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
 import { handleNotesList, handleNoteDetail, handleMeetingTitleUpdate } from "./handlers/notes";
@@ -362,6 +362,17 @@ body=${JSON.stringify(body)}
 
             /** Default endpoints */
             default: {
+                // ── /api/kb/retry/:botId — re-trigger KB ingestion ────────────
+                if (pathname.match(/^\/api\/kb\/retry\/[^/]+$/)) {
+                    const botId = pathname.replace("/api/kb/retry/", "");
+                    if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
+                    if (!await requireAuth(req, res)) return;
+                    const result = await kb_retry_ingestion({ botId });
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
                 // ── /api/kb/tags/:id — tag update / delete ────────────────────
                 if (pathname.startsWith("/api/kb/tags/")) {
                     const tagId = pathname.replace("/api/kb/tags/", "");
