@@ -1,4 +1,5 @@
 import { useAuth, useUser } from "@clerk/react";
+import { useRef } from "react";
 import {
     Calendar as CalendarIcon,
     Clock,
@@ -117,36 +118,28 @@ function ConnectCalendar() {
     );
 }
 
-interface KbDoc {
+interface KbTag {
     id: string;
-    title: string;
-    is_active: boolean;
+    name: string;
+    color: string | null;
 }
 
 function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     const { user } = useUser();
     const [showConnectDialog, setShowConnectDialog] = useState(false);
 
-    // ── KB data — needed by per-meeting KB dropdowns on event cards ──────────
-    const [kbDocuments, setKbDocuments] = useState<KbDoc[]>([]);
-    const [selectedKbId, setSelectedKbId] = useState<string>("");
+    // ── Category tags — used by the per-meeting category selector on event cards ──
+    const [tags, setTags] = useState<KbTag[]>([]);
     const [autoJoinEnabled, setAutoJoinEnabled] = useState<boolean>(true);
 
     useEffect(() => {
         Promise.all([
-            fetch("/api/bot-settings").then((r) => r.json()) as Promise<{ bot_mode: string; active_kb_id: string | null; auto_join_enabled?: boolean }>,
-            fetch("/api/kb").then((r) => r.json()) as Promise<{ documents: KbDoc[] }>,
+            fetch("/api/bot-settings").then((r) => r.json()) as Promise<{ auto_join_enabled?: boolean }>,
+            fetch("/api/kb/tags").then((r) => r.json()) as Promise<{ tags: KbTag[] }>,
         ])
-            .then(([settings, kbData]) => {
-                const docs = kbData.documents ?? [];
-                setKbDocuments(docs);
+            .then(([settings, tagData]) => {
                 setAutoJoinEnabled(settings.auto_join_enabled ?? true);
-                const savedId = settings.active_kb_id;
-                if (savedId && docs.some((d) => d.id === savedId)) {
-                    setSelectedKbId(savedId);
-                } else if (docs.length > 0) {
-                    setSelectedKbId(docs[0].id);
-                }
+                setTags(tagData.tags ?? []);
             })
             .catch(console.error);
     }, []);
@@ -254,8 +247,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                                 <CalendarDetails
                                     key={calendar.id}
                                     calendar={calendar}
-                                    kbDocuments={kbDocuments}
-                                    globalKbId={selectedKbId}
+                                    tags={tags}
                                 />
                             ))}
                         </div>
@@ -266,7 +258,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     );
 }
 
-function CalendarDetails({ calendar, kbDocuments, globalKbId }: { calendar: CalendarType; kbDocuments: KbDoc[]; globalKbId: string }) {
+function CalendarDetails({ calendar, tags }: { calendar: CalendarType; tags: KbTag[] }) {
     const { user } = useUser();
     const [searchParams, setSearchParams] = useSearchParams();
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -463,8 +455,7 @@ function CalendarDetails({ calendar, kbDocuments, globalKbId }: { calendar: Cale
                     calendar={calendar}
                     startTimeGte={selectedStartDate}
                     startTimeLte={selectedEndDate}
-                    kbDocuments={kbDocuments}
-                    globalKbId={globalKbId}
+                    tags={tags}
                 />
             </div>
         </div>
@@ -475,14 +466,12 @@ function CalendarEventsList({
     calendar,
     startTimeGte,
     startTimeLte,
-    kbDocuments,
-    globalKbId,
+    tags,
 }: {
     calendar: CalendarType;
     startTimeGte: string;
     startTimeLte: string;
-    kbDocuments: KbDoc[];
-    globalKbId: string;
+    tags: KbTag[];
 }) {
     const latestStatus = calendar.status_changes.at(0)?.status;
     const isConnecting = latestStatus === "connecting";
@@ -562,8 +551,7 @@ function CalendarEventsList({
                                         calendarId={calendar.id}
                                         formatTime={formatTime}
                                         getEventTitle={getEventTitle}
-                                        kbDocuments={kbDocuments}
-                                        globalKbId={globalKbId}
+                                        tags={tags}
                                     />
                                 ))}
                         </div>
@@ -579,15 +567,13 @@ function CalendarEventCard({
     calendarId,
     formatTime,
     getEventTitle,
-    kbDocuments,
-    globalKbId,
+    tags,
 }: {
     event: CalendarEventType;
     calendarId: string;
     formatTime: (dateString: string) => string;
     getEventTitle: (event: CalendarEventType) => string;
-    kbDocuments: KbDoc[];
-    globalKbId: string;
+    tags: KbTag[];
 }) {
     // Recording bot toggle hook
     const {
@@ -611,34 +597,16 @@ function CalendarEventCard({
         botType: "voice_agent",
     });
 
+    const { getToken } = useAuth();
     const navigate = useNavigate();
     const [isExporting, setIsExporting] = useState(false);
-    // undefined = still loading, null = no override set
-    const [eventKbId, setEventKbId] = useState<string | null | undefined>(undefined);
+    const [selectedTagId, setSelectedTagId] = useState<string>("");
+    const pendingTagRef = useRef<string>("");
+    const prevHasVoiceAgentBot = useRef(false);
 
     const isInFuture = new Date(event.start_time) > new Date();
     const hasMeetingUrl = !!event.meeting_url;
     const canToggle = isInFuture && hasMeetingUrl;
-
-    useEffect(() => {
-        if (!canToggle || kbDocuments.length === 0) {
-            setEventKbId(null);
-            return;
-        }
-        fetch(`/api/meeting-kb/${event.id}`)
-            .then((r) => r.json())
-            .then((data: { kb_document_id: string | null }) => setEventKbId(data.kb_document_id))
-            .catch(() => setEventKbId(null));
-    }, [event.id, canToggle, kbDocuments.length]);
-
-    const handleKbChange = (id: string) => {
-        setEventKbId(id);
-        fetch(`/api/meeting-kb/${event.id}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ kb_document_id: id }),
-        }).catch(console.error);
-    };
 
     const handleExportTranscript = async (botId: string) => {
         setIsExporting(true);
@@ -684,6 +652,43 @@ function CalendarEventCard({
             new Date(bot.start_time) > new Date(),
     );
     const isRecordingScheduled = hasRecordingBot || hasLegacyBot;
+
+    const handleTagChange = async (tagId: string) => {
+        setSelectedTagId(tagId);
+        pendingTagRef.current = tagId;
+        if (!tagId) return;
+        const vaBotId = event.bots.find(
+            (b) => b.deduplication_key.startsWith("va-") && new Date(b.start_time) > new Date(),
+        )?.bot_id;
+        if (!vaBotId) return;
+        const token = await getToken();
+        fetch(`/api/meetings/${vaBotId}/tags`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ tag_ids: [tagId] }),
+        }).catch(console.error);
+    };
+
+    useEffect(() => {
+        if (hasVoiceAgentBot && !prevHasVoiceAgentBot.current) {
+            const tagId = pendingTagRef.current;
+            if (tagId) {
+                const vaBotId = event.bots.find(
+                    (b) => b.deduplication_key.startsWith("va-") && new Date(b.start_time) > new Date(),
+                )?.bot_id;
+                if (vaBotId) {
+                    getToken().then((token) => {
+                        fetch(`/api/meetings/${vaBotId}/tags`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                            body: JSON.stringify({ tag_ids: [tagId] }),
+                        }).catch(console.error);
+                    });
+                }
+            }
+        }
+        prevHasVoiceAgentBot.current = hasVoiceAgentBot;
+    }, [hasVoiceAgentBot]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const handleRecordingToggle = () => {
         if (isRecordingPending) return;
@@ -779,24 +784,21 @@ function CalendarEventCard({
                         <span className="truncate">{event.meeting_url}</span>
                     </a>
                 )}
-                {canToggle && kbDocuments.length > 0 && (
+                {canToggle && tags.length > 0 && (
                     <div className="flex items-center gap-1.5">
-                        <span className="text-gray-500">KB:</span>
-                        {eventKbId === undefined ? (
-                            <Loader2 className="size-3 animate-spin text-gray-400" />
-                        ) : (
-                            <select
-                                value={eventKbId ?? globalKbId}
-                                onChange={(e) => handleKbChange(e.target.value)}
-                                className="text-xs border rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[160px]"
-                            >
-                                {kbDocuments.map((doc) => (
-                                    <option key={doc.id} value={doc.id}>
-                                        {doc.title}{doc.id === globalKbId ? " (default)" : ""}
-                                    </option>
-                                ))}
-                            </select>
-                        )}
+                        <span className="text-gray-500">Category:</span>
+                        <select
+                            value={selectedTagId}
+                            onChange={(e) => handleTagChange(e.target.value)}
+                            className="text-xs border rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[160px]"
+                        >
+                            <option value="">All docs</option>
+                            {tags.map((tag) => (
+                                <option key={tag.id} value={tag.id}>
+                                    {tag.name}
+                                </option>
+                            ))}
+                        </select>
                     </div>
                 )}
             </div>

@@ -7,10 +7,10 @@ import { Card, CardContent } from "../components/ui/Card";
 
 type BotMode = "transcriptor" | "voice_agent";
 
-interface KbDoc {
+interface KbTag {
   id: string;
-  title: string;
-  is_active: boolean;
+  name: string;
+  color: string | null;
 }
 
 const BOT_MODES: { value: BotMode; label: string }[] = [
@@ -21,32 +21,23 @@ const BOT_MODES: { value: BotMode; label: string }[] = [
 export default function InstantMeetingPage() {
   const [botMode, setBotMode] = useState<BotMode>("transcriptor");
   const { getToken } = useAuth();
-  const [kbDocuments, setKbDocuments] = useState<KbDoc[]>([]);
-  const [selectedKbId, setSelectedKbId] = useState<string>("");
-  const [kbLoading, setKbLoading] = useState(true);
+  const [tags, setTags] = useState<KbTag[]>([]);
+  const [selectedTagId, setSelectedTagId] = useState<string>("");
+  const [tagsLoading, setTagsLoading] = useState(true);
   const [meetingUrl, setMeetingUrl] = useState("");
   const [isJoining, setIsJoining] = useState(false);
 
-  // Load saved settings + KB docs together on mount
   useEffect(() => {
     Promise.all([
-      fetch("/api/bot-settings").then((r) => r.json()) as Promise<{ bot_mode: BotMode; active_kb_id: string | null }>,
-      fetch("/api/kb").then((r) => r.json()) as Promise<{ documents: KbDoc[] }>,
+      fetch("/api/bot-settings").then((r) => r.json()) as Promise<{ bot_mode: BotMode }>,
+      fetch("/api/kb/tags").then((r) => r.json()) as Promise<{ tags: KbTag[] }>,
     ])
-      .then(([settings, kbData]) => {
+      .then(([settings, tagData]) => {
         setBotMode(settings.bot_mode);
-        const docs = kbData.documents ?? [];
-        setKbDocuments(docs);
-        // Use saved KB id if valid, otherwise first doc
-        const savedId = settings.active_kb_id;
-        if (savedId && docs.some((d) => d.id === savedId)) {
-          setSelectedKbId(savedId);
-        } else if (docs.length > 0) {
-          setSelectedKbId(docs[0].id);
-        }
+        setTags(tagData.tags ?? []);
       })
       .catch(console.error)
-      .finally(() => setKbLoading(false));
+      .finally(() => setTagsLoading(false));
   }, []);
 
   const handleModeChange = (mode: BotMode) => {
@@ -55,15 +46,6 @@ export default function InstantMeetingPage() {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ bot_mode: mode }),
-    }).catch(console.error);
-  };
-
-  const handleKbChange = (id: string) => {
-    setSelectedKbId(id);
-    fetch("/api/bot-settings", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ active_kb_id: id }),
     }).catch(console.error);
   };
 
@@ -79,6 +61,15 @@ export default function InstantMeetingPage() {
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
+
+      if (botMode === "voice_agent" && selectedTagId && data.bot_id) {
+        await fetch(`/api/meetings/${data.bot_id}/tags`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ tag_ids: [selectedTagId] }),
+        }).catch(console.error);
+      }
+
       toast.success(`Bot sent! ID: ${data.bot_id}`);
       setMeetingUrl("");
     } catch (err) {
@@ -127,37 +118,36 @@ export default function InstantMeetingPage() {
             </div>
           </div>
 
-          {/* Knowledge Base — only relevant for Voice Agent mode */}
-          {botMode === "voice_agent" && <div className="space-y-1.5">
-            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">
-              Knowledge Base
-            </p>
-            <p className="text-xs text-gray-500">
-              Select the knowledge base for this meeting's Voice Agent
-            </p>
-            {kbLoading ? (
-              <div className="flex items-center gap-2 text-sm text-gray-500 py-1">
-                <Loader2 className="size-4 animate-spin" />
-                Loading…
-              </div>
-            ) : (
-              <select
-                value={selectedKbId}
-                onChange={(e) => handleKbChange(e.target.value)}
-                className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-              >
-                {kbDocuments.length === 0 ? (
-                  <option value="">No knowledge bases</option>
-                ) : (
-                  kbDocuments.map((doc) => (
-                    <option key={doc.id} value={doc.id}>
-                      {doc.title}
+          {/* Category — only for Voice Agent mode */}
+          {botMode === "voice_agent" && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+                Category
+              </p>
+              <p className="text-xs text-gray-500">
+                Voice Agent will only answer from this category&apos;s documents
+              </p>
+              {tagsLoading ? (
+                <div className="flex items-center gap-2 text-sm text-gray-500 py-1">
+                  <Loader2 className="size-4 animate-spin" />
+                  Loading…
+                </div>
+              ) : (
+                <select
+                  value={selectedTagId}
+                  onChange={(e) => setSelectedTagId(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="">No filter — answers from all documents</option>
+                  {tags.map((tag) => (
+                    <option key={tag.id} value={tag.id}>
+                      {tag.name}
                     </option>
-                  ))
-                )}
-              </select>
-            )}
-          </div>}
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
 
           {/* Meeting URL */}
           <div className="space-y-2">
