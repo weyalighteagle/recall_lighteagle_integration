@@ -589,6 +589,3 @@ export async function meeting_allowed_tags(args: { botId: string }): Promise<{ t
     return { tag_ids: data.map((r: { tag_id: string }) => r.tag_id) };
 }
 
-    return meeting_tags_get({ botId });
-}
-

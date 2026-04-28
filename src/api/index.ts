@@ -10,8 +10,6 @@ import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bo
 
 import { kb_list, kb_create, kb_delete, kb_toggle, kb_get, kb_update, tag_list, tag_create, tag_update, tag_delete, doc_tag_add, doc_tag_remove, meeting_tags_get, meeting_tags_set, meeting_allowed_tags } from "./handlers/knowledge_base";
 
-import { kb_list, kb_create, kb_delete, kb_toggle, kb_get, kb_update, tag_list, tag_create, tag_update, tag_delete, doc_tag_add, doc_tag_remove, meeting_tags_get, meeting_tags_set } from "./handlers/knowledge_base";
-
 import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
 import { handleNotesList, handleNoteDetail, handleMeetingTitleUpdate } from "./handlers/notes";
 import { handleVoiceAgentStatus } from "./handlers/voice_agent_status";
