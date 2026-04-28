@@ -37,16 +37,10 @@ interface MeetingTagPickerProps {
 }
 
 function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
-
     const queryClient = useQueryClient();
-
-    const [meetingTags, setMeetingTags] = useState<Tag[]>([]);
-    const [tagsLoaded, setTagsLoaded] = useState(false);
-
     const [showPicker, setShowPicker] = useState(false);
     const [saving, setSaving] = useState(false);
     const pickerRef = useRef<HTMLDivElement>(null);
-
 
     const { data: meetingTagsData } = useQuery<{ tags: Tag[] }>({
         queryKey: ["meeting_tags", botId],
@@ -61,7 +55,6 @@ function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
         staleTime: 30_000,
     });
     const meetingTags = meetingTagsData?.tags ?? [];
-
 
     const { data: allTagsData } = useQuery<{ tags: Tag[] }>({
         queryKey: ["kb_tags"],
@@ -84,36 +77,11 @@ function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
         return () => document.removeEventListener("mousedown", handler);
     }, [showPicker]);
 
-
     const toggleTag = async (tag: Tag) => {
         const hasTag = meetingTags.some((t) => t.id === tag.id);
         const newTags = hasTag ? meetingTags.filter((t) => t.id !== tag.id) : [...meetingTags, tag];
         const oldData = queryClient.getQueryData<{ tags: Tag[] }>(["meeting_tags", botId]);
         queryClient.setQueryData(["meeting_tags", botId], { tags: newTags });
-
-    const fetchMeetingTags = async () => {
-        if (tagsLoaded) return;
-        const token = await getToken();
-        const res = await fetch(`/api/meetings/${botId}/tags`, {
-            headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        setMeetingTags(data.tags ?? []);
-        setTagsLoaded(true);
-    };
-
-    const handleOpenPicker = async () => {
-        await fetchMeetingTags();
-        setShowPicker(true);
-    };
-
-    const toggleTag = async (tag: Tag) => {
-        const hasTag = meetingTags.some((t) => t.id === tag.id);
-        const oldTags = meetingTags;
-        const newTags = hasTag ? meetingTags.filter((t) => t.id !== tag.id) : [...meetingTags, tag];
-        setMeetingTags(newTags);
-
         setSaving(true);
         try {
             const token = await getToken();
@@ -126,7 +94,6 @@ function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
                 body: JSON.stringify({ tag_ids: newTags.map((t) => t.id) }),
             });
             if (!res.ok) {
-
                 queryClient.setQueryData(["meeting_tags", botId], oldData);
                 toast.error("Couldn't update tags");
             } else {
@@ -134,16 +101,6 @@ function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
             }
         } catch {
             queryClient.setQueryData(["meeting_tags", botId], oldData);
-
-                setMeetingTags(oldTags);
-                toast.error("Couldn't update tags");
-            } else {
-                const data = await res.json();
-                setMeetingTags(data.tags ?? newTags);
-            }
-        } catch {
-            setMeetingTags(oldTags);
-
             toast.error("Couldn't update tags");
         } finally {
             setSaving(false);
@@ -152,11 +109,7 @@ function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
 
     return (
         <div className="relative flex items-center gap-1 flex-wrap mt-1" ref={pickerRef}>
-
             {meetingTags.map((tag) => (
-
-            {tagsLoaded && meetingTags.map((tag) => (
-
                 <span
                     key={tag.id}
                     className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"
@@ -178,11 +131,7 @@ function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
             <button
                 type="button"
                 className="text-xs text-gray-400 hover:text-gray-600"
-
                 onClick={() => setShowPicker(true)}
-
-                onClick={handleOpenPicker}
-
                 disabled={saving}
             >
                 + category
