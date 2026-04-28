@@ -555,8 +555,8 @@ export async function meeting_tags_set(args: { botId: string; tag_ids: string[] 
     const { data: kbDoc } = await supabase
         .from("kb_documents")
         .select("id")
-        .eq("metadata->>botId", botId)
         .eq("source_type", "transcript")
+        .eq("metadata->>botId", botId)
         .maybeSingle();
 
     if (kbDoc) {
