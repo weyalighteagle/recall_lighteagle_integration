@@ -8,7 +8,7 @@ import { calendars_delete } from "./handlers/calendars_delete";
 import { calendars_list } from "./handlers/calendars_list";
 import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event, kb_retry_ingestion } from "./handlers/recall_webhook";
 
-import { kb_list, kb_create, kb_delete, kb_toggle, kb_get, kb_update, tag_list, tag_create, tag_update, tag_delete, doc_tag_add, doc_tag_remove, meeting_tags_get, meeting_tags_set, meeting_allowed_tags } from "./handlers/knowledge_base";
+import { kb_list, kb_list_transcripts, kb_create, kb_delete, kb_toggle, kb_get, kb_update, tag_list, tag_create, tag_update, tag_delete, doc_tag_add, doc_tag_remove, meeting_tags_get, meeting_tags_set, meeting_allowed_tags } from "./handlers/knowledge_base";
 
 import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
 import { handleNotesList, handleNoteDetail, handleMeetingTitleUpdate } from "./handlers/notes";
@@ -459,6 +459,16 @@ body=${JSON.stringify(body)}
                     await doc_tag_add(docId, body.tag_id);
                     res.writeHead(200, { "Content-Type": "application/json" });
                     res.end(JSON.stringify({ message: "Tag added" }));
+                    return;
+                }
+
+                // ── GET /api/kb/transcripts — user-scoped transcript list ─────
+                if (pathname === "/api/kb/transcripts" && req.method?.toUpperCase() === "GET") {
+                    if (!await requireAuth(req, res)) return;
+                    const userEmail: string = (req as any).userEmail;
+                    const result = await kb_list_transcripts(userEmail);
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
                     return;
                 }
 
