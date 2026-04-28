@@ -550,5 +550,40 @@ export async function meeting_tags_set(args: { botId: string; tag_ids: string[] 
         if (insertErr) throw new Error(insertErr.message);
     }
 
+    // Sync the KB document ingested from this meeting's transcript
+    const { data: kbDoc } = await supabase
+        .from("kb_documents")
+        .select("id")
+        .eq("metadata->>botId", botId)
+        .eq("source_type", "transcript")
+        .maybeSingle();
+
+    if (kbDoc) {
+        await supabase.from("kb_document_tags").delete().eq("document_id", kbDoc.id);
+
+        if (tag_ids.length > 0) {
+            const docTagRows = tag_ids.map((tid) => ({ document_id: kbDoc.id, tag_id: tid }));
+            await supabase.from("kb_document_tags").insert(docTagRows);
+        }
+
+        await supabase
+            .from("kb_chunks")
+            .update({ tag_ids: tag_ids.length > 0 ? tag_ids : [] })
+            .eq("document_id", kbDoc.id);
+
+        console.log(`[kb] Synced ${tag_ids.length} tag(s) to KB document ${kbDoc.id} for bot ${botId}`);
+    }
+
     return meeting_tags_get({ botId });
+}
+
+/** GET /api/meetings/:botId/allowed-tags — tag IDs the voice agent may filter by; null = no filter */
+export async function meeting_allowed_tags(args: { botId: string }): Promise<{ tag_ids: string[] | null }> {
+    const { data } = await supabase
+        .from("meeting_tags")
+        .select("tag_id")
+        .eq("bot_id", args.botId);
+
+    if (!data || data.length === 0) return { tag_ids: null };
+    return { tag_ids: data.map((r: { tag_id: string }) => r.tag_id) };
 }
