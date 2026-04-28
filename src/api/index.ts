@@ -365,6 +365,37 @@ body=${JSON.stringify(body)}
             /** Default endpoints */
             default: {
 
+                // ── GET /api/relay/allowed-tags?token=... — resolve meetingToken → tag IDs ──
+                if (pathname === "/api/relay/allowed-tags" && req.method?.toUpperCase() === "GET") {
+                    const apiKey = req.headers["x-api-key"];
+                    const expectedKey = process.env.BACKEND_API_KEY;
+                    if (!expectedKey || apiKey !== expectedKey) {
+                        res.writeHead(401, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: "Unauthorized" }));
+                        return;
+                    }
+                    const token = search_params.token as string | undefined;
+                    if (!token) {
+                        res.writeHead(400, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: "token is required" }));
+                        return;
+                    }
+                    const { data: meeting } = await supabase
+                        .from("meetings")
+                        .select("bot_id")
+                        .eq("meeting_token", token)
+                        .single();
+                    if (!meeting?.bot_id) {
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ tag_ids: null }));
+                        return;
+                    }
+                    const result = await meeting_allowed_tags({ botId: meeting.bot_id });
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
                 // ── /api/meetings/:botId/allowed-tags — relay API key auth ──────
                 if (pathname.match(/^\/api\/meetings\/[^/]+\/allowed-tags$/)) {
                     const apiKey = req.headers["x-api-key"];
