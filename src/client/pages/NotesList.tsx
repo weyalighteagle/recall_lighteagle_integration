@@ -1,13 +1,20 @@
 import { useAuth } from "@clerk/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Calendar, ChevronLeft, ChevronRight, Download, FileText, Loader2, Pencil, Users } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 
 const ITEMS_PER_PAGE = 10;
+
+interface Tag {
+    id: string;
+    name: string;
+    slug: string;
+    color: string | null;
+}
 
 interface Meeting {
     bot_id: string;
@@ -22,6 +29,141 @@ interface Meeting {
 
 interface NotesResponse {
     meetings: Meeting[];
+}
+
+interface MeetingTagPickerProps {
+    botId: string;
+    getToken: () => Promise<string | null>;
+}
+
+function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
+    const queryClient = useQueryClient();
+    const [showPicker, setShowPicker] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const pickerRef = useRef<HTMLDivElement>(null);
+
+    const { data: meetingTagsData } = useQuery<{ tags: Tag[] }>({
+        queryKey: ["meeting_tags", botId],
+        queryFn: async () => {
+            const token = await getToken();
+            const res = await fetch(`/api/meetings/${botId}/tags`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        },
+        staleTime: 30_000,
+    });
+    const meetingTags = meetingTagsData?.tags ?? [];
+
+    const { data: allTagsData } = useQuery<{ tags: Tag[] }>({
+        queryKey: ["kb_tags"],
+        queryFn: async () => {
+            const res = await fetch("/api/kb/tags");
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        },
+    });
+    const allTags = allTagsData?.tags ?? [];
+
+    useEffect(() => {
+        if (!showPicker) return;
+        const handler = (e: MouseEvent) => {
+            if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+                setShowPicker(false);
+            }
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, [showPicker]);
+
+    const toggleTag = async (tag: Tag) => {
+        const hasTag = meetingTags.some((t) => t.id === tag.id);
+        const newTags = hasTag ? meetingTags.filter((t) => t.id !== tag.id) : [...meetingTags, tag];
+        const oldData = queryClient.getQueryData<{ tags: Tag[] }>(["meeting_tags", botId]);
+        queryClient.setQueryData(["meeting_tags", botId], { tags: newTags });
+        setSaving(true);
+        try {
+            const token = await getToken();
+            const res = await fetch(`/api/meetings/${botId}/tags`, {
+                method: "PUT",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ tag_ids: newTags.map((t) => t.id) }),
+            });
+            if (!res.ok) {
+                queryClient.setQueryData(["meeting_tags", botId], oldData);
+                toast.error("Couldn't update tags");
+            } else {
+                queryClient.invalidateQueries({ queryKey: ["meeting_tags", botId] });
+            }
+        } catch {
+            queryClient.setQueryData(["meeting_tags", botId], oldData);
+            toast.error("Couldn't update tags");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="relative flex items-center gap-1 flex-wrap mt-1" ref={pickerRef}>
+            {meetingTags.map((tag) => (
+                <span
+                    key={tag.id}
+                    className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"
+                >
+                    {tag.color && (
+                        <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                    )}
+                    {tag.name}
+                    <button
+                        type="button"
+                        className="text-gray-400 hover:text-gray-600 leading-none ml-0.5"
+                        onClick={(e) => { e.stopPropagation(); toggleTag(tag); }}
+                        disabled={saving}
+                    >
+                        ×
+                    </button>
+                </span>
+            ))}
+            <button
+                type="button"
+                className="text-xs text-gray-400 hover:text-gray-600"
+                onClick={() => setShowPicker(true)}
+                disabled={saving}
+            >
+                + category
+            </button>
+            {showPicker && (
+                <div className="absolute top-full left-0 mt-1 z-10 bg-white border border-gray-200 rounded-lg shadow-lg p-1.5 min-w-[180px]">
+                    {allTags.length === 0 ? (
+                        <p className="text-xs text-gray-400 px-2 py-1">No tags yet</p>
+                    ) : (
+                        allTags.map((tag) => {
+                            const active = meetingTags.some((t) => t.id === tag.id);
+                            return (
+                                <button
+                                    key={tag.id}
+                                    type="button"
+                                    className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded hover:bg-gray-50 text-sm ${active ? "font-medium" : ""}`}
+                                    onClick={() => toggleTag(tag)}
+                                    disabled={saving}
+                                >
+                                    {tag.color && (
+                                        <span className="size-3 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                                    )}
+                                    <span className="truncate">{tag.name}</span>
+                                    {active && <span className="ml-auto text-blue-500 text-xs">✓</span>}
+                                </button>
+                            );
+                        })
+                    )}
+                </div>
+            )}
+        </div>
+    );
 }
 
 function NotesList() {
@@ -269,6 +411,7 @@ function NotesList() {
                                                 </span>
                                             )}
                                         </div>
+                                        <MeetingTagPicker botId={meeting.bot_id} getToken={getToken} />
                                     </div>
                                     <div className="flex items-center gap-2 shrink-0">
                                         <span

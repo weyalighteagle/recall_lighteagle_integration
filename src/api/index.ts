@@ -6,8 +6,10 @@ import { calendar_oauth } from "./handlers/calendar_oauth";
 import { calendar_oauth_callback } from "./handlers/calendar_oauth_callback";
 import { calendars_delete } from "./handlers/calendars_delete";
 import { calendars_list } from "./handlers/calendars_list";
-import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event } from "./handlers/recall_webhook";
-import { kb_list, kb_create, kb_delete, kb_toggle, kb_get, kb_update } from "./handlers/knowledge_base";
+import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event, kb_retry_ingestion } from "./handlers/recall_webhook";
+
+import { kb_list, kb_list_transcripts, kb_create, kb_delete, kb_toggle, kb_get, kb_update, tag_list, tag_create, tag_update, tag_delete, doc_tag_add, doc_tag_remove, meeting_tags_get, meeting_tags_set, meeting_allowed_tags } from "./handlers/knowledge_base";
+
 import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
 import { handleNotesList, handleNoteDetail, handleMeetingTitleUpdate } from "./handlers/notes";
 import { handleVoiceAgentStatus } from "./handlers/voice_agent_status";
@@ -195,6 +197,27 @@ body=${JSON.stringify(body)}
                         throw new Error(`Method not allowed: ${req.method}`);
                 }
             }
+            case "/api/kb/tags": {
+                switch (req.method?.toUpperCase()) {
+                    case "GET": {
+                        const result = await tag_list();
+                        res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+                        res.end(JSON.stringify(result));
+                        return;
+                    }
+                    case "POST": {
+                        if (!await requireAuth(req, res)) return;
+                        const userEmail: string = (req as any).userEmail;
+                        if (!body?.name) throw new Error("name is required");
+                        const tag = await tag_create(body, userEmail);
+                        res.writeHead(201, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+                        res.end(JSON.stringify(tag));
+                        return;
+                    }
+                    default:
+                        throw new Error(`Method not allowed: ${req.method}`);
+                }
+            }
             case "/api/voice-agent/status": {
                 if (req.method?.toUpperCase() !== "GET") throw new Error(`Method not allowed: ${req.method}`);
 
@@ -341,6 +364,145 @@ body=${JSON.stringify(body)}
 
             /** Default endpoints */
             default: {
+
+                // ── GET /api/relay/allowed-tags?token=... — resolve meetingToken → tag IDs ──
+                if (pathname === "/api/relay/allowed-tags" && req.method?.toUpperCase() === "GET") {
+                    const apiKey = req.headers["x-api-key"];
+                    const expectedKey = process.env.BACKEND_API_KEY;
+                    if (!expectedKey || apiKey !== expectedKey) {
+                        res.writeHead(401, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: "Unauthorized" }));
+                        return;
+                    }
+                    const token = search_params.token as string | undefined;
+                    if (!token) {
+                        res.writeHead(400, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: "token is required" }));
+                        return;
+                    }
+                    const { data: meeting } = await supabase
+                        .from("meetings")
+                        .select("bot_id")
+                        .eq("meeting_token", token)
+                        .single();
+                    if (!meeting?.bot_id) {
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ tag_ids: null }));
+                        return;
+                    }
+                    const result = await meeting_allowed_tags({ botId: meeting.bot_id });
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // ── /api/meetings/:botId/allowed-tags — relay API key auth ──────
+                if (pathname.match(/^\/api\/meetings\/[^/]+\/allowed-tags$/)) {
+                    const apiKey = req.headers["x-api-key"];
+                    const expectedKey = process.env.BACKEND_API_KEY;
+                    if (!expectedKey || apiKey !== expectedKey) {
+                        res.writeHead(401, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: "Unauthorized" }));
+                        return;
+                    }
+                    if (req.method?.toUpperCase() !== "GET") throw new Error(`Method not allowed: ${req.method}`);
+                    const botId = pathname.split("/")[3]!;
+                    const result = await meeting_allowed_tags({ botId });
+                    res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // ── /api/meetings/:botId/tags — per-meeting tag assignment ─────
+                if (pathname.match(/^\/api\/meetings\/[^/]+\/tags$/)) {
+                    const botId = pathname.split("/")[3]!;
+                    if (!await requireAuth(req, res)) return;
+                    if (req.method?.toUpperCase() === "GET") {
+                        const result = await meeting_tags_get({ botId });
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify(result));
+                        return;
+                    }
+                    if (req.method?.toUpperCase() === "PUT") {
+                        if (!Array.isArray(body?.tag_ids)) throw new Error("tag_ids array is required");
+                        const result = await meeting_tags_set({ botId, tag_ids: body.tag_ids });
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify(result));
+                        return;
+                    }
+                    throw new Error(`Method not allowed: ${req.method}`);
+                }
+
+                // ── /api/kb/retry/:botId — re-trigger KB ingestion ────────────
+                if (pathname.match(/^\/api\/kb\/retry\/[^/]+$/)) {
+                    const botId = pathname.replace("/api/kb/retry/", "");
+                    if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
+                    if (!await requireAuth(req, res)) return;
+                    const result = await kb_retry_ingestion({ botId });
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // ── /api/kb/tags/:id — tag update / delete ────────────────────
+                if (pathname.startsWith("/api/kb/tags/")) {
+                    const tagId = pathname.replace("/api/kb/tags/", "");
+                    switch (req.method?.toUpperCase()) {
+                        case "PATCH": {
+                            if (!await requireAuth(req, res)) return;
+                            const tag = await tag_update(tagId, body ?? {});
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify(tag));
+                            return;
+                        }
+                        case "DELETE": {
+                            if (!await requireAuth(req, res)) return;
+                            await tag_delete(tagId);
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify({ message: "Tag deleted" }));
+                            return;
+                        }
+                        default:
+                            throw new Error(`Method not allowed: ${req.method}`);
+                    }
+                }
+
+                // ── /api/kb/:docId/tags/:tagId — remove tag from document ─────
+                // Must be checked before the generic /api/kb/:id handler
+                if (pathname.match(/^\/api\/kb\/[^/]+\/tags\/[^/]+$/)) {
+                    const parts = pathname.split("/"); // ["", "api", "kb", docId, "tags", tagId]
+                    const docId = parts[3]!;
+                    const tagId = parts[5]!;
+                    if (req.method?.toUpperCase() !== "DELETE") throw new Error(`Method not allowed: ${req.method}`);
+                    if (!await requireAuth(req, res)) return;
+                    await doc_tag_remove(docId, tagId);
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ message: "Tag removed" }));
+                    return;
+                }
+
+                // ── /api/kb/:docId/tags — add tag to document ─────────────────
+                if (pathname.match(/^\/api\/kb\/[^/]+\/tags$/)) {
+                    const docId = pathname.split("/")[3]!;
+                    if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
+                    if (!await requireAuth(req, res)) return;
+                    if (!body?.tag_id) throw new Error("tag_id is required");
+                    await doc_tag_add(docId, body.tag_id);
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ message: "Tag added" }));
+                    return;
+                }
+
+                // ── GET /api/kb/transcripts — user-scoped transcript list ─────
+                if (pathname === "/api/kb/transcripts" && req.method?.toUpperCase() === "GET") {
+                    if (!await requireAuth(req, res)) return;
+                    const userEmail: string = (req as any).userEmail;
+                    const result = await kb_list_transcripts(userEmail);
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
                 // ── Single KB Document routes: /api/kb/:id ────────────────────
                 if (pathname.startsWith("/api/kb/") && pathname !== "/api/kb/") {
                     const docId = pathname.replace("/api/kb/", "");

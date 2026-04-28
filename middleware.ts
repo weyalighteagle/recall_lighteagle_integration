@@ -22,12 +22,15 @@ export default async function middleware(request: Request): Promise<Response> {
     const headers = new Headers(request.headers);
     headers.delete("host");
 
+    const body =
+        request.method !== "GET" && request.method !== "HEAD"
+            ? await request.arrayBuffer()
+            : undefined;
+
     const response = await fetch(target, {
         method: request.method,
         headers,
-        body: request.method !== "GET" && request.method !== "HEAD" ? request.body : undefined,
-        // @ts-ignore — duplex is needed for streaming request bodies in edge runtime
-        duplex: "half",
+        body: body ?? undefined,
     });
 
     const responseHeaders = new Headers(response.headers);

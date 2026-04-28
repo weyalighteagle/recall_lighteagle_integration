@@ -1,4 +1,6 @@
 import { supabase } from "../config/supabase";
+import { buildBotMetadataMap } from "./notes";
+import { normalizeMeetingType, upsertIngestionLog, ingestTranscriptToKB } from "./kb_ingest";
 
 /**
  * Handle POST /api/webhooks/transcript
@@ -306,6 +308,62 @@ export async function handleTranscriptWebhook(
                   console.log(
                     `[transcript.done/assemblyai] inserted ${insData?.length ?? rows.length} utterances for bot_id=${botId}, speakers=${JSON.stringify(speakers)}`,
                   );
+
+                  // Step 5: Auto-ingest diarized transcript into KB (voice_agent bots)
+                  // Runs after AssemblyAI utterances are written so we get the high-quality
+                  // diarized content, not the lower-quality real-time streaming transcript.
+                  try {
+                    await upsertIngestionLog(botId, null, "processing");
+
+                    const transcriptText = rows
+                      .map((r) => {
+                        const text = Array.isArray(r.words)
+                          ? (r.words as any[]).map((w) => w.text ?? "").join(" ") // eslint-disable-line @typescript-eslint/no-explicit-any
+                          : "";
+                        return `${r.speaker}: ${text}`;
+                      })
+                      .join("\n");
+
+                    const participants = [...new Set(rows.map((r) => r.speaker))]
+                      .filter((name) => name !== "WEYA Voice Agent" && name !== "Unknown");
+
+                    const meetingDate = new Date(now);
+                    const dateStr = meetingDate.toLocaleDateString("tr-TR", {
+                      year: "numeric", month: "long", day: "numeric", weekday: "long",
+                    });
+
+                    let calendarTitle = "Toplantı";
+                    try {
+                      const metaMap = await buildBotMetadataMap([botId]);
+                      const meta = metaMap.get(botId);
+                      if (meta?.title) calendarTitle = meta.title;
+                    } catch (metaErr) {
+                      console.error(`[transcript.done/assemblyai] Failed to get calendar title:`, metaErr);
+                    }
+
+                    const meetingType = normalizeMeetingType(calendarTitle);
+                    const docTitle = participants.length > 0
+                      ? `${calendarTitle} — ${dateStr} — ${participants.join(", ")}`
+                      : `${calendarTitle} — ${dateStr}`;
+
+                    const result = await ingestTranscriptToKB({
+                      botId,
+                      transcriptText,
+                      docTitle,
+                      meetingDate,
+                      meetingType,
+                      calendarTitle,
+                    });
+
+                    if (result.skipped) {
+                      console.log(`[transcript.done/assemblyai] KB ingest skipped: ${result.reason}`);
+                    } else {
+                      console.log(`[transcript.done/assemblyai] ✅ KB ingested: "${docTitle}" (${result.chunkCount} chunks)`);
+                    }
+                  } catch (kbErr) {
+                    await upsertIngestionLog(botId, null, "failed", { error_message: String(kbErr) });
+                    console.error(`[transcript.done/assemblyai] KB ingest failed (non-fatal):`, kbErr);
+                  }
                 }
               }
             }
