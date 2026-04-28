@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { randomUUID } from "crypto";
 import { env } from "../config/env";
 import { supabase } from "../config/supabase";
 
@@ -35,9 +36,13 @@ export async function bot_join(args: {
 
     let payload: Record<string, any>;
 
+    // Pre-generate a token so we can embed it in the camera URL before the Recall.ai
+    // API call (bot.id is not known until after creation, so we can't use it directly).
+    // The relay reads this token from the WebSocket URL and resolves it to allowed tag IDs.
+    const meetingToken = botType === "voice_agent" ? randomUUID() : null;
+
     if (botType === "voice_agent") {
-        // botId is not known yet — use a placeholder URL; we PATCH it immediately after creation
-        const output_media_url = `${env.VOICE_AGENT_PAGE_URL}?wss=${encodeURIComponent(env.VOICE_AGENT_WSS_URL!)}`;
+        const output_media_url = `${env.VOICE_AGENT_PAGE_URL}?meetingToken=${meetingToken}&wss=${encodeURIComponent(env.VOICE_AGENT_WSS_URL!)}`;
 
         payload = {
             meeting_url,
@@ -112,32 +117,6 @@ export async function bot_join(args: {
 
     const bot = await response.json();
 
-    // For voice_agent bots: PATCH camera URL with botId so the relay can fetch allowedTagIds.
-    // The initial URL was built without bot.id (not known at payload construction time).
-    if (botType === "voice_agent") {
-        const updatedMediaUrl = `${env.VOICE_AGENT_PAGE_URL}?botId=${bot.id}&wss=${encodeURIComponent(env.VOICE_AGENT_WSS_URL!)}`;
-        const patchRes = await fetch(
-            `https://${env.RECALL_REGION}.recall.ai/api/v1/bot/${bot.id}/`,
-            {
-                method: "PATCH",
-                headers: {
-                    "Authorization": `${env.RECALL_API_KEY}`,
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    output_media: {
-                        camera: { kind: "webpage", config: { url: updatedMediaUrl } },
-                    },
-                }),
-            }
-        );
-        if (!patchRes.ok) {
-            console.warn(`[bot_join] PATCH camera URL failed (${patchRes.status}): ${await patchRes.text()}`);
-        } else {
-            console.log(`[bot_join] Camera URL updated with botId=${bot.id}`);
-        }
-    }
-
     // Supabase'de meeting kaydı oluştur (transcript takibi için) — hem recording hem voice_agent için
     const resolvedBotName: string = (payload as any).bot_name;
     // Use ignoreDuplicates: false so that if handleTranscriptWebhook already created the row
@@ -152,6 +131,7 @@ export async function bot_join(args: {
             bot_name: resolvedBotName,
             user_email: args.user_email,
             meeting_start_time: new Date().toISOString(),
+            ...(meetingToken ? { meeting_token: meetingToken } : {}),
         },
         { onConflict: "bot_id", ignoreDuplicates: false },
     );
