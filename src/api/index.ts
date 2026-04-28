@@ -7,7 +7,11 @@ import { calendar_oauth_callback } from "./handlers/calendar_oauth_callback";
 import { calendars_delete } from "./handlers/calendars_delete";
 import { calendars_list } from "./handlers/calendars_list";
 import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event, kb_retry_ingestion } from "./handlers/recall_webhook";
+
 import { kb_list, kb_create, kb_delete, kb_toggle, kb_get, kb_update, tag_list, tag_create, tag_update, tag_delete, doc_tag_add, doc_tag_remove, meeting_tags_get, meeting_tags_set, meeting_allowed_tags } from "./handlers/knowledge_base";
+
+import { kb_list, kb_create, kb_delete, kb_toggle, kb_get, kb_update, tag_list, tag_create, tag_update, tag_delete, doc_tag_add, doc_tag_remove, meeting_tags_get, meeting_tags_set } from "./handlers/knowledge_base";
+
 import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
 import { handleNotesList, handleNoteDetail, handleMeetingTitleUpdate } from "./handlers/notes";
 import { handleVoiceAgentStatus } from "./handlers/voice_agent_status";
@@ -362,6 +366,7 @@ body=${JSON.stringify(body)}
 
             /** Default endpoints */
             default: {
+
                 // ── /api/meetings/:botId/allowed-tags — relay API key auth ──────
                 if (pathname.match(/^\/api\/meetings\/[^/]+\/allowed-tags$/)) {
                     const apiKey = req.headers["x-api-key"];

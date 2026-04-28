@@ -550,6 +550,7 @@ export async function meeting_tags_set(args: { botId: string; tag_ids: string[] 
         if (insertErr) throw new Error(insertErr.message);
     }
 
+
     // Sync the KB document ingested from this meeting's transcript
     const { data: kbDoc } = await supabase
         .from("kb_documents")
@@ -587,3 +588,7 @@ export async function meeting_allowed_tags(args: { botId: string }): Promise<{ t
     if (!data || data.length === 0) return { tag_ids: null };
     return { tag_ids: data.map((r: { tag_id: string }) => r.tag_id) };
 }
+
+    return meeting_tags_get({ botId });
+}
+
