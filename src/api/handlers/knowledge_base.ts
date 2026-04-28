@@ -122,16 +122,16 @@ export async function kb_list(): Promise<{ documents: Array<{
     created_at: string;
     category: string;
     tags: DocTag[];
+    metadata: Record<string, unknown>;
 }> }> {
     // Supabase returns nested relations as any — we type them explicitly below
     const { data, error } = await supabase
         .from("kb_documents")
         .select(`
-            id, title, source_type, is_active, created_at,
+            id, title, source_type, is_active, created_at, metadata,
             kb_categories(name),
             kb_document_tags(tag_id, kb_tags(id, name, color))
         `)
-        .neq("source_type", "transcript")
         .order("created_at", { ascending: false });
 
     if (error) throw new Error(error.message);
@@ -143,6 +143,7 @@ export async function kb_list(): Promise<{ documents: Array<{
         is_active: doc.is_active as boolean,
         created_at: doc.created_at as string,
         category: (doc.kb_categories?.name ?? "unknown") as string,
+        metadata: (doc.metadata ?? {}) as Record<string, unknown>,
         tags: ((doc.kb_document_tags ?? []) as Array<{ tag_id: string; kb_tags: { id: string; name: string; color: string | null } | null }>)
             .map((dt) => dt.kb_tags)
             .filter((t): t is { id: string; name: string; color: string | null } => t !== null),

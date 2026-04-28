@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import {
-    Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye, Star, Tag, X,
+    Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye, Star, Tag, X, Mic,
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import {
@@ -57,6 +57,7 @@ interface KBDocument {
     created_at: string;
     category: string;
     tags: DocTag[];
+    metadata: Record<string, unknown> | null;
 }
 
 interface KBDocumentFull {
@@ -270,6 +271,7 @@ function KnowledgeBase() {
     const documents = data?.documents ?? [];
     const allTags = tagsData?.tags ?? [];
     const activeKbId = botSettings?.active_kb_id ?? null;
+    const selectedDoc = documents.find((d) => d.id === selectedDocId) ?? null;
 
     // ── Group documents by tags ───────────────────────────────────────
     // A doc appears in every section its tags belong to; tagless docs go to Uncategorized.
@@ -476,84 +478,101 @@ function KnowledgeBase() {
     };
 
     // ── Doc row ───────────────────────────────────────────────────────
-    const DocRow = ({ doc }: { doc: KBDocument }) => (
-        <div
-            key={doc.id}
-            className={`flex items-start justify-between py-3 ${!doc.is_active ? "opacity-50" : ""}`}
-        >
-            <button
-                type="button"
-                onClick={() => handleOpenDocument(doc.id)}
-                className="flex flex-col gap-1 min-w-0 flex-1 text-left hover:bg-gray-50 -mx-2 px-2 py-1 rounded-md transition-colors cursor-pointer"
+    const DocRow = ({ doc }: { doc: KBDocument }) => {
+        const isTranscript = doc.source_type === "transcript";
+        const displayDate = isTranscript
+            ? (doc.metadata?.meetingDate as string | undefined) ?? doc.created_at
+            : doc.created_at;
+
+        return (
+            <div
+                key={doc.id}
+                className={`flex items-start justify-between py-3 ${!doc.is_active ? "opacity-50" : ""}`}
             >
-                <span className="text-sm font-medium text-gray-800 truncate">{doc.title}</span>
-                <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
-                        {CATEGORIES.find((c) => c.value === doc.category)?.label ?? doc.category}
-                    </span>
-                    <span className="text-xs text-gray-400">
-                        {new Date(doc.created_at).toLocaleDateString()}
-                    </span>
-                    <span className="text-xs text-blue-500 flex items-center gap-0.5">
-                        <Eye className="size-3" /> View
-                    </span>
-                </div>
-                {/* Tag pills */}
-                <div className="flex items-center gap-1.5 flex-wrap mt-0.5" onClick={(e) => e.stopPropagation()}>
-                    {doc.tags.map((tag) => (
-                        <TagPill
-                            key={tag.id}
-                            tag={tag}
-                            onRemove={() => removeDocTagMutation.mutate({ docId: doc.id, tagId: tag.id })}
+                <button
+                    type="button"
+                    onClick={() => handleOpenDocument(doc.id)}
+                    className="flex flex-col gap-1 min-w-0 flex-1 text-left hover:bg-gray-50 -mx-2 px-2 py-1 rounded-md transition-colors cursor-pointer"
+                >
+                    <span className="text-sm font-medium text-gray-800 truncate">{doc.title}</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                        {isTranscript ? (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 flex items-center gap-0.5">
+                                <Mic className="size-3" /> Meeting Transcript
+                            </span>
+                        ) : (
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
+                                {CATEGORIES.find((c) => c.value === doc.category)?.label ?? doc.category}
+                            </span>
+                        )}
+                        <span className="text-xs text-gray-400">
+                            {new Date(displayDate).toLocaleDateString()}
+                        </span>
+                        <span className="text-xs text-blue-500 flex items-center gap-0.5">
+                            <Eye className="size-3" /> View
+                        </span>
+                    </div>
+                    {/* Tag pills */}
+                    <div className="flex items-center gap-1.5 flex-wrap mt-0.5" onClick={(e) => e.stopPropagation()}>
+                        {doc.tags.map((tag) => (
+                            <TagPill
+                                key={tag.id}
+                                tag={tag}
+                                onRemove={() => removeDocTagMutation.mutate({ docId: doc.id, tagId: tag.id })}
+                            />
+                        ))}
+                        <AddTagDropdown
+                            docId={doc.id}
+                            allTags={allTags}
+                            docTagIds={doc.tags.map((t) => t.id)}
+                            onAdd={(tagId) => addDocTagMutation.mutate({ docId: doc.id, tagId })}
                         />
-                    ))}
-                    <AddTagDropdown
-                        docId={doc.id}
-                        allTags={allTags}
-                        docTagIds={doc.tags.map((t) => t.id)}
-                        onAdd={(tagId) => addDocTagMutation.mutate({ docId: doc.id, tagId })}
-                    />
+                    </div>
+                </button>
+                <div className="flex items-center gap-1 shrink-0 ml-2 mt-1">
+                    {!isTranscript && (
+                        <>
+                            <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                title={activeKbId === doc.id ? "Default KB" : "Set as default"}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (activeKbId !== doc.id) setDefaultMutation.mutate(doc.id);
+                                }}
+                                disabled={setDefaultMutation.isPending}
+                            >
+                                <Star className={`size-4 ${activeKbId === doc.id ? "fill-yellow-400 text-yellow-400" : "text-gray-300 hover:text-yellow-400"}`} />
+                            </Button>
+                            {activeKbId === doc.id && (
+                                <span className="text-xs px-1.5 py-0.5 rounded-full bg-yellow-50 text-yellow-700 font-medium">Default</span>
+                            )}
+                        </>
+                    )}
+                    <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        title={doc.is_active ? "Deactivate" : "Activate"}
+                        onClick={(e) => { e.stopPropagation(); toggleMutation.mutate({ id: doc.id, is_active: !doc.is_active }); }}
+                    >
+                        <Power className={`size-4 ${doc.is_active ? "text-green-600" : "text-gray-400"}`} />
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        title="Delete"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm(`"${doc.title}" will be deleted. Are you sure?`)) deleteMutation.mutate(doc.id);
+                        }}
+                        className="text-red-500 hover:text-red-700"
+                    >
+                        <Trash2 className="size-4" />
+                    </Button>
                 </div>
-            </button>
-            <div className="flex items-center gap-1 shrink-0 ml-2 mt-1">
-                <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    title={activeKbId === doc.id ? "Default KB" : "Set as default"}
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        if (activeKbId !== doc.id) setDefaultMutation.mutate(doc.id);
-                    }}
-                    disabled={setDefaultMutation.isPending}
-                >
-                    <Star className={`size-4 ${activeKbId === doc.id ? "fill-yellow-400 text-yellow-400" : "text-gray-300 hover:text-yellow-400"}`} />
-                </Button>
-                {activeKbId === doc.id && (
-                    <span className="text-xs px-1.5 py-0.5 rounded-full bg-yellow-50 text-yellow-700 font-medium">Default</span>
-                )}
-                <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    title={doc.is_active ? "Deactivate" : "Activate"}
-                    onClick={(e) => { e.stopPropagation(); toggleMutation.mutate({ id: doc.id, is_active: !doc.is_active }); }}
-                >
-                    <Power className={`size-4 ${doc.is_active ? "text-green-600" : "text-gray-400"}`} />
-                </Button>
-                <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    title="Delete"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm(`"${doc.title}" will be deleted. Are you sure?`)) deleteMutation.mutate(doc.id);
-                    }}
-                    className="text-red-500 hover:text-red-700"
-                >
-                    <Trash2 className="size-4" />
-                </Button>
             </div>
-        </div>
-    );
+        );
+    };
 
     // ── Render ────────────────────────────────────────────────────────
     return (
@@ -911,15 +930,29 @@ function KnowledgeBase() {
                         <>
                             <DialogHeader>
                                 <DialogTitle className="flex items-center gap-2">
-                                    <BookOpen className="size-4" />
+                                    {fullDoc.source_type === "transcript" ? (
+                                        <Mic className="size-4 text-purple-500" />
+                                    ) : (
+                                        <BookOpen className="size-4" />
+                                    )}
                                     {fullDoc.title}
                                 </DialogTitle>
                                 <DialogDescription className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
-                                        {CATEGORIES.find((c) => c.value === fullDoc.category)?.label ?? fullDoc.category}
-                                    </span>
+                                    {fullDoc.source_type === "transcript" ? (
+                                        <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 flex items-center gap-0.5">
+                                            <Mic className="size-3" /> Meeting Transcript
+                                        </span>
+                                    ) : (
+                                        <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
+                                            {CATEGORIES.find((c) => c.value === fullDoc.category)?.label ?? fullDoc.category}
+                                        </span>
+                                    )}
                                     <span className="text-xs text-gray-400">
-                                        {new Date(fullDoc.created_at).toLocaleDateString()}
+                                        {new Date(
+                                            fullDoc.source_type === "transcript"
+                                                ? ((selectedDoc?.metadata?.meetingDate as string | undefined) ?? fullDoc.created_at)
+                                                : fullDoc.created_at
+                                        ).toLocaleDateString()}
                                     </span>
                                     <span className={`text-xs font-medium ${fullDoc.is_active ? "text-green-600" : "text-gray-400"}`}>
                                         {fullDoc.is_active ? "Active" : "Inactive"}
@@ -935,10 +968,12 @@ function KnowledgeBase() {
                                 <Button type="button" variant="outline" size="sm" onClick={handleCloseDialog}>
                                     Close
                                 </Button>
-                                <Button type="button" size="sm" onClick={handleStartEditing} className="flex items-center gap-2">
-                                    <Pencil className="size-4" />
-                                    Edit
-                                </Button>
+                                {fullDoc.source_type !== "transcript" && (
+                                    <Button type="button" size="sm" onClick={handleStartEditing} className="flex items-center gap-2">
+                                        <Pencil className="size-4" />
+                                        Edit
+                                    </Button>
+                                )}
                             </DialogFooter>
                         </>
                     )}
