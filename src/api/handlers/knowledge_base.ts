@@ -113,7 +113,7 @@ interface DocTag {
 
 // ─── KB Document Handlers ────────────────────────────────────
 
-/** GET /api/kb — doküman listesi with tags per document */
+/** GET /api/kb — doküman listesi with tags per document (manual docs only, no transcripts) */
 export async function kb_list(): Promise<{ documents: Array<{
     id: string;
     title: string;
@@ -122,16 +122,16 @@ export async function kb_list(): Promise<{ documents: Array<{
     created_at: string;
     category: string;
     tags: DocTag[];
-    metadata: Record<string, unknown>;
 }> }> {
     // Supabase returns nested relations as any — we type them explicitly below
     const { data, error } = await supabase
         .from("kb_documents")
         .select(`
-            id, title, source_type, is_active, created_at, metadata,
+            id, title, source_type, is_active, created_at,
             kb_categories(name),
             kb_document_tags(tag_id, kb_tags(id, name, color))
         `)
+        .neq("source_type", "transcript")
         .order("created_at", { ascending: false });
 
     if (error) throw new Error(error.message);
@@ -143,11 +143,72 @@ export async function kb_list(): Promise<{ documents: Array<{
         is_active: doc.is_active as boolean,
         created_at: doc.created_at as string,
         category: (doc.kb_categories?.name ?? "unknown") as string,
-        metadata: (doc.metadata ?? {}) as Record<string, unknown>,
         tags: ((doc.kb_document_tags ?? []) as Array<{ tag_id: string; kb_tags: { id: string; name: string; color: string | null } | null }>)
             .map((dt) => dt.kb_tags)
             .filter((t): t is { id: string; name: string; color: string | null } => t !== null),
     }));
+
+    return { documents };
+}
+
+/** GET /api/kb/transcripts — transcript docs scoped to the requesting user */
+export async function kb_list_transcripts(userEmail: string): Promise<{ documents: Array<{
+    id: string;
+    title: string;
+    source_type: string;
+    is_active: boolean;
+    created_at: string;
+    category: string;
+    tags: DocTag[];
+    metadata: Record<string, unknown>;
+}> }> {
+    // Collect bot IDs this user owns or attended — mirrors handleNotesList's two DB paths.
+    // Calendar-path (legacy NULL user_email bots) is intentionally skipped here:
+    // KB ingestion only runs for voice_agent bots created via /api/bot/join, which
+    // always have user_email set, so the two DB paths below cover all ingested transcripts.
+    const [userResult, guestResult] = await Promise.all([
+        supabase.from("meetings").select("bot_id").eq("user_email", userEmail),
+        supabase.from("meetings").select("bot_id")
+            .contains("attendee_emails", [userEmail])
+            .neq("user_email", userEmail),
+    ]);
+
+    const botIdSet = new Set<string>();
+    for (const row of [...(userResult.data ?? []), ...(guestResult.data ?? [])]) {
+        botIdSet.add(row.bot_id);
+    }
+
+    if (botIdSet.size === 0) return { documents: [] };
+
+    const { data, error } = await supabase
+        .from("kb_documents")
+        .select(`
+            id, title, source_type, is_active, created_at, metadata,
+            kb_categories(name),
+            kb_document_tags(tag_id, kb_tags(id, name, color))
+        `)
+        .eq("source_type", "transcript")
+        .order("created_at", { ascending: false });
+
+    if (error) throw new Error(error.message);
+
+    const documents = (data ?? []) // eslint-disable-line @typescript-eslint/no-explicit-any
+        .filter((doc: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+            const botId = doc.metadata?.botId;
+            return typeof botId === "string" && botIdSet.has(botId);
+        })
+        .map((doc: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+            id: doc.id as string,
+            title: doc.title as string,
+            source_type: doc.source_type as string,
+            is_active: doc.is_active as boolean,
+            created_at: doc.created_at as string,
+            category: (doc.kb_categories?.name ?? "unknown") as string,
+            metadata: (doc.metadata ?? {}) as Record<string, unknown>,
+            tags: ((doc.kb_document_tags ?? []) as Array<{ tag_id: string; kb_tags: { id: string; name: string; color: string | null } | null }>)
+                .map((dt) => dt.kb_tags)
+                .filter((t): t is { id: string; name: string; color: string | null } => t !== null),
+        }));
 
     return { documents };
 }
