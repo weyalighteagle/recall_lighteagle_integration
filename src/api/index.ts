@@ -419,15 +419,16 @@ body=${JSON.stringify(body)}
                 if (pathname.match(/^\/api\/meetings\/[^/]+\/tags$/)) {
                     const botId = pathname.split("/")[3]!;
                     if (!await requireAuth(req, res)) return;
+                    const userEmail: string = (req as any).userEmail;
                     if (req.method?.toUpperCase() === "GET") {
-                        const result = await meeting_tags_get({ botId });
+                        const result = await meeting_tags_get({ botId, userEmail });
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify(result));
                         return;
                     }
                     if (req.method?.toUpperCase() === "PUT") {
                         if (!Array.isArray(body?.tag_ids)) throw new Error("tag_ids array is required");
-                        const result = await meeting_tags_set({ botId, tag_ids: body.tag_ids });
+                        const result = await meeting_tags_set({ botId, tag_ids: body.tag_ids, userEmail });
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify(result));
                         return;
