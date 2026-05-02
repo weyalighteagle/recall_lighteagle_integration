@@ -20,7 +20,7 @@ export function useToggleRecording(props: {
     const label = botType === "voice_agent" ? "Voice agent" : "Recording";
 
     const { mutate: scheduleRecording, isPending: isScheduling } = useMutation({
-        mutationFn: async () => {
+        mutationFn: async (vars?: { tag_ids?: string[] }) => {
             const url = new URL("/api/calendar/events/bot", window.location.origin);
             url.searchParams.set("calendar_event_id", calendarEventId);
             url.searchParams.set("bot_type", botType);
@@ -32,6 +32,7 @@ export function useToggleRecording(props: {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${token}`,
                 },
+                body: vars?.tag_ids?.length ? JSON.stringify({ tag_ids: vars.tag_ids }) : undefined,
             });
             if (!res.ok) throw new Error(await res.text());
             return { isScheduled: true };

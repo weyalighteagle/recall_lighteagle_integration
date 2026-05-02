@@ -315,6 +315,7 @@ body=${JSON.stringify(body)}
                         if (!search_params.calendar_event_id) throw new Error("calendar_event_id is required");
 
                         const bot_type = (search_params.bot_type === "voice_agent") ? "voice_agent" : "recording";
+                        const tag_ids: string[] = Array.isArray(body?.tag_ids) ? body.tag_ids : [];
 
                         const calendar_event = await calendar_event_retrieve({ calendar_event_id: search_params.calendar_event_id });
                         if (!calendar_event) throw new Error("Calendar event not found");
@@ -324,6 +325,13 @@ body=${JSON.stringify(body)}
 
                         const results = await schedule_bot_for_calendar_event({ calendar, calendar_event, bot_type });
                         console.log(`Scheduled Bot for Calendar Event: ${JSON.stringify(results)}`);
+
+                        if (tag_ids.length > 0) {
+                            await supabase.from("calendar_event_tags").upsert({
+                                calendar_event_id: search_params.calendar_event_id,
+                                tag_ids,
+                            });
+                        }
 
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify({ message: "Bot scheduled" }));
@@ -360,6 +368,22 @@ body=${JSON.stringify(body)}
                         throw new Error(`Method not allowed: ${req.method}`);
                     }
                 }
+            }
+
+            case "/api/calendar/events/tag": {
+                if (req.method?.toUpperCase() !== "PUT") throw new Error(`Method not allowed: ${req.method}`);
+                if (!await requireAuth(req, res)) return;
+                if (!body?.calendar_event_id) throw new Error("calendar_event_id is required");
+                if (!Array.isArray(body?.tag_ids)) throw new Error("tag_ids array is required");
+
+                await supabase.from("calendar_event_tags").upsert({
+                    calendar_event_id: body.calendar_event_id,
+                    tag_ids: body.tag_ids,
+                });
+
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ message: "Tags saved" }));
+                return;
             }
 
             /** Default endpoints */

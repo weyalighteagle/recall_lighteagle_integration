@@ -204,9 +204,10 @@ async function handleBotDone(body: any): Promise<void> {
 
   const { data: meetingRow } = await supabase
     .from('meetings')
-    .select('done, bot_type')
+    .select('id, done, bot_type')
     .eq('bot_id', botId)
     .single();
+  const meetingDbId = meetingRow?.id as string | undefined;
 
   if (meetingRow?.done === true) {
     console.log(`[handleBotDone] meeting already marked done for bot_id=${botId}, skipping`);
@@ -326,6 +327,29 @@ async function handleBotDone(body: any): Promise<void> {
       `[handleBotDone] Could not fetch bot details from Recall for bot ${botId}. Skipping transcription. This needs manual review.`,
     );
     return;
+  }
+
+  // Fix 2: If this bot was scheduled via the calendar UI with a tag, write it to meeting_tags now
+  // so that the KB ingest (here for recording bots, in transcript_webhook for voice_agent) can use it.
+  const calEventId: string | undefined = botData?.calendar_meetings?.[0]?.calendar_event?.id;
+  if (calEventId && meetingDbId) {
+    try {
+      const { data: calTags } = await supabase
+        .from("calendar_event_tags")
+        .select("tag_ids")
+        .eq("calendar_event_id", calEventId)
+        .maybeSingle();
+      if (calTags?.tag_ids?.length) {
+        await supabase.from("meeting_tags").upsert(
+          (calTags.tag_ids as string[]).map((tid) => ({ meeting_id: meetingDbId, tag_id: tid }))
+        );
+        console.log(
+          `[handleBotDone] wrote ${calTags.tag_ids.length} tag(s) to meeting_tags for meeting_id=${meetingDbId}`,
+        );
+      }
+    } catch (err) {
+      console.error(`[handleBotDone] calendar_event_tags lookup failed (non-fatal):`, err);
+    }
   }
 
   if (inferredBotType === "voice_agent") {
@@ -649,13 +673,28 @@ async function handleBotDone(body: any): Promise<void> {
         ? `${calendarTitle} — ${dateStr} — ${participants.join(", ")}`
         : `${calendarTitle} — ${dateStr}`;
 
+      // Fix 1: look up meeting_tags to get tagIds and meetingTypeSlug for KB ingest
+      let kbTagIds: string[] = [];
+      let kbMeetingType = meetingType;
+      if (meetingDbId) {
+        const { data: meetingTagRows } = await supabase
+          .from("meeting_tags")
+          .select("tag_id, kb_tags(slug)")
+          .eq("meeting_id", meetingDbId);
+        if (meetingTagRows?.length) {
+          kbTagIds = meetingTagRows.map((r: any) => r.tag_id); // eslint-disable-line @typescript-eslint/no-explicit-any
+          kbMeetingType = (meetingTagRows[0] as any)?.kb_tags?.slug ?? "toplanti"; // eslint-disable-line @typescript-eslint/no-explicit-any
+        }
+      }
+
       const result = await ingestTranscriptToKB({
         botId,
         transcriptText,
         docTitle,
         meetingDate,
-        meetingType,
+        meetingType: kbMeetingType,
         calendarTitle,
+        tagIds: kbTagIds,
       });
 
       if (result.skipped) {

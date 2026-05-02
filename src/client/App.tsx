@@ -123,6 +123,12 @@ interface KbDoc {
     is_active: boolean;
 }
 
+interface KbTag {
+    id: string;
+    name: string;
+    color: string | null;
+}
+
 function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     const { user } = useUser();
     const [showConnectDialog, setShowConnectDialog] = useState(false);
@@ -131,16 +137,19 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     const [kbDocuments, setKbDocuments] = useState<KbDoc[]>([]);
     const [selectedKbId, setSelectedKbId] = useState<string>("");
     const [autoJoinEnabled, setAutoJoinEnabled] = useState<boolean>(true);
+    const [tags, setTags] = useState<KbTag[]>([]);
 
     useEffect(() => {
         Promise.all([
             fetch("/api/bot-settings").then((r) => r.json()) as Promise<{ bot_mode: string; active_kb_id: string | null; auto_join_enabled?: boolean }>,
             fetch("/api/kb").then((r) => r.json()) as Promise<{ documents: KbDoc[] }>,
+            fetch("/api/kb/tags").then((r) => r.json()) as Promise<{ tags: KbTag[] }>,
         ])
-            .then(([settings, kbData]) => {
+            .then(([settings, kbData, tagData]) => {
                 const docs = kbData.documents ?? [];
                 setKbDocuments(docs);
                 setAutoJoinEnabled(settings.auto_join_enabled ?? true);
+                setTags(tagData.tags ?? []);
                 const savedId = settings.active_kb_id;
                 if (savedId && docs.some((d) => d.id === savedId)) {
                     setSelectedKbId(savedId);
@@ -256,6 +265,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                                     calendar={calendar}
                                     kbDocuments={kbDocuments}
                                     globalKbId={selectedKbId}
+                                    tags={tags}
                                 />
                             ))}
                         </div>
@@ -266,7 +276,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     );
 }
 
-function CalendarDetails({ calendar, kbDocuments, globalKbId }: { calendar: CalendarType; kbDocuments: KbDoc[]; globalKbId: string }) {
+function CalendarDetails({ calendar, kbDocuments, globalKbId, tags }: { calendar: CalendarType; kbDocuments: KbDoc[]; globalKbId: string; tags: KbTag[] }) {
     const { user } = useUser();
     const [searchParams, setSearchParams] = useSearchParams();
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -465,6 +475,7 @@ function CalendarDetails({ calendar, kbDocuments, globalKbId }: { calendar: Cale
                     startTimeLte={selectedEndDate}
                     kbDocuments={kbDocuments}
                     globalKbId={globalKbId}
+                    tags={tags}
                 />
             </div>
         </div>
@@ -477,12 +488,14 @@ function CalendarEventsList({
     startTimeLte,
     kbDocuments,
     globalKbId,
+    tags,
 }: {
     calendar: CalendarType;
     startTimeGte: string;
     startTimeLte: string;
     kbDocuments: KbDoc[];
     globalKbId: string;
+    tags: KbTag[];
 }) {
     const latestStatus = calendar.status_changes.at(0)?.status;
     const isConnecting = latestStatus === "connecting";
@@ -564,6 +577,7 @@ function CalendarEventsList({
                                         getEventTitle={getEventTitle}
                                         kbDocuments={kbDocuments}
                                         globalKbId={globalKbId}
+                                        tags={tags}
                                     />
                                 ))}
                         </div>
@@ -581,6 +595,7 @@ function CalendarEventCard({
     getEventTitle,
     kbDocuments,
     globalKbId,
+    tags,
 }: {
     event: CalendarEventType;
     calendarId: string;
@@ -588,6 +603,7 @@ function CalendarEventCard({
     getEventTitle: (event: CalendarEventType) => string;
     kbDocuments: KbDoc[];
     globalKbId: string;
+    tags: KbTag[];
 }) {
     // Recording bot toggle hook
     const {
@@ -611,14 +627,44 @@ function CalendarEventCard({
         botType: "voice_agent",
     });
 
+    const { getToken } = useAuth();
     const navigate = useNavigate();
     const [isExporting, setIsExporting] = useState(false);
+    const [selectedTagId, setSelectedTagId] = useState<string>("");
     // undefined = still loading, null = no override set
     const [eventKbId, setEventKbId] = useState<string | null | undefined>(undefined);
 
     const isInFuture = new Date(event.start_time) > new Date();
     const hasMeetingUrl = !!event.meeting_url;
     const canToggle = isInFuture && hasMeetingUrl;
+
+    // Dedup key prefix'ine bakarak bot tipini tespit et
+    const hasRecordingBot = event.bots.some(
+        (bot) => bot.deduplication_key.startsWith("rec-") && new Date(bot.start_time) > new Date(),
+    );
+    const hasVoiceAgentBot = event.bots.some(
+        (bot) => bot.deduplication_key.startsWith("va-") && new Date(bot.start_time) > new Date(),
+    );
+    // Geriye uyumluluk: eski format prefix'siz dedup key'ler recording sayılır
+    const hasLegacyBot = event.bots.some(
+        (bot) =>
+            !bot.deduplication_key.startsWith("rec-") &&
+            !bot.deduplication_key.startsWith("va-") &&
+            new Date(bot.start_time) > new Date(),
+    );
+    const isRecordingScheduled = hasRecordingBot || hasLegacyBot;
+
+    // Optimistic toggle state — flipped immediately on click, synced after server refetch
+    const [recordingActive, setRecordingActive] = useState(isRecordingScheduled);
+    const [voiceAgentActive, setVoiceAgentActive] = useState(hasVoiceAgentBot);
+
+    useEffect(() => {
+        if (!isRecordingPending) setRecordingActive(isRecordingScheduled);
+    }, [isRecordingScheduled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        if (!isVoiceAgentPending) setVoiceAgentActive(hasVoiceAgentBot);
+    }, [hasVoiceAgentBot]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
         if (!canToggle || kbDocuments.length === 0) {
@@ -638,6 +684,29 @@ function CalendarEventCard({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ kb_document_id: id }),
         }).catch(console.error);
+    };
+
+    const handleTagChange = async (tagId: string) => {
+        setSelectedTagId(tagId);
+        if (!tagId) return;
+        const token = await getToken();
+        // Always save to calendar_event_tags so future-scheduled bots inherit the tag
+        fetch("/api/calendar/events/tag", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ calendar_event_id: event.id, tag_ids: [tagId] }),
+        }).catch(console.error);
+        // Also tag any already-scheduled voice agent bot
+        const vaBotId = event.bots.find(
+            (b) => b.deduplication_key.startsWith("va-") && new Date(b.start_time) > new Date(),
+        )?.bot_id;
+        if (vaBotId) {
+            fetch(`/api/meetings/${vaBotId}/tags`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ tag_ids: [tagId] }),
+            }).catch(console.error);
+        }
     };
 
     const handleExportTranscript = async (botId: string) => {
@@ -668,38 +737,31 @@ function CalendarEventCard({
         }
     };
 
-    // Dedup key prefix'ine bakarak bot tipini tespit et
-    const hasRecordingBot = event.bots.some(
-        (bot) => bot.deduplication_key.startsWith("rec-") && new Date(bot.start_time) > new Date(),
-    );
-    const hasVoiceAgentBot = event.bots.some(
-        (bot) => bot.deduplication_key.startsWith("va-") && new Date(bot.start_time) > new Date(),
-    );
-
-    // Geriye uyumluluk: eski format prefix'siz dedup key'ler recording sayılır
-    const hasLegacyBot = event.bots.some(
-        (bot) =>
-            !bot.deduplication_key.startsWith("rec-") &&
-            !bot.deduplication_key.startsWith("va-") &&
-            new Date(bot.start_time) > new Date(),
-    );
-    const isRecordingScheduled = hasRecordingBot || hasLegacyBot;
-
     const handleRecordingToggle = () => {
         if (isRecordingPending) return;
-        if (isRecordingScheduled) {
-            unscheduleRecording();
+        if (recordingActive) {
+            setRecordingActive(false);
+            unscheduleRecording(undefined, { onError: () => setRecordingActive(true) });
         } else {
-            scheduleRecording();
+            setRecordingActive(true);
+            scheduleRecording(
+                { tag_ids: selectedTagId ? [selectedTagId] : [] },
+                { onError: () => setRecordingActive(false) },
+            );
         }
     };
 
     const handleVoiceAgentToggle = () => {
         if (isVoiceAgentPending) return;
-        if (hasVoiceAgentBot) {
-            unscheduleVoiceAgent();
+        if (voiceAgentActive) {
+            setVoiceAgentActive(false);
+            unscheduleVoiceAgent(undefined, { onError: () => setVoiceAgentActive(true) });
         } else {
-            scheduleVoiceAgent();
+            setVoiceAgentActive(true);
+            scheduleVoiceAgent(
+                { tag_ids: selectedTagId ? [selectedTagId] : [] },
+                { onError: () => setVoiceAgentActive(false) },
+            );
         }
     };
 
@@ -750,8 +812,8 @@ function CalendarEventCard({
                 {/* Toggle'lar — sağ üst köşe */}
                 {canToggle ? (
                     <div className="flex flex-col gap-1.5 shrink-0 items-end">
-                        {renderToggle("Transcriptor", isRecordingScheduled, isRecordingPending, handleRecordingToggle, "bg-red-500")}
-                        {renderToggle("Voice Agent", hasVoiceAgentBot, isVoiceAgentPending, handleVoiceAgentToggle, "bg-purple-500")}
+                        {renderToggle("Transcriptor", recordingActive, isRecordingPending, handleRecordingToggle, "bg-red-500")}
+                        {renderToggle("Voice Agent", voiceAgentActive, isVoiceAgentPending, handleVoiceAgentToggle, "bg-purple-500")}
                     </div>
                 ) : !hasMeetingUrl ? (
                     <span className="shrink-0 text-xs text-gray-400">
@@ -799,17 +861,34 @@ function CalendarEventCard({
                         )}
                     </div>
                 )}
+                {canToggle && tags.length > 0 && (
+                    <div className="flex items-center gap-1.5">
+                        <span className="text-gray-500">Category:</span>
+                        <select
+                            value={selectedTagId}
+                            onChange={(e) => handleTagChange(e.target.value)}
+                            className="text-xs border rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[160px]"
+                        >
+                            <option value="">All docs</option>
+                            {tags.map((tag) => (
+                                <option key={tag.id} value={tag.id}>
+                                    {tag.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                )}
             </div>
 
             {/* Bot status badges + View Notes */}
             {event.bots.length > 0 && (
                 <div className="mt-1 flex items-center gap-2 flex-wrap">
-                    {(isRecordingScheduled) && (
+                    {recordingActive && (
                         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700">
                             <Video className="size-3" /> Recording
                         </span>
                     )}
-                    {hasVoiceAgentBot && (
+                    {voiceAgentActive && (
                         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700">
                             <Mic className="size-3" /> Voice Agent
                         </span>
