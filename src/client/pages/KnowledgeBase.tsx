@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import {
-    Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye, Star, Tag, X,
+    Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye, Star, Tag, X, Mic,
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import {
@@ -57,6 +57,17 @@ interface KBDocument {
     created_at: string;
     category: string;
     tags: DocTag[];
+}
+
+interface TranscriptDocument {
+    id: string;
+    title: string;
+    source_type: string;
+    is_active: boolean;
+    created_at: string;
+    category: string;
+    tags: DocTag[];
+    metadata: Record<string, unknown>;
 }
 
 interface KBDocumentFull {
@@ -239,10 +250,26 @@ function KnowledgeBase() {
         },
     });
 
+    const { data: transcriptsData, isPending: isTranscriptsPending } = useQuery<{ documents: TranscriptDocument[] }>({
+        queryKey: ["kb_transcripts"],
+        queryFn: async () => {
+            const token = await getToken();
+            const res = await fetch("/api/kb/transcripts", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        },
+    });
+
     const { data: tagsData } = useQuery<{ tags: KBTag[] }>({
         queryKey: ["kb_tags"],
+        staleTime: 0,
         queryFn: async () => {
-            const res = await fetch("/api/kb/tags");
+            const token = await getToken();
+            const res = await fetch("/api/kb/tags", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
             if (!res.ok) throw new Error(await res.text());
             return res.json();
         },
@@ -268,6 +295,7 @@ function KnowledgeBase() {
     });
 
     const documents = data?.documents ?? [];
+    const transcriptDocuments = transcriptsData?.documents ?? [];
     const allTags = tagsData?.tags ?? [];
     const activeKbId = botSettings?.active_kb_id ?? null;
 
@@ -279,11 +307,19 @@ function KnowledgeBase() {
     }));
     const untaggedDocs = documents.filter((d) => d.tags.length === 0);
 
+    // ── Group transcripts by tags (same tag taxonomy, separate section) ──
+    const transcriptTaggedSections = allTags.map((tag) => ({
+        tag,
+        docs: transcriptDocuments.filter((d) => d.tags.some((t) => t.id === tag.id)),
+    })).filter(({ docs }) => docs.length > 0);
+    const untaggedTranscripts = transcriptDocuments.filter((d) => d.tags.length === 0);
+
     // ── Mutations ─────────────────────────────────────────────────────
 
     const invalidateBoth = () => {
         void queryClient.invalidateQueries({ queryKey: ["kb_documents"] });
         void queryClient.invalidateQueries({ queryKey: ["kb_tags"] });
+        void queryClient.invalidateQueries({ queryKey: ["kb_transcripts"] });
     };
 
     const createMutation = useMutation({
@@ -345,7 +381,10 @@ function KnowledgeBase() {
             });
             if (!res.ok) throw new Error(await res.text());
         },
-        onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["kb_documents"] }),
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: ["kb_documents"] });
+            void queryClient.invalidateQueries({ queryKey: ["kb_transcripts"] });
+        },
         onError: (err: Error) => toast.error(err.message),
     });
 
@@ -475,7 +514,7 @@ function KnowledgeBase() {
         setEditContent("");
     };
 
-    // ── Doc row ───────────────────────────────────────────────────────
+    // ── Doc row (Section 1 — manual documents only) ───────────────────
     const DocRow = ({ doc }: { doc: KBDocument }) => (
         <div
             key={doc.id}
@@ -531,6 +570,71 @@ function KnowledgeBase() {
                 {activeKbId === doc.id && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full bg-yellow-50 text-yellow-700 font-medium">Default</span>
                 )}
+                <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    title={doc.is_active ? "Deactivate" : "Activate"}
+                    onClick={(e) => { e.stopPropagation(); toggleMutation.mutate({ id: doc.id, is_active: !doc.is_active }); }}
+                >
+                    <Power className={`size-4 ${doc.is_active ? "text-green-600" : "text-gray-400"}`} />
+                </Button>
+                <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    title="Delete"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm(`"${doc.title}" will be deleted. Are you sure?`)) deleteMutation.mutate(doc.id);
+                    }}
+                    className="text-red-500 hover:text-red-700"
+                >
+                    <Trash2 className="size-4" />
+                </Button>
+            </div>
+        </div>
+    );
+
+    // ── Transcript row (Section 2 — read-only, no rename) ─────────────
+    const TranscriptRow = ({ doc }: { doc: TranscriptDocument }) => (
+        <div
+            key={doc.id}
+            className={`flex items-start justify-between py-3 ${!doc.is_active ? "opacity-50" : ""}`}
+        >
+            <button
+                type="button"
+                onClick={() => handleOpenDocument(doc.id)}
+                className="flex flex-col gap-1 min-w-0 flex-1 text-left hover:bg-gray-50 -mx-2 px-2 py-1 rounded-md transition-colors cursor-pointer"
+            >
+                <span className="text-sm font-medium text-gray-800 truncate">{doc.title}</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 flex items-center gap-0.5">
+                        <Mic className="size-3" /> Meeting Transcript
+                    </span>
+                    <span className="text-xs text-gray-400">
+                        {new Date((doc.metadata?.meetingDate as string | undefined) ?? doc.created_at).toLocaleDateString()}
+                    </span>
+                    <span className="text-xs text-blue-500 flex items-center gap-0.5">
+                        <Eye className="size-3" /> View
+                    </span>
+                </div>
+                {/* Tag pills — assign to a category from the shared tag set */}
+                <div className="flex items-center gap-1.5 flex-wrap mt-0.5" onClick={(e) => e.stopPropagation()}>
+                    {doc.tags.map((tag) => (
+                        <TagPill
+                            key={tag.id}
+                            tag={tag}
+                            onRemove={() => removeDocTagMutation.mutate({ docId: doc.id, tagId: tag.id })}
+                        />
+                    ))}
+                    <AddTagDropdown
+                        docId={doc.id}
+                        allTags={allTags}
+                        docTagIds={doc.tags.map((t) => t.id)}
+                        onAdd={(tagId) => addDocTagMutation.mutate({ docId: doc.id, tagId })}
+                    />
+                </div>
+            </button>
+            <div className="flex items-center gap-1 shrink-0 ml-2 mt-1">
                 <Button
                     variant="ghost"
                     size="icon-sm"
@@ -760,6 +864,73 @@ function KnowledgeBase() {
                 </>
             )}
 
+            {/* ── Section 2: Meeting Transcripts ──────────────────────────── */}
+            <div className="mt-4">
+                <div className="flex items-center gap-2 mb-3">
+                    <Mic className="size-4 text-purple-500" />
+                    <h2 className="text-base font-semibold text-gray-700">Meeting Transcripts</h2>
+                    {!isTranscriptsPending && (
+                        <span className="text-xs text-gray-400">({transcriptDocuments.length})</span>
+                    )}
+                </div>
+                {isTranscriptsPending ? (
+                    <Card>
+                        <CardContent className="flex items-center justify-center py-8">
+                            <Loader2 className="size-6 text-blue-500 animate-spin" />
+                        </CardContent>
+                    </Card>
+                ) : transcriptDocuments.length === 0 ? (
+                    <Card>
+                        <CardContent className="flex flex-col items-center justify-center py-8">
+                            <Mic className="size-8 text-gray-300 mb-2" />
+                            <p className="text-sm text-gray-500">No meeting transcripts yet</p>
+                            <p className="text-xs text-gray-400 mt-1">Transcripts from your meetings will appear here once ingested</p>
+                        </CardContent>
+                    </Card>
+                ) : (
+                    <>
+                        {transcriptTaggedSections.map(({ tag, docs }) => (
+                            <Card key={tag.id} className="mb-4">
+                                <CardHeader className="pb-2">
+                                    <div className="flex items-center gap-2">
+                                        <span
+                                            className="size-3 rounded-full shrink-0"
+                                            style={{ backgroundColor: tag.color ?? "#6b7280" }}
+                                        />
+                                        <CardTitle className="text-sm font-semibold">{tag.name}</CardTitle>
+                                        <span className="text-xs text-gray-400">({docs.length})</span>
+                                    </div>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="divide-y">
+                                        {docs.map((doc) => <TranscriptRow key={doc.id} doc={doc} />)}
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        ))}
+                        {untaggedTranscripts.length > 0 && (
+                            <Card>
+                                <CardHeader className="pb-2">
+                                    <div className="flex items-center gap-2">
+                                        <Mic className="size-4 text-gray-400" />
+                                        <CardTitle className="text-sm font-semibold text-gray-500">Uncategorized Transcripts</CardTitle>
+                                        <span className="text-xs text-gray-400">({untaggedTranscripts.length})</span>
+                                    </div>
+                                    <CardDescription className="text-xs">
+                                        Use the + tag button to assign these to a category so the voice agent can filter them.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="divide-y">
+                                        {untaggedTranscripts.map((doc) => <TranscriptRow key={doc.id} doc={doc} />)}
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
+                    </>
+                )}
+            </div>
+
             {/* ── New Category Dialog ───────────────────────────────────────── */}
             <Dialog open={showNewTagDialog} onOpenChange={(open) => { if (!open) { setShowNewTagDialog(false); setNewTagName(""); setNewTagColor("#3b82f6"); } }}>
                 <DialogContent className="sm:max-w-sm">
@@ -911,13 +1082,23 @@ function KnowledgeBase() {
                         <>
                             <DialogHeader>
                                 <DialogTitle className="flex items-center gap-2">
-                                    <BookOpen className="size-4" />
+                                    {fullDoc.source_type === "transcript" ? (
+                                        <Mic className="size-4 text-purple-500" />
+                                    ) : (
+                                        <BookOpen className="size-4" />
+                                    )}
                                     {fullDoc.title}
                                 </DialogTitle>
                                 <DialogDescription className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
-                                        {CATEGORIES.find((c) => c.value === fullDoc.category)?.label ?? fullDoc.category}
-                                    </span>
+                                    {fullDoc.source_type === "transcript" ? (
+                                        <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 flex items-center gap-0.5">
+                                            <Mic className="size-3" /> Meeting Transcript
+                                        </span>
+                                    ) : (
+                                        <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
+                                            {CATEGORIES.find((c) => c.value === fullDoc.category)?.label ?? fullDoc.category}
+                                        </span>
+                                    )}
                                     <span className="text-xs text-gray-400">
                                         {new Date(fullDoc.created_at).toLocaleDateString()}
                                     </span>
@@ -935,10 +1116,12 @@ function KnowledgeBase() {
                                 <Button type="button" variant="outline" size="sm" onClick={handleCloseDialog}>
                                     Close
                                 </Button>
-                                <Button type="button" size="sm" onClick={handleStartEditing} className="flex items-center gap-2">
-                                    <Pencil className="size-4" />
-                                    Edit
-                                </Button>
+                                {fullDoc.source_type !== "transcript" && (
+                                    <Button type="button" size="sm" onClick={handleStartEditing} className="flex items-center gap-2">
+                                        <Pencil className="size-4" />
+                                        Edit
+                                    </Button>
+                                )}
                             </DialogFooter>
                         </>
                     )}

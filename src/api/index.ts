@@ -8,7 +8,7 @@ import { calendars_delete } from "./handlers/calendars_delete";
 import { calendars_list } from "./handlers/calendars_list";
 import { calendar_event_retrieve, calendar_retrieve, recall_webhook, schedule_bot_for_calendar_event, unschedule_bot_for_calendar_event, kb_retry_ingestion } from "./handlers/recall_webhook";
 
-import { kb_list, kb_create, kb_delete, kb_toggle, kb_get, kb_update, tag_list, tag_create, tag_update, tag_delete, doc_tag_add, doc_tag_remove, meeting_tags_get, meeting_tags_set, meeting_allowed_tags } from "./handlers/knowledge_base";
+import { kb_list, kb_list_transcripts, kb_create, kb_delete, kb_toggle, kb_get, kb_update, tag_list, tag_create, tag_update, tag_delete, doc_tag_add, doc_tag_remove, meeting_tags_get, meeting_tags_set, meeting_allowed_tags } from "./handlers/knowledge_base";
 
 import { handleTranscriptWebhook, handleGetTranscript } from "./handlers/transcript_webhook";
 import { handleNotesList, handleNoteDetail, handleMeetingTitleUpdate } from "./handlers/notes";
@@ -200,7 +200,9 @@ body=${JSON.stringify(body)}
             case "/api/kb/tags": {
                 switch (req.method?.toUpperCase()) {
                     case "GET": {
-                        const result = await tag_list();
+                        if (!await requireAuth(req, res)) return;
+                        const userEmail: string = (req as any).userEmail;
+                        const result = await tag_list(userEmail);
                         res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
                         res.end(JSON.stringify(result));
                         return;
@@ -389,6 +391,37 @@ body=${JSON.stringify(body)}
             /** Default endpoints */
             default: {
 
+                // ── GET /api/relay/allowed-tags?token=... — resolve meetingToken → tag IDs ──
+                if (pathname === "/api/relay/allowed-tags" && req.method?.toUpperCase() === "GET") {
+                    const apiKey = req.headers["x-api-key"];
+                    const expectedKey = process.env.BACKEND_API_KEY;
+                    if (!expectedKey || apiKey !== expectedKey) {
+                        res.writeHead(401, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: "Unauthorized" }));
+                        return;
+                    }
+                    const token = search_params.token as string | undefined;
+                    if (!token) {
+                        res.writeHead(400, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: "token is required" }));
+                        return;
+                    }
+                    const { data: meeting } = await supabase
+                        .from("meetings")
+                        .select("bot_id")
+                        .eq("meeting_token", token)
+                        .single();
+                    if (!meeting?.bot_id) {
+                        res.writeHead(200, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ tag_ids: null }));
+                        return;
+                    }
+                    const result = await meeting_allowed_tags({ botId: meeting.bot_id });
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
                 // ── /api/meetings/:botId/allowed-tags — relay API key auth ──────
                 if (pathname.match(/^\/api\/meetings\/[^/]+\/allowed-tags$/)) {
                     const apiKey = req.headers["x-api-key"];
@@ -410,15 +443,16 @@ body=${JSON.stringify(body)}
                 if (pathname.match(/^\/api\/meetings\/[^/]+\/tags$/)) {
                     const botId = pathname.split("/")[3]!;
                     if (!await requireAuth(req, res)) return;
+                    const userEmail: string = (req as any).userEmail;
                     if (req.method?.toUpperCase() === "GET") {
-                        const result = await meeting_tags_get({ botId });
+                        const result = await meeting_tags_get({ botId, userEmail });
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify(result));
                         return;
                     }
                     if (req.method?.toUpperCase() === "PUT") {
                         if (!Array.isArray(body?.tag_ids)) throw new Error("tag_ids array is required");
-                        const result = await meeting_tags_set({ botId, tag_ids: body.tag_ids });
+                        const result = await meeting_tags_set({ botId, tag_ids: body.tag_ids, userEmail });
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify(result));
                         return;
@@ -443,14 +477,16 @@ body=${JSON.stringify(body)}
                     switch (req.method?.toUpperCase()) {
                         case "PATCH": {
                             if (!await requireAuth(req, res)) return;
-                            const tag = await tag_update(tagId, body ?? {});
+                            const userEmail: string = (req as any).userEmail;
+                            const tag = await tag_update(tagId, body ?? {}, userEmail);
                             res.writeHead(200, { "Content-Type": "application/json" });
                             res.end(JSON.stringify(tag));
                             return;
                         }
                         case "DELETE": {
                             if (!await requireAuth(req, res)) return;
-                            await tag_delete(tagId);
+                            const userEmail: string = (req as any).userEmail;
+                            await tag_delete(tagId, userEmail);
                             res.writeHead(200, { "Content-Type": "application/json" });
                             res.end(JSON.stringify({ message: "Tag deleted" }));
                             return;
@@ -483,6 +519,16 @@ body=${JSON.stringify(body)}
                     await doc_tag_add(docId, body.tag_id);
                     res.writeHead(200, { "Content-Type": "application/json" });
                     res.end(JSON.stringify({ message: "Tag added" }));
+                    return;
+                }
+
+                // ── GET /api/kb/transcripts — user-scoped transcript list ─────
+                if (pathname === "/api/kb/transcripts" && req.method?.toUpperCase() === "GET") {
+                    if (!await requireAuth(req, res)) return;
+                    const userEmail: string = (req as any).userEmail;
+                    const result = await kb_list_transcripts(userEmail);
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
                     return;
                 }
 
