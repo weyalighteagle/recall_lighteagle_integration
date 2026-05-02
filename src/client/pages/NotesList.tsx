@@ -59,7 +59,10 @@ function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
     const { data: allTagsData } = useQuery<{ tags: Tag[] }>({
         queryKey: ["kb_tags"],
         queryFn: async () => {
-            const res = await fetch("/api/kb/tags");
+            const token = await getToken();
+            const res = await fetch("/api/kb/tags", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
             if (!res.ok) throw new Error(await res.text());
             return res.json();
         },
