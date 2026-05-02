@@ -439,13 +439,12 @@ export async function kb_update(args: {
 
 // ─── Tag Handlers ────────────────────────────────────────────
 
-/** GET /api/kb/tags — list all tags for the org */
-export async function tag_list(): Promise<{ tags: KbTag[] }> {
-    const orgId = LIGHT_EAGLE_ORG_ID;
+/** GET /api/kb/tags — list tags created by the requesting user */
+export async function tag_list(userEmail: string): Promise<{ tags: KbTag[] }> {
     const { data, error } = await supabase
         .from("kb_tags")
         .select("id, name, slug, color, created_by, created_at")
-        .eq("org_id", orgId)
+        .eq("created_by", userEmail)
         .order("created_at", { ascending: true });
 
     if (error) throw new Error(error.message);
@@ -488,10 +487,11 @@ export async function tag_create(
     return data as KbTag;
 }
 
-/** PATCH /api/kb/tags/:id — rename or recolor a tag */
+/** PATCH /api/kb/tags/:id — rename or recolor a tag (owner only) */
 export async function tag_update(
     id: string,
     body: { name?: string; color?: string },
+    userEmail: string,
 ): Promise<KbTag> {
     const validId = z.string().uuid().parse(id);
     const { name, color } = z.object({
@@ -512,6 +512,7 @@ export async function tag_update(
         .from("kb_tags")
         .update(updates)
         .eq("id", validId)
+        .eq("created_by", userEmail)
         .select("id, name, slug, color, created_by, created_at")
         .single();
 
@@ -520,12 +521,14 @@ export async function tag_update(
         throw new Error(error.message);
     }
 
+    if (!data) throw new Error("Tag not found or you do not have permission to update it");
+
     console.log(`[kb] Updated tag ${validId}`);
     return data as KbTag;
 }
 
-/** DELETE /api/kb/tags/:id — delete tag (cascade removes kb_document_tags rows via FK) */
-export async function tag_delete(id: string): Promise<void> {
+/** DELETE /api/kb/tags/:id — delete tag (owner only; cascade removes kb_document_tags rows via FK) */
+export async function tag_delete(id: string, userEmail: string): Promise<void> {
     const validId = z.string().uuid().parse(id);
 
     // Collect affected document IDs before deletion so we can sync their chunk tag_ids
@@ -535,10 +538,15 @@ export async function tag_delete(id: string): Promise<void> {
         .eq("tag_id", validId);
     const affectedDocIds = (links ?? []).map((l: { document_id: string }) => l.document_id);
 
-    const { error } = await supabase.from("kb_tags").delete().eq("id", validId);
+    const { error, count } = await supabase
+        .from("kb_tags")
+        .delete({ count: "exact" })
+        .eq("id", validId)
+        .eq("created_by", userEmail);
     if (error) throw new Error(error.message);
+    if (count === 0) throw new Error("Tag not found or you do not have permission to delete it");
 
-    // Sync chunk tag_ids for all affected documents (FK cascade already removed the db_document_tags rows)
+    // Sync chunk tag_ids for all affected documents (FK cascade already removed the kb_document_tags rows)
     for (const docId of affectedDocIds) {
         await syncChunkTagIds(docId);
     }

@@ -200,7 +200,9 @@ body=${JSON.stringify(body)}
             case "/api/kb/tags": {
                 switch (req.method?.toUpperCase()) {
                     case "GET": {
-                        const result = await tag_list();
+                        if (!await requireAuth(req, res)) return;
+                        const userEmail: string = (req as any).userEmail;
+                        const result = await tag_list(userEmail);
                         res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
                         res.end(JSON.stringify(result));
                         return;
@@ -450,14 +452,16 @@ body=${JSON.stringify(body)}
                     switch (req.method?.toUpperCase()) {
                         case "PATCH": {
                             if (!await requireAuth(req, res)) return;
-                            const tag = await tag_update(tagId, body ?? {});
+                            const userEmail: string = (req as any).userEmail;
+                            const tag = await tag_update(tagId, body ?? {}, userEmail);
                             res.writeHead(200, { "Content-Type": "application/json" });
                             res.end(JSON.stringify(tag));
                             return;
                         }
                         case "DELETE": {
                             if (!await requireAuth(req, res)) return;
-                            await tag_delete(tagId);
+                            const userEmail: string = (req as any).userEmail;
+                            await tag_delete(tagId, userEmail);
                             res.writeHead(200, { "Content-Type": "application/json" });
                             res.end(JSON.stringify({ message: "Tag deleted" }));
                             return;
