@@ -209,6 +209,13 @@ async function handleBotDone(body: any): Promise<void> {
     .single();
   const meetingDbId = meetingRow?.id as string | undefined;
 
+  const { data: meetingTagRows } = await supabase
+    .from("meeting_tags")
+    .select("tag_id, kb_tags(slug)")
+    .eq("meeting_id", meetingDbId ?? "");
+  const kbTagIds = meetingTagRows?.map((r: any) => r.tag_id) ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const kbMeetingType = (meetingTagRows?.[0] as any)?.kb_tags?.slug ?? "toplanti"; // eslint-disable-line @typescript-eslint/no-explicit-any
+
   if (meetingRow?.done === true) {
     console.log(`[handleBotDone] meeting already marked done for bot_id=${botId}, skipping`);
     return;
@@ -327,29 +334,6 @@ async function handleBotDone(body: any): Promise<void> {
       `[handleBotDone] Could not fetch bot details from Recall for bot ${botId}. Skipping transcription. This needs manual review.`,
     );
     return;
-  }
-
-  // Fix 2: If this bot was scheduled via the calendar UI with a tag, write it to meeting_tags now
-  // so that the KB ingest (here for recording bots, in transcript_webhook for voice_agent) can use it.
-  const calEventId: string | undefined = botData?.calendar_meetings?.[0]?.calendar_event?.id;
-  if (calEventId && meetingDbId) {
-    try {
-      const { data: calTags } = await supabase
-        .from("calendar_event_tags")
-        .select("tag_ids")
-        .eq("calendar_event_id", calEventId)
-        .maybeSingle();
-      if (calTags?.tag_ids?.length) {
-        await supabase.from("meeting_tags").upsert(
-          (calTags.tag_ids as string[]).map((tid) => ({ meeting_id: meetingDbId, tag_id: tid }))
-        );
-        console.log(
-          `[handleBotDone] wrote ${calTags.tag_ids.length} tag(s) to meeting_tags for meeting_id=${meetingDbId}`,
-        );
-      }
-    } catch (err) {
-      console.error(`[handleBotDone] calendar_event_tags lookup failed (non-fatal):`, err);
-    }
   }
 
   if (inferredBotType === "voice_agent") {
@@ -668,24 +652,9 @@ async function handleBotDone(body: any): Promise<void> {
         console.error(`[handleBotDone] Failed to get calendar title for KB ingest:`, metaErr);
       }
 
-      const meetingType = normalizeMeetingType(calendarTitle);
       const docTitle = participants.length > 0
         ? `${calendarTitle} — ${dateStr} — ${participants.join(", ")}`
         : `${calendarTitle} — ${dateStr}`;
-
-      // Fix 1: look up meeting_tags to get tagIds and meetingTypeSlug for KB ingest
-      let kbTagIds: string[] = [];
-      let kbMeetingType = meetingType;
-      if (meetingDbId) {
-        const { data: meetingTagRows } = await supabase
-          .from("meeting_tags")
-          .select("tag_id, kb_tags(slug)")
-          .eq("meeting_id", meetingDbId);
-        if (meetingTagRows?.length) {
-          kbTagIds = meetingTagRows.map((r: any) => r.tag_id); // eslint-disable-line @typescript-eslint/no-explicit-any
-          kbMeetingType = (meetingTagRows[0] as any)?.kb_tags?.slug ?? "toplanti"; // eslint-disable-line @typescript-eslint/no-explicit-any
-        }
-      }
 
       const result = await ingestTranscriptToKB({
         botId,
@@ -1179,6 +1148,7 @@ export async function schedule_bot_for_calendar_event(args: {
               attendee_emails: attendeeEmails,
               meeting_start_time: calendar_event.start_time ?? null,
               meeting_title: calendar_event.raw?.summary ?? calendar_event.raw?.subject ?? null,
+              calendar_event_id: calendar_event.id,
             },
             { onConflict: "bot_id", ignoreDuplicates: true },
           );

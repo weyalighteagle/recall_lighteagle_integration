@@ -1,6 +1,6 @@
 import { supabase } from "../config/supabase";
 import { buildBotMetadataMap } from "./notes";
-import { normalizeMeetingType, upsertIngestionLog, ingestTranscriptToKB } from "./kb_ingest";
+import { upsertIngestionLog, ingestTranscriptToKB } from "./kb_ingest";
 
 /**
  * Handle POST /api/webhooks/transcript
@@ -341,29 +341,19 @@ export async function handleTranscriptWebhook(
                       console.error(`[transcript.done/assemblyai] Failed to get calendar title:`, metaErr);
                     }
 
-                    const meetingType = normalizeMeetingType(calendarTitle);
                     const docTitle = participants.length > 0
                       ? `${calendarTitle} — ${dateStr} — ${participants.join(", ")}`
                       : `${calendarTitle} — ${dateStr}`;
 
-                    // Fix 1: look up meeting_tags (written by handleBotDone earlier) for tagIds + slug
-                    let kbTagIds: string[] = [];
-                    let kbMeetingType = meetingType;
-                    try {
-                      const { data: meetingIdRow } = await supabase
-                        .from("meetings").select("id").eq("bot_id", botId).single();
-                      const meetingDbId = meetingIdRow?.id;
-                      if (meetingDbId) {
-                        const { data: meetingTagRows } = await supabase
-                          .from("meeting_tags")
-                          .select("tag_id, kb_tags(slug)")
-                          .eq("meeting_id", meetingDbId);
-                        if (meetingTagRows?.length) {
-                          kbTagIds = meetingTagRows.map((r: any) => r.tag_id); // eslint-disable-line @typescript-eslint/no-explicit-any
-                          kbMeetingType = (meetingTagRows[0] as any)?.kb_tags?.slug ?? "toplanti"; // eslint-disable-line @typescript-eslint/no-explicit-any
-                        }
-                      }
-                    } catch {}
+                    const { data: meetingIdRow } = await supabase
+                      .from("meetings").select("id").eq("bot_id", botId).single();
+                    const meetingDbId = meetingIdRow?.id;
+                    const { data: meetingTagRows } = await supabase
+                      .from("meeting_tags")
+                      .select("tag_id, kb_tags(slug)")
+                      .eq("meeting_id", meetingDbId ?? "");
+                    const kbTagIds = meetingTagRows?.map((r: any) => r.tag_id) ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
+                    const kbMeetingType = (meetingTagRows?.[0] as any)?.kb_tags?.slug ?? "toplanti"; // eslint-disable-line @typescript-eslint/no-explicit-any
 
                     const result = await ingestTranscriptToKB({
                       botId,
