@@ -126,6 +126,7 @@ interface KbTag {
 
 function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     const { user } = useUser();
+    const { getToken } = useAuth();
     const [showConnectDialog, setShowConnectDialog] = useState(false);
 
     // ── Category tags — used by the per-meeting category selector on event cards ──
@@ -135,14 +136,18 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     useEffect(() => {
         Promise.all([
             fetch("/api/bot-settings").then((r) => r.json()) as Promise<{ auto_join_enabled?: boolean }>,
-            fetch("/api/kb/tags").then((r) => r.json()) as Promise<{ tags: KbTag[] }>,
+            getToken().then((token) =>
+                fetch("/api/kb/tags", {
+                    headers: { Authorization: `Bearer ${token}` },
+                }).then((r) => r.json())
+            ) as Promise<{ tags: KbTag[] }>,
         ])
             .then(([settings, tagData]) => {
                 setAutoJoinEnabled(settings.auto_join_enabled ?? true);
                 setTags(tagData.tags ?? []);
             })
             .catch(console.error);
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const handleAutoJoinToggle = (enabled: boolean) => {
         setAutoJoinEnabled(enabled);
@@ -653,38 +658,26 @@ function CalendarEventCard({
     );
     const isRecordingScheduled = hasRecordingBot || hasLegacyBot;
 
-    // Optimistic toggle state — flipped immediately on click, synced after server refetch
     const [recordingActive, setRecordingActive] = useState(isRecordingScheduled);
     const [voiceAgentActive, setVoiceAgentActive] = useState(hasVoiceAgentBot);
 
-    useEffect(() => {
-        if (!isRecordingPending) setRecordingActive(isRecordingScheduled);
-    }, [isRecordingScheduled]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    useEffect(() => {
-        if (!isVoiceAgentPending) setVoiceAgentActive(hasVoiceAgentBot);
-    }, [hasVoiceAgentBot]); // eslint-disable-line react-hooks/exhaustive-deps
+    useEffect(() => { setRecordingActive(isRecordingScheduled); }, [isRecordingScheduled]);
+    useEffect(() => { setVoiceAgentActive(hasVoiceAgentBot); }, [hasVoiceAgentBot]);
 
     const handleTagChange = async (tagId: string) => {
         setSelectedTagId(tagId);
         pendingTagRef.current = tagId;
         if (!tagId) return;
-        const token = await getToken();
-        fetch("/api/calendar/events/tag", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ calendar_event_id: event.id, tag_ids: [tagId] }),
-        }).catch(console.error);
         const vaBotId = event.bots.find(
             (b) => b.deduplication_key.startsWith("va-") && new Date(b.start_time) > new Date(),
         )?.bot_id;
-        if (vaBotId) {
-            fetch(`/api/meetings/${vaBotId}/tags`, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ tag_ids: [tagId] }),
-            }).catch(console.error);
-        }
+        if (!vaBotId) return;
+        const token = await getToken();
+        fetch(`/api/meetings/${vaBotId}/tags`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ tag_ids: [tagId] }),
+        }).catch(console.error);
     };
 
     useEffect(() => {
@@ -712,13 +705,12 @@ function CalendarEventCard({
         if (isRecordingPending) return;
         if (recordingActive) {
             setRecordingActive(false);
-            unscheduleRecording(undefined, { onError: () => setRecordingActive(true) });
+            unscheduleRecording(undefined, { onError: () => setRecordingActive(isRecordingScheduled) });
         } else {
             setRecordingActive(true);
-            scheduleRecording(
-                { tag_ids: selectedTagId ? [selectedTagId] : [] },
-                { onError: () => setRecordingActive(false) },
-            );
+            setVoiceAgentActive(false);
+            if (hasVoiceAgentBot) unscheduleVoiceAgent();
+            scheduleRecording(undefined, { onError: () => setRecordingActive(isRecordingScheduled) });
         }
     };
 
@@ -726,13 +718,12 @@ function CalendarEventCard({
         if (isVoiceAgentPending) return;
         if (voiceAgentActive) {
             setVoiceAgentActive(false);
-            unscheduleVoiceAgent(undefined, { onError: () => setVoiceAgentActive(true) });
+            unscheduleVoiceAgent(undefined, { onError: () => setVoiceAgentActive(hasVoiceAgentBot) });
         } else {
             setVoiceAgentActive(true);
-            scheduleVoiceAgent(
-                { tag_ids: selectedTagId ? [selectedTagId] : [] },
-                { onError: () => setVoiceAgentActive(false) },
-            );
+            setRecordingActive(false);
+            if (isRecordingScheduled) unscheduleRecording();
+            scheduleVoiceAgent(undefined, { onError: () => setVoiceAgentActive(hasVoiceAgentBot) });
         }
     };
 

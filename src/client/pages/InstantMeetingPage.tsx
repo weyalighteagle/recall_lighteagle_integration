@@ -30,7 +30,11 @@ export default function InstantMeetingPage() {
   useEffect(() => {
     Promise.all([
       fetch("/api/bot-settings").then((r) => r.json()) as Promise<{ bot_mode: BotMode }>,
-      fetch("/api/kb/tags").then((r) => r.json()) as Promise<{ tags: KbTag[] }>,
+      getToken().then((token) =>
+        fetch("/api/kb/tags", {
+          headers: { Authorization: `Bearer ${token}` },
+        }).then((r) => r.json())
+      ) as Promise<{ tags: KbTag[] }>,
     ])
       .then(([settings, tagData]) => {
         setBotMode(settings.bot_mode);
