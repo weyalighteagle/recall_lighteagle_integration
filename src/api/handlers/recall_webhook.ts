@@ -204,7 +204,7 @@ async function handleBotDone(body: any): Promise<void> {
 
   const { data: meetingRow } = await supabase
     .from('meetings')
-    .select('id, done, bot_type')
+    .select('id, done, bot_type, calendar_event_id')
     .eq('bot_id', botId)
     .single();
   const meetingDbId = meetingRow?.id as string | undefined;
@@ -213,8 +213,33 @@ async function handleBotDone(body: any): Promise<void> {
     .from("meeting_tags")
     .select("tag_id, kb_tags(slug)")
     .eq("meeting_id", meetingDbId ?? "");
-  const kbTagIds = meetingTagRows?.map((r: any) => r.tag_id) ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
-  const kbMeetingType = (meetingTagRows?.[0] as any)?.kb_tags?.slug ?? "toplanti"; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let kbTagIds = meetingTagRows?.map((r: any) => r.tag_id) ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
+  let kbMeetingType = (meetingTagRows?.[0] as any)?.kb_tags?.slug ?? "toplanti"; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+  if (kbTagIds.length === 0 && meetingRow?.calendar_event_id) {
+    const { data: calEventTagRow } = await supabase
+      .from("calendar_event_tags")
+      .select("tag_ids")
+      .eq("calendar_event_id", meetingRow.calendar_event_id)
+      .single();
+    if (calEventTagRow?.tag_ids?.length) {
+      if (meetingDbId) {
+        await supabase.from("meeting_tags").upsert(
+          calEventTagRow.tag_ids.map((tid: string) => ({
+            meeting_id: meetingDbId,
+            tag_id: tid,
+          })),
+          { onConflict: "meeting_id,tag_id", ignoreDuplicates: true }
+        );
+      }
+      kbTagIds = calEventTagRow.tag_ids;
+      const { data: tagRows } = await supabase
+        .from("kb_tags")
+        .select("slug")
+        .in("id", kbTagIds);
+      kbMeetingType = (tagRows?.[0] as any)?.slug ?? "toplanti"; // eslint-disable-line @typescript-eslint/no-explicit-any
+    }
+  }
 
   if (meetingRow?.done === true) {
     console.log(`[handleBotDone] meeting already marked done for bot_id=${botId}, skipping`);

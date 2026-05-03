@@ -363,7 +363,31 @@ body=${JSON.stringify(body)}
                     }
                 }
             }
+            case "/api/calendar/events/tag": {
+                if (req.method?.toUpperCase() !== "PUT") break;
+                if (!await requireAuth(req, res)) return;
 
+                const { calendar_event_id: cal_evt_id, tag_ids: cal_tag_ids } = body ?? {};
+                if (!cal_evt_id) {
+                    res.writeHead(400, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "calendar_event_id required" }));
+                    return;
+                }
+
+                const { error: calTagErr } = await supabase
+                    .from("calendar_event_tags")
+                    .upsert({ calendar_event_id: cal_evt_id, tag_ids: cal_tag_ids ?? [] });
+
+                if (calTagErr) {
+                    res.writeHead(500, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: calTagErr.message }));
+                    return;
+                }
+
+                res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+                res.end(JSON.stringify({ ok: true }));
+                return;
+            }
             /** Default endpoints */
             default: {
 
