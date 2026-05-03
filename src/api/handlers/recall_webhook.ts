@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { z } from "zod";
 import {
   CalendarSchema,
@@ -1016,6 +1017,7 @@ export async function schedule_bot_for_calendar_event(args: {
 
   // Bot tipine göre config oluştur
   let bot_config: Record<string, any>;
+  const meetingToken = bot_type === "voice_agent" ? randomUUID() : null;
 
   if (bot_type === "voice_agent") {
     // Voice Agent: Output Media ile web sayfası render eder
@@ -1027,6 +1029,7 @@ export async function schedule_bot_for_calendar_event(args: {
 
     const pageParams = new URLSearchParams({ wss: env.VOICE_AGENT_WSS_URL });
     if (kb_id) pageParams.set("kb", kb_id);
+    if (meetingToken) pageParams.set("meetingToken", meetingToken);
     const output_media_url = `${env.VOICE_AGENT_PAGE_URL}?${pageParams.toString()}`;
 
     bot_config = {
@@ -1172,6 +1175,7 @@ export async function schedule_bot_for_calendar_event(args: {
               meeting_start_time: calendar_event.start_time ?? null,
               meeting_title: calendar_event.raw?.summary ?? calendar_event.raw?.subject ?? null,
               calendar_event_id: calendar_event.id,
+              ...(meetingToken ? { meeting_token: meetingToken } : {}),
             },
             { onConflict: "bot_id", ignoreDuplicates: true },
           );
