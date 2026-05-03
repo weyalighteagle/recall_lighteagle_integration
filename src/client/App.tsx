@@ -126,6 +126,7 @@ interface KbTag {
 
 function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     const { user } = useUser();
+    const { getToken } = useAuth();
     const [showConnectDialog, setShowConnectDialog] = useState(false);
 
     // ── Category tags — used by the per-meeting category selector on event cards ──
@@ -135,14 +136,18 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     useEffect(() => {
         Promise.all([
             fetch("/api/bot-settings").then((r) => r.json()) as Promise<{ auto_join_enabled?: boolean }>,
-            fetch("/api/kb/tags").then((r) => r.json()) as Promise<{ tags: KbTag[] }>,
+            getToken().then((token) =>
+                fetch("/api/kb/tags", {
+                    headers: { Authorization: `Bearer ${token}` },
+                }).then((r) => r.json())
+            ) as Promise<{ tags: KbTag[] }>,
         ])
             .then(([settings, tagData]) => {
                 setAutoJoinEnabled(settings.auto_join_enabled ?? true);
                 setTags(tagData.tags ?? []);
             })
             .catch(console.error);
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const handleAutoJoinToggle = (enabled: boolean) => {
         setAutoJoinEnabled(enabled);
@@ -653,6 +658,12 @@ function CalendarEventCard({
     );
     const isRecordingScheduled = hasRecordingBot || hasLegacyBot;
 
+    const [recordingActive, setRecordingActive] = useState(isRecordingScheduled);
+    const [voiceAgentActive, setVoiceAgentActive] = useState(hasVoiceAgentBot);
+
+    useEffect(() => { setRecordingActive(isRecordingScheduled); }, [isRecordingScheduled]);
+    useEffect(() => { setVoiceAgentActive(hasVoiceAgentBot); }, [hasVoiceAgentBot]);
+
     const handleTagChange = async (tagId: string) => {
         setSelectedTagId(tagId);
         pendingTagRef.current = tagId;
@@ -692,19 +703,27 @@ function CalendarEventCard({
 
     const handleRecordingToggle = () => {
         if (isRecordingPending) return;
-        if (isRecordingScheduled) {
-            unscheduleRecording();
+        if (recordingActive) {
+            setRecordingActive(false);
+            unscheduleRecording(undefined, { onError: () => setRecordingActive(isRecordingScheduled) });
         } else {
-            scheduleRecording();
+            setRecordingActive(true);
+            setVoiceAgentActive(false);
+            if (hasVoiceAgentBot) unscheduleVoiceAgent();
+            scheduleRecording(undefined, { onError: () => setRecordingActive(isRecordingScheduled) });
         }
     };
 
     const handleVoiceAgentToggle = () => {
         if (isVoiceAgentPending) return;
-        if (hasVoiceAgentBot) {
-            unscheduleVoiceAgent();
+        if (voiceAgentActive) {
+            setVoiceAgentActive(false);
+            unscheduleVoiceAgent(undefined, { onError: () => setVoiceAgentActive(hasVoiceAgentBot) });
         } else {
-            scheduleVoiceAgent();
+            setVoiceAgentActive(true);
+            setRecordingActive(false);
+            if (isRecordingScheduled) unscheduleRecording();
+            scheduleVoiceAgent(undefined, { onError: () => setVoiceAgentActive(hasVoiceAgentBot) });
         }
     };
 
@@ -755,8 +774,8 @@ function CalendarEventCard({
                 {/* Toggle'lar — sağ üst köşe */}
                 {canToggle ? (
                     <div className="flex flex-col gap-1.5 shrink-0 items-end">
-                        {renderToggle("Transcriptor", isRecordingScheduled, isRecordingPending, handleRecordingToggle, "bg-red-500")}
-                        {renderToggle("Voice Agent", hasVoiceAgentBot, isVoiceAgentPending, handleVoiceAgentToggle, "bg-purple-500")}
+                        {renderToggle("Transcriptor", recordingActive, isRecordingPending, handleRecordingToggle, "bg-red-500")}
+                        {renderToggle("Voice Agent", voiceAgentActive, isVoiceAgentPending, handleVoiceAgentToggle, "bg-purple-500")}
                     </div>
                 ) : !hasMeetingUrl ? (
                     <span className="shrink-0 text-xs text-gray-400">
@@ -806,12 +825,12 @@ function CalendarEventCard({
             {/* Bot status badges + View Notes */}
             {event.bots.length > 0 && (
                 <div className="mt-1 flex items-center gap-2 flex-wrap">
-                    {(isRecordingScheduled) && (
+                    {recordingActive && (
                         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700">
                             <Video className="size-3" /> Recording
                         </span>
                     )}
-                    {hasVoiceAgentBot && (
+                    {voiceAgentActive && (
                         <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700">
                             <Mic className="size-3" /> Voice Agent
                         </span>
