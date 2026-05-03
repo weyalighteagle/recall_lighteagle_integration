@@ -212,7 +212,7 @@ async function handleBotDone(body: any): Promise<void> {
   const { data: meetingTagRows } = await supabase
     .from("meeting_tags")
     .select("tag_id, kb_tags(slug)")
-    .eq("meeting_id", meetingDbId ?? "");
+    .eq("bot_id", botId);
   let kbTagIds = meetingTagRows?.map((r: any) => r.tag_id) ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
   let kbMeetingType = (meetingTagRows?.[0] as any)?.kb_tags?.slug ?? "toplanti"; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -223,15 +223,13 @@ async function handleBotDone(body: any): Promise<void> {
       .eq("calendar_event_id", meetingRow.calendar_event_id)
       .single();
     if (calEventTagRow?.tag_ids?.length) {
-      if (meetingDbId) {
-        await supabase.from("meeting_tags").upsert(
-          calEventTagRow.tag_ids.map((tid: string) => ({
-            meeting_id: meetingDbId,
-            tag_id: tid,
-          })),
-          { onConflict: "meeting_id,tag_id", ignoreDuplicates: true }
-        );
-      }
+      await supabase.from("meeting_tags").upsert(
+        calEventTagRow.tag_ids.map((tid: string) => ({
+          bot_id: botId,
+          tag_id: tid,
+        })),
+        { onConflict: "bot_id,tag_id", ignoreDuplicates: true }
+      );
       kbTagIds = calEventTagRow.tag_ids;
       const { data: tagRows } = await supabase
         .from("kb_tags")
