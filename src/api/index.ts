@@ -373,18 +373,28 @@ body=${JSON.stringify(body)}
             }
 
             case "/api/calendar/events/tag": {
-                if (req.method?.toUpperCase() !== "PUT") throw new Error(`Method not allowed: ${req.method}`);
+                if (req.method?.toUpperCase() !== "PUT") break;
                 if (!await requireAuth(req, res)) return;
-                if (!body?.calendar_event_id) throw new Error("calendar_event_id is required");
-                if (!Array.isArray(body?.tag_ids)) throw new Error("tag_ids array is required");
 
-                await supabase.from("calendar_event_tags").upsert({
-                    calendar_event_id: body.calendar_event_id,
-                    tag_ids: body.tag_ids,
-                });
+                const { calendar_event_id: cal_evt_id, tag_ids: cal_tag_ids } = body ?? {};
+                if (!cal_evt_id) {
+                    res.writeHead(400, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: "calendar_event_id required" }));
+                    return;
+                }
 
-                res.writeHead(200, { "Content-Type": "application/json" });
-                res.end(JSON.stringify({ message: "Tags saved" }));
+                const { error: calTagErr } = await supabase
+                    .from("calendar_event_tags")
+                    .upsert({ calendar_event_id: cal_evt_id, tag_ids: cal_tag_ids ?? [] });
+
+                if (calTagErr) {
+                    res.writeHead(500, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: calTagErr.message }));
+                    return;
+                }
+
+                res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+                res.end(JSON.stringify({ ok: true }));
                 return;
             }
 
