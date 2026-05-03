@@ -609,6 +609,23 @@ function CalendarEventCard({
     const pendingTagRef = useRef<string>("");
     const prevHasVoiceAgentBot = useRef(false);
 
+    // Load persisted category selection from server on mount
+    useEffect(() => {
+        if (!event.id) return;
+        getToken().then((token) =>
+            fetch(`/api/calendar/events/tag?calendar_event_id=${event.id}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            })
+                .then((r) => r.json())
+                .then((data) => {
+                    if (data?.tag_ids?.length) {
+                        setSelectedTagId(data.tag_ids[0]);
+                    }
+                })
+                .catch(console.error)
+        );
+    }, [event.id]);
+
     const isInFuture = new Date(event.start_time) > new Date();
     const hasMeetingUrl = !!event.meeting_url;
     const canToggle = isInFuture && hasMeetingUrl;
@@ -668,11 +685,20 @@ function CalendarEventCard({
         setSelectedTagId(tagId);
         pendingTagRef.current = tagId;
         if (!tagId) return;
+
+        // Always persist to calendar_event_tags regardless of bot state
+        const token = await getToken();
+        fetch("/api/calendar/events/tag", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ calendar_event_id: event.id, tag_ids: [tagId] }),
+        }).catch(console.error);
+
+        // Also apply immediately if VA bot already scheduled
         const vaBotId = event.bots.find(
             (b) => b.deduplication_key.startsWith("va-") && new Date(b.start_time) > new Date(),
         )?.bot_id;
         if (!vaBotId) return;
-        const token = await getToken();
         fetch(`/api/meetings/${vaBotId}/tags`, {
             method: "PUT",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
