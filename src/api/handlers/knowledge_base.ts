@@ -439,13 +439,12 @@ export async function kb_update(args: {
 
 // ─── Tag Handlers ────────────────────────────────────────────
 
-/** GET /api/kb/tags — list all tags for the org */
-export async function tag_list(): Promise<{ tags: KbTag[] }> {
-    const orgId = LIGHT_EAGLE_ORG_ID;
+/** GET /api/kb/tags — list tags created by the requesting user */
+export async function tag_list(userEmail: string): Promise<{ tags: KbTag[] }> {
     const { data, error } = await supabase
         .from("kb_tags")
         .select("id, name, slug, color, created_by, created_at")
-        .eq("org_id", orgId)
+        .eq("created_by", userEmail)
         .order("created_at", { ascending: true });
 
     if (error) throw new Error(error.message);
@@ -488,10 +487,11 @@ export async function tag_create(
     return data as KbTag;
 }
 
-/** PATCH /api/kb/tags/:id — rename or recolor a tag */
+/** PATCH /api/kb/tags/:id — rename or recolor a tag (owner only) */
 export async function tag_update(
     id: string,
     body: { name?: string; color?: string },
+    userEmail: string,
 ): Promise<KbTag> {
     const validId = z.string().uuid().parse(id);
     const { name, color } = z.object({
@@ -512,6 +512,7 @@ export async function tag_update(
         .from("kb_tags")
         .update(updates)
         .eq("id", validId)
+        .eq("created_by", userEmail)
         .select("id, name, slug, color, created_by, created_at")
         .single();
 
@@ -520,12 +521,14 @@ export async function tag_update(
         throw new Error(error.message);
     }
 
+    if (!data) throw new Error("Tag not found or you do not have permission to update it");
+
     console.log(`[kb] Updated tag ${validId}`);
     return data as KbTag;
 }
 
-/** DELETE /api/kb/tags/:id — delete tag (cascade removes kb_document_tags rows via FK) */
-export async function tag_delete(id: string): Promise<void> {
+/** DELETE /api/kb/tags/:id — delete tag (owner only; cascade removes kb_document_tags rows via FK) */
+export async function tag_delete(id: string, userEmail: string): Promise<void> {
     const validId = z.string().uuid().parse(id);
 
     // Collect affected document IDs before deletion so we can sync their chunk tag_ids
@@ -535,10 +538,15 @@ export async function tag_delete(id: string): Promise<void> {
         .eq("tag_id", validId);
     const affectedDocIds = (links ?? []).map((l: { document_id: string }) => l.document_id);
 
-    const { error } = await supabase.from("kb_tags").delete().eq("id", validId);
+    const { error, count } = await supabase
+        .from("kb_tags")
+        .delete({ count: "exact" })
+        .eq("id", validId)
+        .eq("created_by", userEmail);
     if (error) throw new Error(error.message);
+    if (count === 0) throw new Error("Tag not found or you do not have permission to delete it");
 
-    // Sync chunk tag_ids for all affected documents (FK cascade already removed the db_document_tags rows)
+    // Sync chunk tag_ids for all affected documents (FK cascade already removed the kb_document_tags rows)
     for (const docId of affectedDocIds) {
         await syncChunkTagIds(docId);
     }
@@ -583,22 +591,36 @@ export async function doc_tag_remove(docId: string, tagId: string): Promise<void
 
 // ─── Meeting Tag Handlers ─────────────────────────────────────
 
-/** GET /api/meetings/:botId/tags — list tags assigned to a meeting */
-export async function meeting_tags_get(args: { botId: string }): Promise<{ tags: KbTag[] }> {
+/** GET /api/meetings/:botId/tags — list tags assigned to a meeting, scoped to the calling user */
+export async function meeting_tags_get(args: { botId: string; userEmail: string }): Promise<{ tags: KbTag[] }> {
     const { data, error } = await supabase
         .from("meeting_tags")
         .select("kb_tags(id, name, slug, color, created_by, created_at)")
         .eq("bot_id", args.botId);
 
     if (error) throw new Error(error.message);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tags = (data ?? []).map((row: any) => row.kb_tags).filter(Boolean) as KbTag[];
+    const tags = (data ?? [])
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((row: any) => row.kb_tags)
+        .filter((t): t is KbTag => t !== null && t.created_by === args.userEmail);
     return { tags };
 }
 
-/** PUT /api/meetings/:botId/tags — replace all tags for a meeting (full replacement) */
-export async function meeting_tags_set(args: { botId: string; tag_ids: string[] }): Promise<{ tags: KbTag[] }> {
-    const { botId, tag_ids } = args;
+/** PUT /api/meetings/:botId/tags — replace all tags for a meeting (full replacement, owner only) */
+export async function meeting_tags_set(args: { botId: string; tag_ids: string[]; userEmail: string }): Promise<{ tags: KbTag[] }> {
+    const { botId, tag_ids, userEmail } = args;
+
+    // Verify every submitted tag belongs to the calling user
+    if (tag_ids.length > 0) {
+        const { data: ownedTags } = await supabase
+            .from("kb_tags")
+            .select("id")
+            .in("id", tag_ids)
+            .eq("created_by", userEmail);
+        if ((ownedTags?.length ?? 0) !== tag_ids.length) {
+            throw new Error("One or more tags do not belong to you");
+        }
+    }
 
     const { error: deleteErr } = await supabase
         .from("meeting_tags")
@@ -637,17 +659,39 @@ export async function meeting_tags_set(args: { botId: string; tag_ids: string[] 
         console.log(`[kb] Synced ${tag_ids.length} tag(s) to KB document ${kbDoc.id} for bot ${botId}`);
     }
 
-    return meeting_tags_get({ botId });
+    return meeting_tags_get({ botId, userEmail });
 }
 
 /** GET /api/meetings/:botId/allowed-tags — tag IDs the voice agent may filter by; null = no filter */
 export async function meeting_allowed_tags(args: { botId: string }): Promise<{ tag_ids: string[] | null }> {
+    // First try meeting_tags (works for instant meetings and meetings
+    // where handleBotDone has already run)
     const { data } = await supabase
         .from("meeting_tags")
         .select("tag_id")
         .eq("bot_id", args.botId);
 
-    if (!data || data.length === 0) return { tag_ids: null };
-    return { tag_ids: data.map((r: { tag_id: string }) => r.tag_id) };
+    if (data && data.length > 0) {
+        return { tag_ids: data.map((r: { tag_id: string }) => r.tag_id) };
+    }
+
+    // Fallback: check calendar_event_tags via meetings.calendar_event_id
+    // (for calendar meetings where the user selected a category before the bot joined)
+    const { data: meetingRow } = await supabase
+        .from("meetings")
+        .select("calendar_event_id")
+        .eq("bot_id", args.botId)
+        .single();
+
+    if (!meetingRow?.calendar_event_id) return { tag_ids: null };
+
+    const { data: calTagRow } = await supabase
+        .from("calendar_event_tags")
+        .select("tag_ids")
+        .eq("calendar_event_id", meetingRow.calendar_event_id)
+        .single();
+
+    if (!calTagRow?.tag_ids?.length) return { tag_ids: null };
+    return { tag_ids: calTagRow.tag_ids };
 }
 

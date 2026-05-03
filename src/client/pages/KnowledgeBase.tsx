@@ -264,8 +264,12 @@ function KnowledgeBase() {
 
     const { data: tagsData } = useQuery<{ tags: KBTag[] }>({
         queryKey: ["kb_tags"],
+        staleTime: 0,
         queryFn: async () => {
-            const res = await fetch("/api/kb/tags");
+            const token = await getToken();
+            const res = await fetch("/api/kb/tags", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
             if (!res.ok) throw new Error(await res.text());
             return res.json();
         },

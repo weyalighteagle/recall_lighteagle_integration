@@ -58,8 +58,12 @@ function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
 
     const { data: allTagsData } = useQuery<{ tags: Tag[] }>({
         queryKey: ["kb_tags"],
+        staleTime: 0,
         queryFn: async () => {
-            const res = await fetch("/api/kb/tags");
+            const token = await getToken();
+            const res = await fetch("/api/kb/tags", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
             if (!res.ok) throw new Error(await res.text());
             return res.json();
         },
@@ -98,6 +102,7 @@ function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
                 toast.error("Couldn't update tags");
             } else {
                 queryClient.invalidateQueries({ queryKey: ["meeting_tags", botId] });
+                queryClient.invalidateQueries({ queryKey: ["kb_transcripts"] });
             }
         } catch {
             queryClient.setQueryData(["meeting_tags", botId], oldData);
