@@ -664,12 +664,34 @@ export async function meeting_tags_set(args: { botId: string; tag_ids: string[];
 
 /** GET /api/meetings/:botId/allowed-tags — tag IDs the voice agent may filter by; null = no filter */
 export async function meeting_allowed_tags(args: { botId: string }): Promise<{ tag_ids: string[] | null }> {
+    // First try meeting_tags (works for instant meetings and meetings
+    // where handleBotDone has already run)
     const { data } = await supabase
         .from("meeting_tags")
         .select("tag_id")
         .eq("bot_id", args.botId);
 
-    if (!data || data.length === 0) return { tag_ids: null };
-    return { tag_ids: data.map((r: { tag_id: string }) => r.tag_id) };
+    if (data && data.length > 0) {
+        return { tag_ids: data.map((r: { tag_id: string }) => r.tag_id) };
+    }
+
+    // Fallback: check calendar_event_tags via meetings.calendar_event_id
+    // (for calendar meetings where the user selected a category before the bot joined)
+    const { data: meetingRow } = await supabase
+        .from("meetings")
+        .select("calendar_event_id")
+        .eq("bot_id", args.botId)
+        .single();
+
+    if (!meetingRow?.calendar_event_id) return { tag_ids: null };
+
+    const { data: calTagRow } = await supabase
+        .from("calendar_event_tags")
+        .select("tag_ids")
+        .eq("calendar_event_id", meetingRow.calendar_event_id)
+        .single();
+
+    if (!calTagRow?.tag_ids?.length) return { tag_ids: null };
+    return { tag_ids: calTagRow.tag_ids };
 }
 
