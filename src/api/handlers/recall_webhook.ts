@@ -204,9 +204,17 @@ async function handleBotDone(body: any): Promise<void> {
 
   const { data: meetingRow } = await supabase
     .from('meetings')
-    .select('done, bot_type')
+    .select('id, done, bot_type')
     .eq('bot_id', botId)
     .single();
+  const meetingDbId = meetingRow?.id as string | undefined;
+
+  const { data: meetingTagRows } = await supabase
+    .from("meeting_tags")
+    .select("tag_id, kb_tags(slug)")
+    .eq("meeting_id", meetingDbId ?? "");
+  const kbTagIds = meetingTagRows?.map((r: any) => r.tag_id) ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const kbMeetingType = (meetingTagRows?.[0] as any)?.kb_tags?.slug ?? "toplanti"; // eslint-disable-line @typescript-eslint/no-explicit-any
 
   if (meetingRow?.done === true) {
     console.log(`[handleBotDone] meeting already marked done for bot_id=${botId}, skipping`);
@@ -644,7 +652,6 @@ async function handleBotDone(body: any): Promise<void> {
         console.error(`[handleBotDone] Failed to get calendar title for KB ingest:`, metaErr);
       }
 
-      const meetingType = normalizeMeetingType(calendarTitle);
       const docTitle = participants.length > 0
         ? `${calendarTitle} — ${dateStr} — ${participants.join(", ")}`
         : `${calendarTitle} — ${dateStr}`;
@@ -654,8 +661,9 @@ async function handleBotDone(body: any): Promise<void> {
         transcriptText,
         docTitle,
         meetingDate,
-        meetingType,
+        meetingType: kbMeetingType,
         calendarTitle,
+        tagIds: kbTagIds,
       });
 
       if (result.skipped) {
@@ -1140,6 +1148,7 @@ export async function schedule_bot_for_calendar_event(args: {
               attendee_emails: attendeeEmails,
               meeting_start_time: calendar_event.start_time ?? null,
               meeting_title: calendar_event.raw?.summary ?? calendar_event.raw?.subject ?? null,
+              calendar_event_id: calendar_event.id,
             },
             { onConflict: "bot_id", ignoreDuplicates: true },
           );

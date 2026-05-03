@@ -63,8 +63,9 @@ export async function ingestTranscriptToKB(params: {
   meetingDate: Date;
   meetingType?: string;
   calendarTitle?: string;
+  tagIds?: string[];
 }): Promise<IngestResult> {
-  const { botId, transcriptText, docTitle, meetingDate, meetingType, calendarTitle } = params;
+  const { botId, transcriptText, docTitle, meetingDate, meetingType, calendarTitle, tagIds } = params;
 
   if (transcriptText.length < 100) {
     await upsertIngestionLog(botId, null, "skipped",
@@ -125,24 +126,18 @@ export async function ingestTranscriptToKB(params: {
     content: chunk,
     token_count: Math.ceil(chunk.length / 4),
     embedding: JSON.stringify(embeddings[i]),
+    tag_ids: tagIds && tagIds.length > 0 ? tagIds : null,
   }));
 
   const { error: chunkErr } = await supabase.from("kb_chunks").insert(chunkRows);
   if (chunkErr) throw new Error(`KB chunks insert failed: ${chunkErr.message}`);
 
-  // Auto-tag the KB document with any tags already assigned to this meeting
-  const { data: existingMeetingTags } = await supabase
-    .from("meeting_tags")
-    .select("tag_id")
-    .eq("bot_id", botId);
-
-  if (existingMeetingTags && existingMeetingTags.length > 0) {
-    const tagIds = existingMeetingTags.map((t: { tag_id: string }) => t.tag_id);
+  // Auto-tag the KB document with tags passed by the caller (already written to tag_ids on chunk rows)
+  if (tagIds && tagIds.length > 0) {
     await supabase.from("kb_document_tags").insert(
       tagIds.map((tid: string) => ({ document_id: doc.id, tag_id: tid }))
     );
-    await supabase.from("kb_chunks").update({ tag_ids: tagIds }).eq("document_id", doc.id);
-    console.log(`[kb_ingest] Auto-tagged doc ${doc.id} with ${tagIds.length} meeting tag(s)`);
+    console.log(`[kb_ingest] Auto-tagged doc ${doc.id} with ${tagIds.length} tag(s)`);
   }
 
   await upsertIngestionLog(botId, null, "success", { chunk_count: chunkRows.length });
