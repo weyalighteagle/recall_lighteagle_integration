@@ -364,6 +364,23 @@ body=${JSON.stringify(body)}
                 }
             }
             case "/api/calendar/events/tag": {
+                if (req.method?.toUpperCase() === "GET") {
+                    if (!await requireAuth(req, res)) return;
+                    const cal_event_id = search_params.calendar_event_id as string;
+                    if (!cal_event_id) {
+                        res.writeHead(400, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: "calendar_event_id required" }));
+                        return;
+                    }
+                    const { data } = await supabase
+                        .from("calendar_event_tags")
+                        .select("tag_ids")
+                        .eq("calendar_event_id", cal_event_id)
+                        .maybeSingle();
+                    res.writeHead(200, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
+                    res.end(JSON.stringify({ tag_ids: data?.tag_ids ?? null }));
+                    return;
+                }
                 if (req.method?.toUpperCase() !== "PUT") break;
                 if (!await requireAuth(req, res)) return;
 
