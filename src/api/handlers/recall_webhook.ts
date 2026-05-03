@@ -1182,6 +1182,17 @@ export async function schedule_bot_for_calendar_event(args: {
         if (error) {
           console.error(`[schedule_bot] Failed to pre-store user_email for bot ${bot.bot_id}:`, error);
         }
+        // Backfill meeting_token and calendar_event_id on existing rows where token is not yet set
+        if (meetingToken) {
+          await supabase
+            .from("meetings")
+            .update({
+              meeting_token: meetingToken,
+              calendar_event_id: calendar_event.id,
+            })
+            .eq("bot_id", bot.bot_id)
+            .is("meeting_token", null);
+        }
         // Refresh attendee list on already-existing rows without touching done
         await supabase
           .from("meetings")
