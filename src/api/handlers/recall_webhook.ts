@@ -1121,6 +1121,48 @@ export async function schedule_bot_for_calendar_event(args: {
     updatedEvent = CalendarEventSchema.parse(await response.json());
   }
 
+  // If bot already exists and we have a meetingToken,
+  // update its output_media_url via v1 PATCH
+  if (existingBots.length > 0 && meetingToken && bot_type === "voice_agent") {
+    const existingBotId = existingBots[0].bot_id;
+    const updatedPageParams = new URLSearchParams({ wss: env.VOICE_AGENT_WSS_URL! });
+    updatedPageParams.set("meetingToken", meetingToken);
+    if (kb_id) updatedPageParams.set("kb", kb_id);
+    const updatedOutputMediaUrl = `${env.VOICE_AGENT_PAGE_URL}?${updatedPageParams.toString()}`;
+
+    await fetch(
+      `https://${env.RECALL_REGION}.recall.ai/api/v1/bot/${existingBotId}/`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `${env.RECALL_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          output_media: {
+            camera: {
+              kind: "webpage",
+              config: { url: updatedOutputMediaUrl },
+            },
+          },
+        }),
+      }
+    ).then(r => {
+      if (!r.ok) r.text().then(t =>
+        console.error(`[schedule_bot] PATCH bot output_media failed: ${r.status} ${t}`)
+      );
+      else console.log(`[schedule_bot] Updated output_media_url for existing bot ${existingBotId}`);
+    }).catch(e =>
+      console.error(`[schedule_bot] PATCH bot output_media error:`, e)
+    );
+
+    // Also update meeting_token in DB (overwrite existing)
+    await supabase
+      .from("meetings")
+      .update({ meeting_token: meetingToken })
+      .eq("bot_id", existingBotId);
+  }
+
   // Extract attendee emails from the raw calendar event (Google: raw.attendees[].email,
   // Outlook: raw.attendees[].emailAddress.address). Fall back to empty array if absent.
   const rawAttendees: unknown[] = Array.isArray(calendar_event.raw?.attendees)
