@@ -40,7 +40,8 @@ export async function upsertIngestionLog(
       { onConflict: "bot_id" }
     );
   } catch (e) {
-    console.error("[ingestion_log] Failed to write log row:", e);
+    console.error(`[ingestion_log] Failed to write log row for bot_id=${botId}: ${e instanceof Error ? e.message : String(e)}`);
+    console.error(`[ingestion_log] ERROR stack:`, e instanceof Error ? e.stack : "(no stack)");
     // Never throw — logging must never break the webhook
   }
 }
