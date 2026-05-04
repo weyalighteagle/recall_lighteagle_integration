@@ -340,18 +340,32 @@ export async function handleTranscriptWebhook(
                     } catch (metaErr) {
                       console.error(`[transcript.done/assemblyai] Failed to get calendar title:`, metaErr);
                     }
+                    // Instant Meetings have no calendar event, so buildBotMetadataMap returns no title.
+                    // Fall back to meetings.meeting_title (set when the user renames the meeting).
+                    if (!calendarTitle || calendarTitle === "Toplantı") {
+                      try {
+                        const { data: titleRow } = await supabase
+                          .from("meetings")
+                          .select("meeting_title")
+                          .eq("bot_id", botId)
+                          .maybeSingle();
+                        if (titleRow?.meeting_title) {
+                          calendarTitle = titleRow.meeting_title;
+                          console.log(`[transcript.done/assemblyai] Using meetings.meeting_title="${calendarTitle}" for bot_id=${botId}`);
+                        }
+                      } catch (titleErr) {
+                        console.error(`[transcript.done/assemblyai] Failed to read meeting_title from DB:`, titleErr);
+                      }
+                    }
 
                     const docTitle = participants.length > 0
                       ? `${calendarTitle} — ${dateStr} — ${participants.join(", ")}`
                       : `${calendarTitle} — ${dateStr}`;
 
-                    const { data: meetingIdRow } = await supabase
-                      .from("meetings").select("id").eq("bot_id", botId).single();
-                    const meetingDbId = meetingIdRow?.id;
                     const { data: meetingTagRows } = await supabase
                       .from("meeting_tags")
                       .select("tag_id, kb_tags(slug)")
-                      .eq("meeting_id", meetingDbId ?? "");
+                      .eq("bot_id", botId);
                     const kbTagIds = meetingTagRows?.map((r: any) => r.tag_id) ?? []; // eslint-disable-line @typescript-eslint/no-explicit-any
                     const kbMeetingType = (meetingTagRows?.[0] as any)?.kb_tags?.slug ?? "toplanti"; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -372,7 +386,8 @@ export async function handleTranscriptWebhook(
                     }
                   } catch (kbErr) {
                     await upsertIngestionLog(botId, null, "failed", { error_message: String(kbErr) });
-                    console.error(`[transcript.done/assemblyai] KB ingest failed (non-fatal):`, kbErr);
+                    console.error(`[transcript.done/assemblyai] KB ingest FAILED for bot_id=${botId}: ${kbErr instanceof Error ? kbErr.message : String(kbErr)}`);
+                    console.error(`[transcript.done/assemblyai] KB ingest ERROR stack:`, kbErr instanceof Error ? kbErr.stack : "(no stack)");
                   }
                 }
               }
