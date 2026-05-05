@@ -34,7 +34,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/dashboard/*" element={<ProtectedRoute><DashboardRoutes /></ProtectedRoute>} />
           <Route
             path="*"
-            element={<ProtectedRoute><Navigate replace to="/dashboard/calendar" /></ProtectedRoute>}
+            element={<ProtectedRoute><Navigate replace to="/dashboard/notes" /></ProtectedRoute>}
           />
         </Routes>
       </BrowserRouter>
@@ -54,7 +54,7 @@ function DashboardRoutes() {
   return (
     <DashboardWrapper>
       <Routes>
-        <Route path="/" element={<Navigate replace to="/dashboard/calendar" />} />
+        <Route path="/" element={<Navigate replace to="/dashboard/notes" />} />
         <Route path="calendar" element={<App />} />
         <Route path="notes" element={<NotesList />} />
         <Route path="notes/:botId" element={<TranscriptView />} />
