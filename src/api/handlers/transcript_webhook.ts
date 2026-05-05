@@ -176,14 +176,16 @@ export async function handleTranscriptWebhook(
       // AssemblyAI diarized result for a voice_agent bot.
       // Download, parse, replace real-time utterances, and mark done.
       if (isAssemblyAiAsync) {
-        const { data: meeting } = await supabase
+        const { data: claimed, error: claimError } = await supabase
           .from('meetings')
-          .select('done')
+          .update({ done: true })
           .eq('bot_id', botId)
+          .eq('done', false)
+          .select('bot_id')
           .single();
 
-        if (meeting?.done) {
-          console.log(`[transcript.done/assemblyai] already processed bot_id=${botId}, skipping`);
+        if (claimError || !claimed) {
+          console.log(`[transcript.done/assemblyai] already claimed or not found for bot_id=${botId}, skipping`);
           return { status: 200 };
         }
 
@@ -406,17 +408,6 @@ export async function handleTranscriptWebhook(
           } catch (dlErr) {
             console.error(`[transcript.done/assemblyai] download/parse error:`, dlErr);
           }
-        }
-
-        // Mark meeting done regardless of download outcome
-        const { error: doneErr } = await supabase
-          .from("meetings")
-          .update({ done: true })
-          .eq("bot_id", botId);
-        if (doneErr) {
-          console.error(`[transcript.done/assemblyai] failed to mark done for bot_id=${botId}:`, doneErr);
-        } else {
-          console.log(`[transcript.done/assemblyai] marked done=true for bot_id=${botId}`);
         }
 
         return { status: 200 };
