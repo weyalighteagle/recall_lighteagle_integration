@@ -803,8 +803,11 @@ async function handleRecordingDone(body: any): Promise<void> {
         body: JSON.stringify({
           provider: {
             assembly_ai_async: {
-              language_code: "tr",
               speech_models: ["universal-2"],
+              language_detection: true,
+              language_detection_options: {
+                code_switching: true,
+              },
             },
           },
         }),
