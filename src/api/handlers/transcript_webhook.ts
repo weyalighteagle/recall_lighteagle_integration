@@ -176,6 +176,17 @@ export async function handleTranscriptWebhook(
       // AssemblyAI diarized result for a voice_agent bot.
       // Download, parse, replace real-time utterances, and mark done.
       if (isAssemblyAiAsync) {
+        const { data: meeting } = await supabase
+          .from('meetings')
+          .select('done')
+          .eq('bot_id', botId)
+          .single();
+
+        if (meeting?.done) {
+          console.log(`[transcript.done/assemblyai] already processed bot_id=${botId}, skipping`);
+          return { status: 200 };
+        }
+
         console.log(
           `[transcript.done/assemblyai] processing transcript_id=${transcriptId} for bot_id=${botId}`,
         );
