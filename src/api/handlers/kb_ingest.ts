@@ -127,7 +127,7 @@ export async function ingestTranscriptToKB(params: {
     content: chunk,
     token_count: Math.ceil(chunk.length / 4),
     embedding: JSON.stringify(embeddings[i]),
-    tag_ids: tagIds && tagIds.length > 0 ? tagIds : null,
+    tag_ids: tagIds ?? [],
   }));
 
   const { error: chunkErr } = await supabase.from("kb_chunks").insert(chunkRows);
