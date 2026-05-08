@@ -358,6 +358,13 @@ async function handleBotDone(body: any): Promise<void> {
     console.error(
       `[handleBotDone] Could not fetch bot details from Recall for bot ${botId}. Skipping transcription. This needs manual review.`,
     );
+    try {
+      await supabase.from("meetings").update({ done: true }).eq("bot_id", botId);
+      console.log(`[handleBotDone] marked done=true for bot ${botId} (Recall API fetch failed)`);
+    } catch (doneErr) {
+      console.error(`[handleBotDone] failed to mark done after Recall API failure for bot ${botId}:`, doneErr);
+    }
+    await upsertIngestionLog(botId, null, "failed", { error_message: "Could not fetch bot details from Recall API" });
     return;
   }
 
@@ -727,6 +734,12 @@ async function handleBotDone(body: any): Promise<void> {
   } catch (topErr) {
     console.error(`[handleBotDone] UNCAUGHT ERROR bot_id=${botId}: ${topErr instanceof Error ? topErr.message : String(topErr)}`);
     console.error(`[handleBotDone] UNCAUGHT ERROR stack:`, topErr instanceof Error ? topErr.stack : "(no stack)");
+    try {
+      await supabase.from("meetings").update({ done: true }).eq("bot_id", botId);
+      console.log(`[handleBotDone] safety-net: marked done=true for bot ${botId} after uncaught error`);
+    } catch (doneErr) {
+      console.error(`[handleBotDone] safety-net done flip also failed for bot ${botId}:`, doneErr);
+    }
   }
 }
 
@@ -803,8 +816,11 @@ async function handleRecordingDone(body: any): Promise<void> {
         body: JSON.stringify({
           provider: {
             assembly_ai_async: {
-              language_code: "tr",
               speech_models: ["universal-2"],
+              language_detection: true,
+              language_detection_options: {
+                code_switching: true,
+              },
             },
           },
         }),
