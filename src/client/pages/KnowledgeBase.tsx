@@ -1,9 +1,10 @@
 import { useAuth } from "@clerk/react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useRef, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient, useQueries } from "@tanstack/react-query";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import {
-    Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye, Star, Tag, X, Mic,
+    Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye, Star, X, Mic,
+    FolderOpen, Layers,
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import {
@@ -13,7 +14,6 @@ import {
     CardTitle,
     CardDescription,
 } from "../components/ui/Card";
-import { ScrollArea } from "../components/ui/ScrollArea";
 import {
     Dialog,
     DialogContent,
@@ -80,50 +80,57 @@ interface KBDocumentFull {
     created_at: string;
 }
 
-// ─── Small helpers ───────────────────────────────────────────
-
-function TagPill({
-    tag,
-    onRemove,
-}: {
-    tag: DocTag;
-    onRemove?: () => void;
-}) {
-    const bg = tag.color ?? "#6b7280";
-    return (
-        <span
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-white"
-            style={{ backgroundColor: bg }}
-        >
-            {tag.name}
-            {onRemove && (
-                <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); onRemove(); }}
-                    className="hover:opacity-70 transition-opacity"
-                    aria-label={`Remove tag ${tag.name}`}
-                >
-                    <X className="size-2.5" />
-                </button>
-            )}
-        </span>
-    );
+interface Project {
+    id: string;
+    name: string;
+    description: string | null;
+    document_count: number;
+    created_at: string;
 }
 
-function AddTagDropdown({
+interface ProjectDocument {
+    id: string;
+    title: string;
+    source_type: string;
+    is_active: boolean;
+    created_at: string;
+}
+
+interface ProjectDetail {
+    id: string;
+    name: string;
+    description: string | null;
+    created_at: string;
+    documents: ProjectDocument[];
+}
+
+// ─── Small helpers ───────────────────────────────────────────
+
+function AddToProjectDropdown({
     docId,
-    allTags,
-    docTagIds,
+    projects,
+    assignedProjects,
     onAdd,
 }: {
     docId: string;
-    allTags: KBTag[];
-    docTagIds: string[];
-    onAdd: (tagId: string) => void;
+    projects: Project[];
+    assignedProjects: Project[];
+    onAdd: (projectId: string) => void;
 }) {
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
-    const available = allTags.filter((t) => !docTagIds.includes(t.id));
+    const [localAssignedIds, setLocalAssignedIds] = useState<Set<string>>(
+        () => new Set(assignedProjects.map((p) => p.id))
+    );
+
+    // Sync server-loaded assignments once project detail queries resolve
+    const assignedKey = assignedProjects.map((p) => p.id).join(",");
+    useEffect(() => {
+        const ids = assignedKey.split(",").filter(Boolean);
+        if (ids.length > 0) {
+            setLocalAssignedIds((prev) => new Set([...prev, ...ids]));
+        }
+    }, [assignedKey]);
 
     useEffect(() => {
         if (!open) return;
@@ -134,78 +141,56 @@ function AddTagDropdown({
         return () => document.removeEventListener("mousedown", handler);
     }, [open]);
 
-    if (available.length === 0) return null;
+    const handleAdd = (projectId: string) => {
+        setLocalAssignedIds((prev) => new Set([...prev, projectId]));
+        onAdd(projectId);
+        setOpen(false);
+    };
+
+    const assignedList = projects.filter((p) => localAssignedIds.has(p.id));
+    const unassigned = projects.filter((p) => !localAssignedIds.has(p.id));
 
     return (
-        <div className="relative" ref={ref}>
-            <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border border-dashed border-gray-300 text-xs text-gray-500 hover:border-gray-400 hover:text-gray-700 transition-colors"
-            >
-                <Plus className="size-3" /> tag
-            </button>
+        <div className="relative flex items-center gap-1.5 flex-wrap" ref={ref}>
+            {assignedList.map((p) => (
+                <span
+                    key={p.id}
+                    className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium"
+                >
+                    <Layers className="size-2.5" />
+                    {p.name}
+                </span>
+            ))}
+            {projects.length > 0 && (
+                <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border border-dashed border-blue-300 text-xs text-blue-500 hover:border-blue-400 hover:text-blue-700 transition-colors"
+                >
+                    <Layers className="size-3" /> project
+                </button>
+            )}
             {open && (
-                <div className="absolute left-0 top-full mt-1 z-50 bg-white border rounded-md shadow-lg min-w-[140px] py-1">
-                    {available.map((tag) => (
-                        <button
-                            key={tag.id}
-                            type="button"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onAdd(tag.id);
-                                setOpen(false);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-gray-50 text-left"
-                        >
-                            <span
-                                className="size-2.5 rounded-full shrink-0"
-                                style={{ backgroundColor: tag.color ?? "#6b7280" }}
-                            />
-                            {tag.name}
-                        </button>
-                    ))}
+                <div className="absolute left-0 top-full mt-1 z-50 bg-white border rounded-md shadow-lg min-w-[180px] py-1">
+                    {unassigned.length === 0 ? (
+                        <p className="text-xs text-gray-400 px-3 py-1.5">All projects assigned</p>
+                    ) : (
+                        unassigned.map((project) => (
+                            <button
+                                key={project.id}
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleAdd(project.id); }}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-gray-50 text-left"
+                            >
+                                <Layers className="size-3 text-blue-400 shrink-0" />
+                                <span className="truncate">{project.name}</span>
+                                <span className="ml-auto text-gray-400 shrink-0">{project.document_count} docs</span>
+                            </button>
+                        ))
+                    )}
                 </div>
             )}
         </div>
-    );
-}
-
-// ─── Inline rename input for a tag section header ────────────
-
-function InlineRename({
-    initialValue,
-    onCommit,
-    onCancel,
-}: {
-    initialValue: string;
-    onCommit: (value: string) => void;
-    onCancel: () => void;
-}) {
-    const [value, setValue] = useState(initialValue);
-    const inputRef = useRef<HTMLInputElement>(null);
-
-    useEffect(() => { inputRef.current?.focus(); inputRef.current?.select(); }, []);
-
-    const commit = () => {
-        const trimmed = value.trim();
-        if (trimmed && trimmed !== initialValue) onCommit(trimmed);
-        else onCancel();
-    };
-
-    return (
-        <input
-            ref={inputRef}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-                if (e.key === "Enter") commit();
-                if (e.key === "Escape") onCancel();
-            }}
-            className="text-sm font-semibold bg-transparent border-b border-blue-400 outline-none px-0.5"
-            style={{ width: `${Math.max(value.length, 4)}ch` }}
-        />
     );
 }
 
@@ -220,7 +205,6 @@ function KnowledgeBase() {
     const [title, setTitle] = useState("");
     const [category, setCategory] = useState("faq");
     const [content, setContent] = useState("");
-    const [createTagIds, setCreateTagIds] = useState<string[]>([]);
 
     // ── View / Edit dialog state ──────────────────────────────────────
     const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
@@ -229,16 +213,19 @@ function KnowledgeBase() {
     const [editCategory, setEditCategory] = useState("");
     const [editContent, setEditContent] = useState("");
 
-    // ── New tag dialog state ──────────────────────────────────────────
-    const [showNewTagDialog, setShowNewTagDialog] = useState(false);
-    const [newTagName, setNewTagName] = useState("");
-    const [newTagColor, setNewTagColor] = useState("#3b82f6");
+    // ── Project state ─────────────────────────────────────────────
+    const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
+    const [newProjectName, setNewProjectName] = useState("");
+    const [newProjectDescription, setNewProjectDescription] = useState("");
 
-    // ── Delete tag dialog state ───────────────────────────────────────
-    const [tagToDelete, setTagToDelete] = useState<KBTag | null>(null);
+    const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+    const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
 
-    // ── Inline rename state ───────────────────────────────────────────
-    const [renamingTagId, setRenamingTagId] = useState<string | null>(null);
+    const [editingProject, setEditingProject] = useState<Project | null>(null);
+    const [editProjectName, setEditProjectName] = useState("");
+    const [editProjectDescription, setEditProjectDescription] = useState("");
+
+    const [showAddDocDialog, setShowAddDocDialog] = useState(false);
 
     // ── Queries ───────────────────────────────────────────────────────
     const { data, isPending } = useQuery<{ documents: KBDocument[] }>({
@@ -250,24 +237,11 @@ function KnowledgeBase() {
         },
     });
 
-    const { data: transcriptsData, isPending: isTranscriptsPending } = useQuery<{ documents: TranscriptDocument[] }>({
+    const { data: transcriptsData } = useQuery<{ documents: TranscriptDocument[] }>({
         queryKey: ["kb_transcripts"],
         queryFn: async () => {
             const token = await getToken();
             const res = await fetch("/api/kb/transcripts", {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!res.ok) throw new Error(await res.text());
-            return res.json();
-        },
-    });
-
-    const { data: tagsData } = useQuery<{ tags: KBTag[] }>({
-        queryKey: ["kb_tags"],
-        staleTime: 0,
-        queryFn: async () => {
-            const token = await getToken();
-            const res = await fetch("/api/kb/tags", {
                 headers: { Authorization: `Bearer ${token}` },
             });
             if (!res.ok) throw new Error(await res.text());
@@ -294,40 +268,180 @@ function KnowledgeBase() {
         },
     });
 
+    const { data: projectsData, isPending: isProjectsPending } = useQuery<{ projects: Project[] }>({
+        queryKey: ["kb_projects"],
+        queryFn: async () => {
+            const token = await getToken();
+            const res = await fetch("/api/projects", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        },
+    });
+
+    const { data: projectDetail, isPending: isProjectDetailPending } = useQuery<ProjectDetail>({
+        queryKey: ["kb_project_detail", selectedProjectId],
+        queryFn: async () => {
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${selectedProjectId}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        },
+        enabled: !!selectedProjectId,
+    });
+
+    const projects = projectsData?.projects ?? [];
+
+    const projectDetailQueries = useQueries({
+        queries: projects.map((p) => ({
+            queryKey: ["kb_project_detail", p.id] as const,
+            queryFn: async () => {
+                const token = await getToken();
+                const res = await fetch(`/api/projects/${p.id}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!res.ok) return { id: p.id, documents: [] as Array<{ id: string }> };
+                return res.json() as Promise<{ id: string; documents: Array<{ id: string }> }>;
+            },
+            staleTime: 60_000,
+            enabled: projects.length > 0,
+        })),
+    });
+
+    const docProjectsMap = useMemo(() => {
+        const map = new Map<string, Project[]>();
+        projectDetailQueries.forEach((query, i) => {
+            const detail = query.data;
+            const project = projects[i];
+            if (detail && project) {
+                for (const doc of detail.documents) {
+                    if (!map.has(doc.id)) map.set(doc.id, []);
+                    map.get(doc.id)!.push(project);
+                }
+            }
+        });
+        return map;
+    }, [projectDetailQueries, projects]);
+
     const documents = data?.documents ?? [];
     const transcriptDocuments = transcriptsData?.documents ?? [];
-    const allTags = tagsData?.tags ?? [];
     const activeKbId = botSettings?.active_kb_id ?? null;
-
-    // ── Group documents by tags ───────────────────────────────────────
-    // A doc appears in every section its tags belong to; tagless docs go to Uncategorized.
-    const taggedSections = allTags.map((tag) => ({
-        tag,
-        docs: documents.filter((d) => d.tags.some((t) => t.id === tag.id)),
-    }));
-    const untaggedDocs = documents.filter((d) => d.tags.length === 0);
-
-    // ── Group transcripts by tags (same tag taxonomy, separate section) ──
-    const transcriptTaggedSections = allTags.map((tag) => ({
-        tag,
-        docs: transcriptDocuments.filter((d) => d.tags.some((t) => t.id === tag.id)),
-    })).filter(({ docs }) => docs.length > 0);
-    const untaggedTranscripts = transcriptDocuments.filter((d) => d.tags.length === 0);
 
     // ── Mutations ─────────────────────────────────────────────────────
 
     const invalidateBoth = () => {
         void queryClient.invalidateQueries({ queryKey: ["kb_documents"] });
-        void queryClient.invalidateQueries({ queryKey: ["kb_tags"] });
         void queryClient.invalidateQueries({ queryKey: ["kb_transcripts"] });
     };
+
+    const invalidateProjects = (projectId?: string) => {
+        void queryClient.invalidateQueries({ queryKey: ["kb_projects"] });
+        if (projectId) void queryClient.invalidateQueries({ queryKey: ["kb_project_detail", projectId] });
+    };
+
+    const createProjectMutation = useMutation({
+        mutationFn: async () => {
+            const token = await getToken();
+            const res = await fetch("/api/projects", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ name: newProjectName.trim(), description: newProjectDescription.trim() || undefined }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json() as Promise<Project>;
+        },
+        onSuccess: (p) => {
+            toast.success(`Project "${p.name}" created`);
+            setNewProjectName("");
+            setNewProjectDescription("");
+            setShowNewProjectDialog(false);
+            invalidateProjects();
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
+    const updateProjectMutation = useMutation({
+        mutationFn: async () => {
+            if (!editingProject) throw new Error("No project selected");
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${editingProject.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ name: editProjectName.trim(), description: editProjectDescription.trim() || null }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json() as Promise<Project>;
+        },
+        onSuccess: (p) => {
+            toast.success(`Project renamed to "${p.name}"`);
+            setEditingProject(null);
+            invalidateProjects(p.id);
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
+    const deleteProjectMutation = useMutation({
+        mutationFn: async (id: string) => {
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${id}`, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+        },
+        onSuccess: () => {
+            toast.success("Project deleted");
+            setProjectToDelete(null);
+            if (selectedProjectId === projectToDelete?.id) setSelectedProjectId(null);
+            invalidateProjects();
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
+    const addDocToProjectMutation = useMutation({
+        mutationFn: async ({ projectId, documentId }: { projectId: string; documentId: string }) => {
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${projectId}/documents`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ document_id: documentId }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+        },
+        onSuccess: (_data, { projectId }) => {
+            toast.success("Document added to project");
+            setShowAddDocDialog(false);
+            invalidateProjects(projectId);
+            void queryClient.invalidateQueries({ queryKey: ["kb_project_detail"] });
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
+    const removeDocFromProjectMutation = useMutation({
+        mutationFn: async ({ projectId, documentId }: { projectId: string; documentId: string }) => {
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${projectId}/documents/${documentId}`, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+        },
+        onSuccess: (_data, { projectId }) => {
+            toast.success("Document removed from project");
+            invalidateProjects(projectId);
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
 
     const createMutation = useMutation({
         mutationFn: async () => {
             const res = await fetch("/api/kb", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title, category, content, tag_ids: createTagIds }),
+                body: JSON.stringify({ title, category, content, tag_ids: [] }),
             });
             if (!res.ok) throw new Error(await res.text());
             return res.json() as Promise<{ document_id: string; chunks: number }>;
@@ -336,7 +450,6 @@ function KnowledgeBase() {
             toast.success(`"${title}" added (${resData.chunks} chunks)`);
             setTitle("");
             setContent("");
-            setCreateTagIds([]);
             setShowForm(false);
             invalidateBoth();
         },
@@ -401,90 +514,6 @@ function KnowledgeBase() {
         onError: (err: Error) => toast.error(err.message),
     });
 
-    const createTagMutation = useMutation({
-        mutationFn: async () => {
-            const token = await getToken();
-            const res = await fetch("/api/kb/tags", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ name: newTagName, color: newTagColor }),
-            });
-            if (!res.ok) throw new Error(await res.text());
-            return res.json() as Promise<KBTag>;
-        },
-        onSuccess: (tag) => {
-            toast.success(`Category "${tag.name}" created`);
-            setNewTagName("");
-            setNewTagColor("#3b82f6");
-            setShowNewTagDialog(false);
-            invalidateBoth();
-        },
-        onError: (err: Error) => toast.error(err.message),
-    });
-
-    const renameTagMutation = useMutation({
-        mutationFn: async ({ id, name }: { id: string; name: string }) => {
-            const token = await getToken();
-            const res = await fetch(`/api/kb/tags/${id}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ name }),
-            });
-            if (!res.ok) throw new Error(await res.text());
-            return res.json() as Promise<KBTag>;
-        },
-        onSuccess: (tag) => {
-            toast.success(`Renamed to "${tag.name}"`);
-            setRenamingTagId(null);
-            invalidateBoth();
-        },
-        onError: (err: Error) => { toast.error(err.message); setRenamingTagId(null); },
-    });
-
-    const deleteTagMutation = useMutation({
-        mutationFn: async (id: string) => {
-            const token = await getToken();
-            const res = await fetch(`/api/kb/tags/${id}`, {
-                method: "DELETE",
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!res.ok) throw new Error(await res.text());
-        },
-        onSuccess: () => {
-            toast.success("Category deleted");
-            setTagToDelete(null);
-            invalidateBoth();
-        },
-        onError: (err: Error) => { toast.error(err.message); setTagToDelete(null); },
-    });
-
-    const addDocTagMutation = useMutation({
-        mutationFn: async ({ docId, tagId }: { docId: string; tagId: string }) => {
-            const token = await getToken();
-            const res = await fetch(`/api/kb/${docId}/tags`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ tag_id: tagId }),
-            });
-            if (!res.ok) throw new Error(await res.text());
-        },
-        onSuccess: () => invalidateBoth(),
-        onError: (err: Error) => toast.error(err.message),
-    });
-
-    const removeDocTagMutation = useMutation({
-        mutationFn: async ({ docId, tagId }: { docId: string; tagId: string }) => {
-            const token = await getToken();
-            const res = await fetch(`/api/kb/${docId}/tags/${tagId}`, {
-                method: "DELETE",
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            if (!res.ok) throw new Error(await res.text());
-        },
-        onSuccess: () => invalidateBoth(),
-        onError: (err: Error) => toast.error(err.message),
-    });
-
     // ── Dialog handlers ───────────────────────────────────────────────
     const handleOpenDocument = (docId: string) => {
         setSelectedDocId(docId);
@@ -537,20 +566,12 @@ function KnowledgeBase() {
                         <Eye className="size-3" /> View
                     </span>
                 </div>
-                {/* Tag pills */}
                 <div className="flex items-center gap-1.5 flex-wrap mt-0.5" onClick={(e) => e.stopPropagation()}>
-                    {doc.tags.map((tag) => (
-                        <TagPill
-                            key={tag.id}
-                            tag={tag}
-                            onRemove={() => removeDocTagMutation.mutate({ docId: doc.id, tagId: tag.id })}
-                        />
-                    ))}
-                    <AddTagDropdown
+                    <AddToProjectDropdown
                         docId={doc.id}
-                        allTags={allTags}
-                        docTagIds={doc.tags.map((t) => t.id)}
-                        onAdd={(tagId) => addDocTagMutation.mutate({ docId: doc.id, tagId })}
+                        projects={projects}
+                        assignedProjects={docProjectsMap.get(doc.id) ?? []}
+                        onAdd={(projectId) => addDocToProjectMutation.mutate({ projectId, documentId: doc.id })}
                     />
                 </div>
             </button>
@@ -594,71 +615,6 @@ function KnowledgeBase() {
         </div>
     );
 
-    // ── Transcript row (Section 2 — read-only, no rename) ─────────────
-    const TranscriptRow = ({ doc }: { doc: TranscriptDocument }) => (
-        <div
-            key={doc.id}
-            className={`flex items-start justify-between py-3 ${!doc.is_active ? "opacity-50" : ""}`}
-        >
-            <button
-                type="button"
-                onClick={() => handleOpenDocument(doc.id)}
-                className="flex flex-col gap-1 min-w-0 flex-1 text-left hover:bg-gray-50 -mx-2 px-2 py-1 rounded-md transition-colors cursor-pointer"
-            >
-                <span className="text-sm font-medium text-gray-800 truncate">{doc.title}</span>
-                <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 flex items-center gap-0.5">
-                        <Mic className="size-3" /> Meeting Transcript
-                    </span>
-                    <span className="text-xs text-gray-400">
-                        {new Date((doc.metadata?.meetingDate as string | undefined) ?? doc.created_at).toLocaleDateString()}
-                    </span>
-                    <span className="text-xs text-blue-500 flex items-center gap-0.5">
-                        <Eye className="size-3" /> View
-                    </span>
-                </div>
-                {/* Tag pills — assign to a category from the shared tag set */}
-                <div className="flex items-center gap-1.5 flex-wrap mt-0.5" onClick={(e) => e.stopPropagation()}>
-                    {doc.tags.map((tag) => (
-                        <TagPill
-                            key={tag.id}
-                            tag={tag}
-                            onRemove={() => removeDocTagMutation.mutate({ docId: doc.id, tagId: tag.id })}
-                        />
-                    ))}
-                    <AddTagDropdown
-                        docId={doc.id}
-                        allTags={allTags}
-                        docTagIds={doc.tags.map((t) => t.id)}
-                        onAdd={(tagId) => addDocTagMutation.mutate({ docId: doc.id, tagId })}
-                    />
-                </div>
-            </button>
-            <div className="flex items-center gap-1 shrink-0 ml-2 mt-1">
-                <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    title={doc.is_active ? "Deactivate" : "Activate"}
-                    onClick={(e) => { e.stopPropagation(); toggleMutation.mutate({ id: doc.id, is_active: !doc.is_active }); }}
-                >
-                    <Power className={`size-4 ${doc.is_active ? "text-green-600" : "text-gray-400"}`} />
-                </Button>
-                <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    title="Delete"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm(`"${doc.title}" will be deleted. Are you sure?`)) deleteMutation.mutate(doc.id);
-                    }}
-                    className="text-red-500 hover:text-red-700"
-                >
-                    <Trash2 className="size-4" />
-                </Button>
-            </div>
-        </div>
-    );
-
     // ── Render ────────────────────────────────────────────────────────
     return (
         <div className="flex flex-col gap-4 max-w-3xl mx-auto">
@@ -668,11 +624,11 @@ function KnowledgeBase() {
                     <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setShowNewTagDialog(true)}
+                        onClick={() => setShowNewProjectDialog(true)}
                         className="flex items-center gap-1"
                     >
-                        <Tag className="size-4" />
-                        New Category
+                        <Layers className="size-4" />
+                        New Project
                     </Button>
                     <Button
                         variant="outline"
@@ -713,33 +669,6 @@ function KnowledgeBase() {
                                     <option key={cat.value} value={cat.value}>{cat.label}</option>
                                 ))}
                             </select>
-                            {/* Tag picker for new document */}
-                            {allTags.length > 0 && (
-                                <div className="flex flex-col gap-1.5">
-                                    <span className="text-xs text-gray-500 font-medium">Tags (optional)</span>
-                                    <div className="flex flex-wrap gap-1.5">
-                                        {allTags.map((tag) => {
-                                            const selected = createTagIds.includes(tag.id);
-                                            return (
-                                                <button
-                                                    key={tag.id}
-                                                    type="button"
-                                                    onClick={() => setCreateTagIds(
-                                                        selected
-                                                            ? createTagIds.filter((id) => id !== tag.id)
-                                                            : [...createTagIds, tag.id]
-                                                    )}
-                                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-opacity ${selected ? "opacity-100" : "opacity-40 hover:opacity-70"}`}
-                                                    style={{ backgroundColor: tag.color ?? "#6b7280", color: "white" }}
-                                                >
-                                                    {selected && <span>✓</span>}
-                                                    {tag.name}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            )}
                             <textarea
                                 placeholder="Paste content here..."
                                 value={content}
@@ -767,7 +696,99 @@ function KnowledgeBase() {
                 </Card>
             )}
 
-            {/* ── Document sections (grouped by tag) ───────────────────────── */}
+            {/* ── Projects grid ──────────────────────────────────────────── */}
+            <div>
+                <div className="flex items-center gap-2 mb-3">
+                    <Layers className="size-4 text-blue-500" />
+                    <h2 className="text-base font-semibold text-gray-700">Projects</h2>
+                    {!isProjectsPending && (
+                        <span className="text-xs text-gray-400">({projects.length})</span>
+                    )}
+                </div>
+
+                {isProjectsPending ? (
+                    <div className="flex items-center justify-center py-8">
+                        <Loader2 className="size-6 text-blue-500 animate-spin" />
+                    </div>
+                ) : projects.length === 0 ? (
+                    <Card className="border-dashed">
+                        <CardContent className="flex flex-col items-center justify-center py-10">
+                            <Layers className="size-8 text-gray-300 mb-2" />
+                            <p className="text-sm text-gray-500">No projects yet</p>
+                            <p className="text-xs text-gray-400 mt-1">Create a project to scope your voice agent's knowledge</p>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="mt-4 flex items-center gap-1"
+                                onClick={() => setShowNewProjectDialog(true)}
+                            >
+                                <Plus className="size-4" /> New Project
+                            </Button>
+                        </CardContent>
+                    </Card>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {projects.map((project) => (
+                            <Card
+                                key={project.id}
+                                className="group cursor-pointer hover:shadow-md transition-shadow border border-gray-200"
+                                onClick={() => setSelectedProjectId(project.id)}
+                            >
+                                <CardContent className="p-4 flex flex-col gap-2 min-h-[120px]">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            <span className="size-3 rounded-sm shrink-0 bg-blue-500" />
+                                            <span className="text-sm font-semibold text-gray-800 truncate">{project.name}</span>
+                                        </div>
+                                        <div
+                                            className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                title="Edit project"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setEditingProject(project);
+                                                    setEditProjectName(project.name);
+                                                    setEditProjectDescription(project.description ?? "");
+                                                }}
+                                            >
+                                                <Pencil className="size-3.5 text-gray-400" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                title="Delete project"
+                                                onClick={(e) => { e.stopPropagation(); setProjectToDelete(project); }}
+                                                className="text-red-400 hover:text-red-600"
+                                            >
+                                                <Trash2 className="size-3.5" />
+                                            </Button>
+                                        </div>
+                                    </div>
+                                    {project.description && (
+                                        <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">
+                                            {project.description}
+                                        </p>
+                                    )}
+                                    <div className="mt-auto flex items-center gap-1.5 pt-2">
+                                        <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 font-medium">
+                                            {project.document_count} {project.document_count === 1 ? "doc" : "docs"}
+                                        </span>
+                                        <span className="text-xs text-gray-400">
+                                            {new Date(project.created_at).toLocaleDateString()}
+                                        </span>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* ── Company Documents ────────────────────────────────────────── */}
             {isPending ? (
                 <Card>
                     <CardContent className="flex flex-col items-center justify-center py-12">
@@ -775,246 +796,30 @@ function KnowledgeBase() {
                         <p className="text-sm text-gray-500">Loading…</p>
                     </CardContent>
                 </Card>
+            ) : documents.length === 0 ? (
+                <Card>
+                    <CardContent className="flex flex-col items-center justify-center py-8">
+                        <BookOpen className="size-8 text-gray-300 mb-2" />
+                        <p className="text-sm text-gray-500">No documents added yet</p>
+                        <p className="text-xs text-gray-400 mt-1">Use &quot;Add Document&quot; to upload information</p>
+                    </CardContent>
+                </Card>
             ) : (
-                <>
-                    {/* One card per tag section */}
-                    {taggedSections.map(({ tag, docs }) => (
-                        <Card key={tag.id}>
-                            <CardHeader className="pb-2">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <span
-                                            className="size-3 rounded-full shrink-0"
-                                            style={{ backgroundColor: tag.color ?? "#6b7280" }}
-                                        />
-                                        {renamingTagId === tag.id ? (
-                                            <InlineRename
-                                                initialValue={tag.name}
-                                                onCommit={(name) => renameTagMutation.mutate({ id: tag.id, name })}
-                                                onCancel={() => setRenamingTagId(null)}
-                                            />
-                                        ) : (
-                                            <CardTitle className="text-sm font-semibold">{tag.name}</CardTitle>
-                                        )}
-                                        <span className="text-xs text-gray-400">({docs.length})</span>
-                                    </div>
-                                    <div className="flex items-center gap-1">
-                                        <Button
-                                            variant="ghost"
-                                            size="icon-sm"
-                                            title="Rename category"
-                                            onClick={() => setRenamingTagId(renamingTagId === tag.id ? null : tag.id)}
-                                        >
-                                            <Pencil className="size-3.5 text-gray-400" />
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon-sm"
-                                            title="Delete category"
-                                            onClick={() => setTagToDelete(tag)}
-                                            className="text-red-400 hover:text-red-600"
-                                        >
-                                            <Trash2 className="size-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            </CardHeader>
-                            <CardContent>
-                                {docs.length === 0 ? (
-                                    <p className="text-xs text-gray-400 py-2">No documents yet</p>
-                                ) : (
-                                    <div className="divide-y">
-                                        {docs.map((doc) => <DocRow key={doc.id} doc={doc} />)}
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
-                    ))}
-
-                    {/* Uncategorized section */}
-                    <Card>
-                        <CardHeader className="pb-2">
-                            <div className="flex items-center gap-2">
-                                <BookOpen className="size-4 text-gray-400" />
-                                <CardTitle className="text-sm font-semibold text-gray-500">Uncategorized</CardTitle>
-                                <span className="text-xs text-gray-400">({untaggedDocs.length})</span>
-                            </div>
-                            <CardDescription className="text-xs">
-                                Documents with no tags. The voice agent uses all active documents unless tag filtering is configured.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            {untaggedDocs.length === 0 && documents.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center py-8">
-                                    <BookOpen className="size-8 text-gray-300 mb-2" />
-                                    <p className="text-sm text-gray-500">No documents added yet</p>
-                                    <p className="text-xs text-gray-400 mt-1">Use &quot;Add Document&quot; to upload information</p>
-                                </div>
-                            ) : untaggedDocs.length === 0 ? (
-                                <p className="text-xs text-gray-400 py-2">All documents are tagged</p>
-                            ) : (
-                                <ScrollArea className="h-[400px]">
-                                    <div className="divide-y pr-4">
-                                        {untaggedDocs.map((doc) => <DocRow key={doc.id} doc={doc} />)}
-                                    </div>
-                                </ScrollArea>
-                            )}
-                        </CardContent>
-                    </Card>
-                </>
-            )}
-
-            {/* ── Section 2: Meeting Transcripts ──────────────────────────── */}
-            <div className="mt-4">
-                <div className="flex items-center gap-2 mb-3">
-                    <Mic className="size-4 text-purple-500" />
-                    <h2 className="text-base font-semibold text-gray-700">Meeting Transcripts</h2>
-                    {!isTranscriptsPending && (
-                        <span className="text-xs text-gray-400">({transcriptDocuments.length})</span>
-                    )}
-                </div>
-                {isTranscriptsPending ? (
-                    <Card>
-                        <CardContent className="flex items-center justify-center py-8">
-                            <Loader2 className="size-6 text-blue-500 animate-spin" />
-                        </CardContent>
-                    </Card>
-                ) : transcriptDocuments.length === 0 ? (
-                    <Card>
-                        <CardContent className="flex flex-col items-center justify-center py-8">
-                            <Mic className="size-8 text-gray-300 mb-2" />
-                            <p className="text-sm text-gray-500">No meeting transcripts yet</p>
-                            <p className="text-xs text-gray-400 mt-1">Transcripts from your meetings will appear here once ingested</p>
-                        </CardContent>
-                    </Card>
-                ) : (
-                    <>
-                        {transcriptTaggedSections.map(({ tag, docs }) => (
-                            <Card key={tag.id} className="mb-4">
-                                <CardHeader className="pb-2">
-                                    <div className="flex items-center gap-2">
-                                        <span
-                                            className="size-3 rounded-full shrink-0"
-                                            style={{ backgroundColor: tag.color ?? "#6b7280" }}
-                                        />
-                                        <CardTitle className="text-sm font-semibold">{tag.name}</CardTitle>
-                                        <span className="text-xs text-gray-400">({docs.length})</span>
-                                    </div>
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="divide-y">
-                                        {docs.map((doc) => <TranscriptRow key={doc.id} doc={doc} />)}
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        ))}
-                        {untaggedTranscripts.length > 0 && (
-                            <Card>
-                                <CardHeader className="pb-2">
-                                    <div className="flex items-center gap-2">
-                                        <Mic className="size-4 text-gray-400" />
-                                        <CardTitle className="text-sm font-semibold text-gray-500">Uncategorized Transcripts</CardTitle>
-                                        <span className="text-xs text-gray-400">({untaggedTranscripts.length})</span>
-                                    </div>
-                                    <CardDescription className="text-xs">
-                                        Use the + tag button to assign these to a category so the voice agent can filter them.
-                                    </CardDescription>
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="divide-y">
-                                        {untaggedTranscripts.map((doc) => <TranscriptRow key={doc.id} doc={doc} />)}
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        )}
-                    </>
-                )}
-            </div>
-
-            {/* ── New Category Dialog ───────────────────────────────────────── */}
-            <Dialog open={showNewTagDialog} onOpenChange={(open) => { if (!open) { setShowNewTagDialog(false); setNewTagName(""); setNewTagColor("#3b82f6"); } }}>
-                <DialogContent className="sm:max-w-sm">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <Tag className="size-4" />
-                            New Category
-                        </DialogTitle>
-                        <DialogDescription>Create a tag to group your knowledge base documents.</DialogDescription>
-                    </DialogHeader>
-                    <div className="flex flex-col gap-3">
-                        <input
-                            type="text"
-                            placeholder="Category name (e.g. Investors)"
-                            value={newTagName}
-                            onChange={(e) => setNewTagName(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === "Enter" && newTagName.trim()) createTagMutation.mutate(); }}
-                            className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            autoFocus
-                        />
-                        <div className="flex items-center gap-3">
-                            <label className="text-sm text-gray-600 shrink-0">Color</label>
-                            <input
-                                type="color"
-                                value={newTagColor}
-                                onChange={(e) => setNewTagColor(e.target.value)}
-                                className="size-8 rounded cursor-pointer border border-gray-200"
-                            />
-                            <span
-                                className="px-2 py-0.5 rounded-full text-xs text-white font-medium"
-                                style={{ backgroundColor: newTagColor }}
-                            >
-                                {newTagName || "Preview"}
-                            </span>
+                <Card>
+                    <CardHeader className="pb-2">
+                        <div className="flex items-center gap-2">
+                            <BookOpen className="size-4 text-gray-400" />
+                            <CardTitle className="text-sm font-semibold text-gray-700">Company Documents</CardTitle>
+                            <span className="text-xs text-gray-400">({documents.length})</span>
                         </div>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" size="sm" onClick={() => setShowNewTagDialog(false)}>
-                            Cancel
-                        </Button>
-                        <Button
-                            size="sm"
-                            disabled={!newTagName.trim() || createTagMutation.isPending}
-                            onClick={() => createTagMutation.mutate()}
-                            className="flex items-center gap-2"
-                        >
-                            {createTagMutation.isPending ? <><Loader2 className="size-4 animate-spin" />Creating…</> : "Create"}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-            {/* ── Delete Category Dialog ────────────────────────────────────── */}
-            <Dialog open={!!tagToDelete} onOpenChange={(open) => { if (!open) setTagToDelete(null); }}>
-                <DialogContent className="sm:max-w-sm">
-                    <DialogHeader>
-                        <DialogTitle className="text-red-600">Delete Category</DialogTitle>
-                        <DialogDescription>
-                            Delete &quot;{tagToDelete?.name}&quot;?{" "}
-                            {(() => {
-                                const count = tagToDelete ? (taggedSections.find((s) => s.tag.id === tagToDelete.id)?.docs.length ?? 0) : 0;
-                                return count > 0
-                                    ? `${count} document${count !== 1 ? "s" : ""} will become uncategorized.`
-                                    : "No documents are tagged with this category.";
-                            })()}
-                            {" "}This cannot be undone.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <Button variant="outline" size="sm" onClick={() => setTagToDelete(null)}>
-                            Cancel
-                        </Button>
-                        <Button
-                            variant="destructive"
-                            size="sm"
-                            disabled={deleteTagMutation.isPending}
-                            onClick={() => tagToDelete && deleteTagMutation.mutate(tagToDelete.id)}
-                            className="flex items-center gap-2"
-                        >
-                            {deleteTagMutation.isPending ? <><Loader2 className="size-4 animate-spin" />Deleting…</> : "Delete"}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="divide-y">
+                            {documents.map((doc) => <DocRow key={doc.id} doc={doc} />)}
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
 
             {/* ── View / Edit Dialog ───────────────────────────────────────── */}
             <Dialog open={!!selectedDocId} onOpenChange={(open) => { if (!open) handleCloseDialog(); }}>
@@ -1122,6 +927,234 @@ function KnowledgeBase() {
                                         Edit
                                     </Button>
                                 )}
+                            </DialogFooter>
+                        </>
+                    )}
+                </DialogContent>
+            </Dialog>
+
+            {/* ── New Project Dialog ────────────────────────────────────────── */}
+            <Dialog open={showNewProjectDialog} onOpenChange={(open) => { if (!open) { setShowNewProjectDialog(false); setNewProjectName(""); setNewProjectDescription(""); } }}>
+                <DialogContent className="sm:max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Layers className="size-4" />
+                            New Project
+                        </DialogTitle>
+                        <DialogDescription>Projects scope your voice agent to a specific set of documents.</DialogDescription>
+                    </DialogHeader>
+                    <div className="flex flex-col gap-3">
+                        <input
+                            type="text"
+                            placeholder="Project name (e.g. Investor Relations)"
+                            value={newProjectName}
+                            onChange={(e) => setNewProjectName(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter" && newProjectName.trim()) createProjectMutation.mutate(); }}
+                            className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            autoFocus
+                        />
+                        <textarea
+                            placeholder="Description (optional) — what is this project about?"
+                            value={newProjectDescription}
+                            onChange={(e) => setNewProjectDescription(e.target.value)}
+                            rows={3}
+                            className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" size="sm" onClick={() => setShowNewProjectDialog(false)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            size="sm"
+                            disabled={!newProjectName.trim() || createProjectMutation.isPending}
+                            onClick={() => createProjectMutation.mutate()}
+                            className="flex items-center gap-2"
+                        >
+                            {createProjectMutation.isPending ? <><Loader2 className="size-4 animate-spin" />Creating…</> : "Create Project"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ── Edit Project Dialog ───────────────────────────────────────── */}
+            <Dialog open={!!editingProject} onOpenChange={(open) => { if (!open) setEditingProject(null); }}>
+                <DialogContent className="sm:max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Pencil className="size-4" />
+                            Edit Project
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="flex flex-col gap-3">
+                        <input
+                            type="text"
+                            placeholder="Project name"
+                            value={editProjectName}
+                            onChange={(e) => setEditProjectName(e.target.value)}
+                            className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            autoFocus
+                        />
+                        <textarea
+                            placeholder="Description (optional)"
+                            value={editProjectDescription}
+                            onChange={(e) => setEditProjectDescription(e.target.value)}
+                            rows={3}
+                            className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" size="sm" onClick={() => setEditingProject(null)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            size="sm"
+                            disabled={!editProjectName.trim() || updateProjectMutation.isPending}
+                            onClick={() => updateProjectMutation.mutate()}
+                            className="flex items-center gap-2"
+                        >
+                            {updateProjectMutation.isPending ? <><Loader2 className="size-4 animate-spin" />Saving…</> : "Save"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ── Delete Project Dialog ─────────────────────────────────────── */}
+            <Dialog open={!!projectToDelete} onOpenChange={(open) => { if (!open) setProjectToDelete(null); }}>
+                <DialogContent className="sm:max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle className="text-red-600">Delete Project</DialogTitle>
+                        <DialogDescription>
+                            Delete &quot;{projectToDelete?.name}&quot;? The project will be removed but its documents will not be deleted. This cannot be undone.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" size="sm" onClick={() => setProjectToDelete(null)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            size="sm"
+                            disabled={deleteProjectMutation.isPending}
+                            onClick={() => projectToDelete && deleteProjectMutation.mutate(projectToDelete.id)}
+                            className="flex items-center gap-2"
+                        >
+                            {deleteProjectMutation.isPending ? <><Loader2 className="size-4 animate-spin" />Deleting…</> : "Delete"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ── Project Detail Dialog ─────────────────────────────────────── */}
+            <Dialog open={!!selectedProjectId} onOpenChange={(open) => { if (!open) { setSelectedProjectId(null); setShowAddDocDialog(false); } }}>
+                <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+                    {isProjectDetailPending ? (
+                        <div className="flex flex-col items-center justify-center py-12">
+                            <Loader2 className="size-8 text-blue-500 mb-3 animate-spin" />
+                            <p className="text-sm text-gray-500">Loading project…</p>
+                        </div>
+                    ) : !projectDetail ? (
+                        <div className="py-12 text-center text-sm text-red-500">Project not found.</div>
+                    ) : (
+                        <>
+                            <DialogHeader>
+                                <DialogTitle className="flex items-center gap-2">
+                                    <Layers className="size-4 text-blue-500" />
+                                    {projectDetail.name}
+                                </DialogTitle>
+                                {projectDetail.description && (
+                                    <DialogDescription>{projectDetail.description}</DialogDescription>
+                                )}
+                            </DialogHeader>
+
+                            {/* Document list */}
+                            <div className="flex flex-col gap-2">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm font-medium text-gray-700">
+                                        Documents ({projectDetail.documents.length})
+                                    </span>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="flex items-center gap-1"
+                                        onClick={() => setShowAddDocDialog((v) => !v)}
+                                    >
+                                        <Plus className="size-3.5" /> Add Document
+                                    </Button>
+                                </div>
+
+                                {/* Add doc picker — inline dropdown */}
+                                {showAddDocDialog && (
+                                    <Card className="border-blue-200 bg-blue-50">
+                                        <CardContent className="p-3">
+                                            <p className="text-xs text-gray-600 mb-2 font-medium">Select a document to add:</p>
+                                            <div className="flex flex-col gap-1 max-h-72 overflow-y-auto">
+                                                {[...documents, ...transcriptDocuments]
+                                                    .filter((d) => !projectDetail.documents.some((pd) => pd.id === d.id))
+                                                    .map((doc) => (
+                                                        <button
+                                                            key={doc.id}
+                                                            type="button"
+                                                            onClick={() => addDocToProjectMutation.mutate({ projectId: projectDetail.id, documentId: doc.id })}
+                                                            disabled={addDocToProjectMutation.isPending}
+                                                            className="flex items-center gap-2 px-2 py-1.5 rounded text-left text-xs hover:bg-white transition-colors w-full"
+                                                        >
+                                                            {doc.source_type === "transcript" ? (
+                                                                <Mic className="size-3 text-purple-500 shrink-0" />
+                                                            ) : (
+                                                                <BookOpen className="size-3 text-gray-400 shrink-0" />
+                                                            )}
+                                                            <span className="truncate">{doc.title}</span>
+                                                        </button>
+                                                    ))}
+                                                {[...documents, ...transcriptDocuments].filter((d) => !projectDetail.documents.some((pd) => pd.id === d.id)).length === 0 && (
+                                                    <p className="text-xs text-gray-400 px-2 py-1">All documents are already in this project.</p>
+                                                )}
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                )}
+
+                                {projectDetail.documents.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center py-8 border rounded-md border-dashed">
+                                        <FolderOpen className="size-7 text-gray-300 mb-2" />
+                                        <p className="text-sm text-gray-400">No documents in this project yet</p>
+                                    </div>
+                                ) : (
+                                    <div className="divide-y border rounded-md">
+                                        {projectDetail.documents.map((doc) => (
+                                            <div key={doc.id} className="flex items-center justify-between px-3 py-2.5">
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    {doc.source_type === "transcript" ? (
+                                                        <Mic className="size-3.5 text-purple-500 shrink-0" />
+                                                    ) : (
+                                                        <BookOpen className="size-3.5 text-gray-400 shrink-0" />
+                                                    )}
+                                                    <span className="text-sm text-gray-700 truncate">{doc.title}</span>
+                                                    <span className={`text-xs shrink-0 ${doc.is_active ? "text-green-500" : "text-gray-400"}`}>
+                                                        {doc.is_active ? "Active" : "Inactive"}
+                                                    </span>
+                                                </div>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon-sm"
+                                                    title="Remove from project"
+                                                    disabled={removeDocFromProjectMutation.isPending}
+                                                    onClick={() => removeDocFromProjectMutation.mutate({ projectId: projectDetail.id, documentId: doc.id })}
+                                                    className="text-red-400 hover:text-red-600 shrink-0"
+                                                >
+                                                    <X className="size-4" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            <DialogFooter>
+                                <Button variant="outline" size="sm" onClick={() => setSelectedProjectId(null)}>
+                                    Close
+                                </Button>
                             </DialogFooter>
                         </>
                     )}
