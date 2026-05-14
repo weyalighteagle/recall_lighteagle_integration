@@ -19,6 +19,7 @@ import { voice_agent_config_get, voice_agent_config_update } from "./handlers/vo
 import { voice_agent_photo_upload, voice_agent_photo_delete } from "./handlers/voice_agent_photo";
 import { knowledge_bases_list, knowledge_base_by_slug } from "./handlers/knowledge_bases";
 import { meeting_kb_get, meeting_kb_upsert, meeting_kb_delete } from "./handlers/meeting_kb_override";
+import { meeting_project_get, meeting_project_upsert, meeting_project_delete } from "./handlers/meeting_project";
 import { project_list, project_create, project_get, project_update, project_delete, project_document_add, project_document_remove } from "./handlers/projects";
 import { supabase } from "./config/supabase";
 import { requireAuth } from "./middleware/auth";
@@ -713,6 +714,38 @@ body=${JSON.stringify(body)}
                     });
                     res.end(JSON.stringify(transcript));
                     return;
+                }
+
+                // ── /api/meeting-project — meeting→project assignment ─────
+                if (pathname === "/api/meeting-project") {
+                    switch (req.method?.toUpperCase()) {
+                        case "GET": {
+                            if (!await requireAuth(req, res)) return;
+                            const userId: string = (req as any).userId;
+                            const result = await meeting_project_get(search_params, userId);
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify(result));
+                            return;
+                        }
+                        case "PUT": {
+                            if (!await requireAuth(req, res)) return;
+                            const userId: string = (req as any).userId;
+                            const result = await meeting_project_upsert(body ?? {}, userId);
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify(result));
+                            return;
+                        }
+                        case "DELETE": {
+                            if (!await requireAuth(req, res)) return;
+                            const userId: string = (req as any).userId;
+                            const result = await meeting_project_delete(search_params, userId);
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify(result));
+                            return;
+                        }
+                        default:
+                            throw new Error(`Method not allowed: ${req.method}`);
+                    }
                 }
 
                 // GET /api/meeting-kb/:calendarEventId — per-meeting KB override
