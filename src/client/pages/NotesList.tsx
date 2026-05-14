@@ -193,6 +193,7 @@ function MeetingProjectPicker({ kbDocumentId, projects, getToken }: MeetingProje
     const queryClient = useQueryClient();
     const [showPicker, setShowPicker] = useState(false);
     const pickerRef = useRef<HTMLDivElement>(null);
+    const [assignedProjectIds, setAssignedProjectIds] = useState<Set<string>>(new Set());
 
     useEffect(() => {
         if (!showPicker) return;
@@ -216,9 +217,10 @@ function MeetingProjectPicker({ kbDocumentId, projects, getToken }: MeetingProje
             });
             if (!res.ok) throw new Error(await res.text());
         },
-        onSuccess: () => {
+        onSuccess: (_data, projectId) => {
             void queryClient.invalidateQueries({ queryKey: ["kb_projects"] });
             void queryClient.invalidateQueries({ queryKey: ["kb_project_detail"] });
+            setAssignedProjectIds((prev) => new Set([...prev, projectId]));
             setShowPicker(false);
             toast.success("Added to project");
         },
@@ -236,8 +238,19 @@ function MeetingProjectPicker({ kbDocumentId, projects, getToken }: MeetingProje
         );
     }
 
+    const assignedProjects = projects.filter((p) => assignedProjectIds.has(p.id));
+
     return (
-        <div className="relative inline-flex items-center" ref={pickerRef}>
+        <div className="relative inline-flex items-center gap-1.5 flex-wrap" ref={pickerRef}>
+            {assignedProjects.map((p) => (
+                <span
+                    key={p.id}
+                    className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium"
+                >
+                    <Layers className="size-2.5" />
+                    {p.name}
+                </span>
+            ))}
             <button
                 type="button"
                 className="text-xs text-gray-400 hover:text-gray-600"
@@ -269,13 +282,19 @@ function MeetingProjectPicker({ kbDocumentId, projects, getToken }: MeetingProje
                             <button
                                 key={project.id}
                                 type="button"
-                                className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded hover:bg-gray-50 text-sm"
-                                onClick={() => addToProjectMutation.mutate(project.id)}
-                                disabled={addToProjectMutation.isPending}
+                                className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded hover:bg-gray-50 text-sm ${assignedProjectIds.has(project.id) ? "opacity-40 cursor-default" : ""}`}
+                                onClick={() => {
+                                    if (!assignedProjectIds.has(project.id)) {
+                                        addToProjectMutation.mutate(project.id);
+                                    }
+                                }}
+                                disabled={addToProjectMutation.isPending || assignedProjectIds.has(project.id)}
                             >
                                 <Layers className="size-3 text-blue-400 shrink-0" />
                                 <span className="truncate">{project.name}</span>
-                                <span className="ml-auto text-xs text-gray-400 shrink-0">{project.document_count} docs</span>
+                                {assignedProjectIds.has(project.id) && (
+                                    <span className="ml-auto text-blue-500 text-xs">✓</span>
+                                )}
                             </button>
                         ))
                     )}
