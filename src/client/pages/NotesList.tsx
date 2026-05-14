@@ -1,7 +1,7 @@
 import { useAuth } from "@clerk/react";
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation, useQueries } from "@tanstack/react-query";
 import { Calendar, ChevronLeft, ChevronRight, Download, FileText, Layers, Loader2, Pencil, Users, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
@@ -186,14 +186,23 @@ function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
 interface MeetingProjectPickerProps {
     kbDocumentId: string | null;
     projects: Project[];
+    initialAssignedProjects: Project[];
     getToken: () => Promise<string | null>;
 }
 
-function MeetingProjectPicker({ kbDocumentId, projects, getToken }: MeetingProjectPickerProps) {
+function MeetingProjectPicker({ kbDocumentId, projects, initialAssignedProjects, getToken }: MeetingProjectPickerProps) {
     const queryClient = useQueryClient();
     const [showPicker, setShowPicker] = useState(false);
     const pickerRef = useRef<HTMLDivElement>(null);
     const [assignedProjectIds, setAssignedProjectIds] = useState<Set<string>>(new Set());
+
+    const initialKey = initialAssignedProjects.map((p) => p.id).join(",");
+    useEffect(() => {
+        const ids = initialKey.split(",").filter(Boolean);
+        if (ids.length > 0) {
+            setAssignedProjectIds((prev) => new Set([...prev, ...ids]));
+        }
+    }, [initialKey]);
 
     useEffect(() => {
         if (!showPicker) return;
@@ -354,6 +363,37 @@ function NotesList() {
     });
 
     const projects = projectsData?.projects ?? [];
+
+    const projectDetailQueries = useQueries({
+        queries: projects.map((p) => ({
+            queryKey: ["kb_project_detail", p.id] as const,
+            queryFn: async () => {
+                const token = await getToken();
+                const res = await fetch(`/api/projects/${p.id}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!res.ok) return { id: p.id, documents: [] as Array<{ id: string }> };
+                return res.json() as Promise<{ id: string; documents: Array<{ id: string }> }>;
+            },
+            staleTime: 60_000,
+            enabled: projects.length > 0,
+        })),
+    });
+
+    const initialDocProjects = useMemo(() => {
+        const map = new Map<string, Project[]>();
+        projectDetailQueries.forEach((query, i) => {
+            const detail = query.data;
+            const project = projects[i];
+            if (detail && project) {
+                for (const doc of detail.documents) {
+                    if (!map.has(doc.id)) map.set(doc.id, []);
+                    map.get(doc.id)!.push(project);
+                }
+            }
+        });
+        return map;
+    }, [projectDetailQueries, projects]);
 
     // Map botId → kb_document id using metadata.botId stored during transcript ingest
     const kbDocByBotId = new Map<string, string>(
@@ -585,6 +625,12 @@ function NotesList() {
                                         <MeetingProjectPicker
                                             kbDocumentId={kbDocByBotId.get(meeting.bot_id) ?? null}
                                             projects={projects}
+                                            initialAssignedProjects={
+                                                (() => {
+                                                    const docId = kbDocByBotId.get(meeting.bot_id);
+                                                    return docId ? (initialDocProjects.get(docId) ?? []) : [];
+                                                })()
+                                            }
                                             getToken={getToken}
                                         />
                                     </div>

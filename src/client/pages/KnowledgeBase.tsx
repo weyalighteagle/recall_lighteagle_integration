@@ -14,7 +14,6 @@ import {
     CardTitle,
     CardDescription,
 } from "../components/ui/Card";
-import { ScrollArea } from "../components/ui/ScrollArea";
 import {
     Dialog,
     DialogContent,
@@ -206,7 +205,7 @@ function KnowledgeBase() {
         },
     });
 
-    const { data: transcriptsData, isPending: isTranscriptsPending } = useQuery<{ documents: TranscriptDocument[] }>({
+    const { data: transcriptsData } = useQuery<{ documents: TranscriptDocument[] }>({
         queryKey: ["kb_transcripts"],
         queryFn: async () => {
             const token = await getToken();
@@ -552,62 +551,6 @@ function KnowledgeBase() {
         </div>
     );
 
-    // ── Transcript row (Section 2 — read-only, no rename) ─────────────
-    const TranscriptRow = ({ doc }: { doc: TranscriptDocument }) => (
-        <div
-            key={doc.id}
-            className={`flex items-start justify-between py-3 ${!doc.is_active ? "opacity-50" : ""}`}
-        >
-            <button
-                type="button"
-                onClick={() => handleOpenDocument(doc.id)}
-                className="flex flex-col gap-1 min-w-0 flex-1 text-left hover:bg-gray-50 -mx-2 px-2 py-1 rounded-md transition-colors cursor-pointer"
-            >
-                <span className="text-sm font-medium text-gray-800 truncate">{doc.title}</span>
-                <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 flex items-center gap-0.5">
-                        <Mic className="size-3" /> Meeting Transcript
-                    </span>
-                    <span className="text-xs text-gray-400">
-                        {new Date((doc.metadata?.meetingDate as string | undefined) ?? doc.created_at).toLocaleDateString()}
-                    </span>
-                    <span className="text-xs text-blue-500 flex items-center gap-0.5">
-                        <Eye className="size-3" /> View
-                    </span>
-                </div>
-                <div className="flex items-center gap-1.5 flex-wrap mt-0.5" onClick={(e) => e.stopPropagation()}>
-                    <AddToProjectDropdown
-                        docId={doc.id}
-                        projects={projects}
-                        onAdd={(projectId) => addDocToProjectMutation.mutate({ projectId, documentId: doc.id })}
-                    />
-                </div>
-            </button>
-            <div className="flex items-center gap-1 shrink-0 ml-2 mt-1">
-                <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    title={doc.is_active ? "Deactivate" : "Activate"}
-                    onClick={(e) => { e.stopPropagation(); toggleMutation.mutate({ id: doc.id, is_active: !doc.is_active }); }}
-                >
-                    <Power className={`size-4 ${doc.is_active ? "text-green-600" : "text-gray-400"}`} />
-                </Button>
-                <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    title="Delete"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm(`"${doc.title}" will be deleted. Are you sure?`)) deleteMutation.mutate(doc.id);
-                    }}
-                    className="text-red-500 hover:text-red-700"
-                >
-                    <Trash2 className="size-4" />
-                </Button>
-            </div>
-        </div>
-    );
-
     // ── Render ────────────────────────────────────────────────────────
     return (
         <div className="flex flex-col gap-4 max-w-3xl mx-auto">
@@ -813,40 +756,6 @@ function KnowledgeBase() {
                     </CardContent>
                 </Card>
             )}
-
-            {/* ── Section 2: Meeting Transcripts ──────────────────────────── */}
-            <div className="mt-4">
-                <div className="flex items-center gap-2 mb-3">
-                    <Mic className="size-4 text-purple-500" />
-                    <h2 className="text-base font-semibold text-gray-700">Meeting Transcripts</h2>
-                    {!isTranscriptsPending && (
-                        <span className="text-xs text-gray-400">({transcriptDocuments.length})</span>
-                    )}
-                </div>
-                {isTranscriptsPending ? (
-                    <Card>
-                        <CardContent className="flex items-center justify-center py-8">
-                            <Loader2 className="size-6 text-blue-500 animate-spin" />
-                        </CardContent>
-                    </Card>
-                ) : transcriptDocuments.length === 0 ? (
-                    <Card>
-                        <CardContent className="flex flex-col items-center justify-center py-8">
-                            <Mic className="size-8 text-gray-300 mb-2" />
-                            <p className="text-sm text-gray-500">No meeting transcripts yet</p>
-                            <p className="text-xs text-gray-400 mt-1">Transcripts from your meetings will appear here once ingested</p>
-                        </CardContent>
-                    </Card>
-                ) : (
-                    <Card>
-                        <CardContent>
-                            <div className="divide-y">
-                                {transcriptDocuments.map((doc) => <TranscriptRow key={doc.id} doc={doc} />)}
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
-            </div>
 
             {/* ── View / Edit Dialog ───────────────────────────────────────── */}
             <Dialog open={!!selectedDocId} onOpenChange={(open) => { if (!open) handleCloseDialog(); }}>
