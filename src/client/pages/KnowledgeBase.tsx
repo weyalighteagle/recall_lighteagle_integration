@@ -1,6 +1,6 @@
 import { useAuth } from "@clerk/react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useRef, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient, useQueries } from "@tanstack/react-query";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import {
     Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye, Star, X, Mic,
@@ -109,14 +109,28 @@ interface ProjectDetail {
 function AddToProjectDropdown({
     docId,
     projects,
+    assignedProjects,
     onAdd,
 }: {
     docId: string;
     projects: Project[];
+    assignedProjects: Project[];
     onAdd: (projectId: string) => void;
 }) {
     const [open, setOpen] = useState(false);
     const ref = useRef<HTMLDivElement>(null);
+    const [localAssignedIds, setLocalAssignedIds] = useState<Set<string>>(
+        () => new Set(assignedProjects.map((p) => p.id))
+    );
+
+    // Sync server-loaded assignments once project detail queries resolve
+    const assignedKey = assignedProjects.map((p) => p.id).join(",");
+    useEffect(() => {
+        const ids = assignedKey.split(",").filter(Boolean);
+        if (ids.length > 0) {
+            setLocalAssignedIds((prev) => new Set([...prev, ...ids]));
+        }
+    }, [assignedKey]);
 
     useEffect(() => {
         if (!open) return;
@@ -127,35 +141,53 @@ function AddToProjectDropdown({
         return () => document.removeEventListener("mousedown", handler);
     }, [open]);
 
-    if (projects.length === 0) return null;
+    const handleAdd = (projectId: string) => {
+        setLocalAssignedIds((prev) => new Set([...prev, projectId]));
+        onAdd(projectId);
+        setOpen(false);
+    };
+
+    const assignedList = projects.filter((p) => localAssignedIds.has(p.id));
+    const unassigned = projects.filter((p) => !localAssignedIds.has(p.id));
 
     return (
-        <div className="relative" ref={ref}>
-            <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border border-dashed border-blue-300 text-xs text-blue-500 hover:border-blue-400 hover:text-blue-700 transition-colors"
-            >
-                <Layers className="size-3" /> project
-            </button>
+        <div className="relative flex items-center gap-1.5 flex-wrap" ref={ref}>
+            {assignedList.map((p) => (
+                <span
+                    key={p.id}
+                    className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium"
+                >
+                    <Layers className="size-2.5" />
+                    {p.name}
+                </span>
+            ))}
+            {projects.length > 0 && (
+                <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border border-dashed border-blue-300 text-xs text-blue-500 hover:border-blue-400 hover:text-blue-700 transition-colors"
+                >
+                    <Layers className="size-3" /> project
+                </button>
+            )}
             {open && (
                 <div className="absolute left-0 top-full mt-1 z-50 bg-white border rounded-md shadow-lg min-w-[180px] py-1">
-                    {projects.map((project) => (
-                        <button
-                            key={project.id}
-                            type="button"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onAdd(project.id);
-                                setOpen(false);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-gray-50 text-left"
-                        >
-                            <Layers className="size-3 text-blue-400 shrink-0" />
-                            <span className="truncate">{project.name}</span>
-                            <span className="ml-auto text-gray-400 shrink-0">{project.document_count} docs</span>
-                        </button>
-                    ))}
+                    {unassigned.length === 0 ? (
+                        <p className="text-xs text-gray-400 px-3 py-1.5">All projects assigned</p>
+                    ) : (
+                        unassigned.map((project) => (
+                            <button
+                                key={project.id}
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleAdd(project.id); }}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-gray-50 text-left"
+                            >
+                                <Layers className="size-3 text-blue-400 shrink-0" />
+                                <span className="truncate">{project.name}</span>
+                                <span className="ml-auto text-gray-400 shrink-0">{project.document_count} docs</span>
+                            </button>
+                        ))
+                    )}
                 </div>
             )}
         </div>
@@ -262,6 +294,37 @@ function KnowledgeBase() {
     });
 
     const projects = projectsData?.projects ?? [];
+
+    const projectDetailQueries = useQueries({
+        queries: projects.map((p) => ({
+            queryKey: ["kb_project_detail", p.id] as const,
+            queryFn: async () => {
+                const token = await getToken();
+                const res = await fetch(`/api/projects/${p.id}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!res.ok) return { id: p.id, documents: [] as Array<{ id: string }> };
+                return res.json() as Promise<{ id: string; documents: Array<{ id: string }> }>;
+            },
+            staleTime: 60_000,
+            enabled: projects.length > 0,
+        })),
+    });
+
+    const docProjectsMap = useMemo(() => {
+        const map = new Map<string, Project[]>();
+        projectDetailQueries.forEach((query, i) => {
+            const detail = query.data;
+            const project = projects[i];
+            if (detail && project) {
+                for (const doc of detail.documents) {
+                    if (!map.has(doc.id)) map.set(doc.id, []);
+                    map.get(doc.id)!.push(project);
+                }
+            }
+        });
+        return map;
+    }, [projectDetailQueries, projects]);
 
     const documents = data?.documents ?? [];
     const transcriptDocuments = transcriptsData?.documents ?? [];
@@ -507,6 +570,7 @@ function KnowledgeBase() {
                     <AddToProjectDropdown
                         docId={doc.id}
                         projects={projects}
+                        assignedProjects={docProjectsMap.get(doc.id) ?? []}
                         onAdd={(projectId) => addDocToProjectMutation.mutate({ projectId, documentId: doc.id })}
                     />
                 </div>
