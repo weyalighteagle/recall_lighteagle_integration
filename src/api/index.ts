@@ -19,6 +19,7 @@ import { voice_agent_config_get, voice_agent_config_update } from "./handlers/vo
 import { voice_agent_photo_upload, voice_agent_photo_delete } from "./handlers/voice_agent_photo";
 import { knowledge_bases_list, knowledge_base_by_slug } from "./handlers/knowledge_bases";
 import { meeting_kb_get, meeting_kb_upsert, meeting_kb_delete } from "./handlers/meeting_kb_override";
+import { project_list, project_create, project_get, project_update, project_delete, project_document_add, project_document_remove } from "./handlers/projects";
 import { supabase } from "./config/supabase";
 import { requireAuth } from "./middleware/auth";
 
@@ -742,6 +743,98 @@ body=${JSON.stringify(body)}
                     await meeting_kb_delete(calendarEventId);
                     res.writeHead(200, { "Content-Type": "application/json" });
                     res.end(JSON.stringify({ message: "Override removed" }));
+                    return;
+                }
+
+                // ── /api/projects — list + create ─────────────────────────
+                if (pathname === "/api/projects") {
+                    switch (req.method?.toUpperCase()) {
+                        case "GET": {
+                            if (!await requireAuth(req, res)) return;
+                            const userId: string = (req as any).userId;
+                            const result = await project_list(userId);
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify(result));
+                            return;
+                        }
+                        case "POST": {
+                            if (!await requireAuth(req, res)) return;
+                            const userId: string = (req as any).userId;
+                            if (!body?.name) {
+                                res.writeHead(400, { "Content-Type": "application/json" });
+                                res.end(JSON.stringify({ error: "name is required" }));
+                                return;
+                            }
+                            const project = await project_create(body, userId);
+                            res.writeHead(201, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify(project));
+                            return;
+                        }
+                        default:
+                            throw new Error(`Method not allowed: ${req.method}`);
+                    }
+                }
+
+                // ── /api/projects/:id — get, update, delete ────────────────
+                if (pathname.match(/^\/api\/projects\/[^/]+$/)) {
+                    const projectId = pathname.split("/")[3]!;
+                    switch (req.method?.toUpperCase()) {
+                        case "GET": {
+                            if (!await requireAuth(req, res)) return;
+                            const userId: string = (req as any).userId;
+                            const result = await project_get(projectId, userId);
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify(result));
+                            return;
+                        }
+                        case "PATCH": {
+                            if (!await requireAuth(req, res)) return;
+                            const userId: string = (req as any).userId;
+                            const result = await project_update(projectId, body ?? {}, userId);
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify(result));
+                            return;
+                        }
+                        case "DELETE": {
+                            if (!await requireAuth(req, res)) return;
+                            const userId: string = (req as any).userId;
+                            await project_delete(projectId, userId);
+                            res.writeHead(200, { "Content-Type": "application/json" });
+                            res.end(JSON.stringify({ message: "Project deleted" }));
+                            return;
+                        }
+                        default:
+                            throw new Error(`Method not allowed: ${req.method}`);
+                    }
+                }
+
+                // ── /api/projects/:id/documents/:docId — remove document ──
+                if (pathname.match(/^\/api\/projects\/[^/]+\/documents\/[^/]+$/)) {
+                    if (req.method?.toUpperCase() !== "DELETE") throw new Error(`Method not allowed: ${req.method}`);
+                    if (!await requireAuth(req, res)) return;
+                    const userId: string = (req as any).userId;
+                    const projectId = pathname.split("/")[3]!;
+                    const docId = pathname.split("/")[5]!;
+                    const result = await project_document_remove(projectId, docId, userId);
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // ── /api/projects/:id/documents — add document ────────────
+                if (pathname.match(/^\/api\/projects\/[^/]+\/documents$/)) {
+                    if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
+                    if (!await requireAuth(req, res)) return;
+                    const userId: string = (req as any).userId;
+                    const projectId = pathname.split("/")[3]!;
+                    if (!body?.document_id) {
+                        res.writeHead(400, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: "document_id is required" }));
+                        return;
+                    }
+                    const result = await project_document_add(projectId, body.document_id, userId);
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
                     return;
                 }
 
