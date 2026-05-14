@@ -29,3 +29,5 @@ npm-debug.log*
 # Local tooling
 .claude/
 supabase/.temp/
+scripts/demo_files/
+scripts/ingest_demo.ts
