@@ -218,6 +218,7 @@ function MeetingProjectPicker({ kbDocumentId, projects, getToken }: MeetingProje
         },
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ["kb_projects"] });
+            void queryClient.invalidateQueries({ queryKey: ["kb_project_detail"] });
             setShowPicker(false);
             toast.success("Added to project");
         },
@@ -562,14 +563,11 @@ function NotesList() {
                                                 </span>
                                             )}
                                         </div>
-                                        <div className="flex items-center gap-3 flex-wrap">
-                                            <MeetingTagPicker botId={meeting.bot_id} getToken={getToken} />
-                                            <MeetingProjectPicker
-                                                kbDocumentId={kbDocByBotId.get(meeting.bot_id) ?? null}
-                                                projects={projects}
-                                                getToken={getToken}
-                                            />
-                                        </div>
+                                        <MeetingProjectPicker
+                                            kbDocumentId={kbDocByBotId.get(meeting.bot_id) ?? null}
+                                            projects={projects}
+                                            getToken={getToken}
+                                        />
                                     </div>
                                     <div className="flex items-center gap-2 shrink-0">
                                         <span

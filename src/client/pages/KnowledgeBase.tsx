@@ -196,6 +196,62 @@ function AddTagDropdown({
     );
 }
 
+function AddToProjectDropdown({
+    docId,
+    projects,
+    onAdd,
+}: {
+    docId: string;
+    projects: Project[];
+    onAdd: (projectId: string) => void;
+}) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!open) return;
+        const handler = (e: MouseEvent) => {
+            if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, [open]);
+
+    if (projects.length === 0) return null;
+
+    return (
+        <div className="relative" ref={ref}>
+            <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border border-dashed border-blue-300 text-xs text-blue-500 hover:border-blue-400 hover:text-blue-700 transition-colors"
+            >
+                <Layers className="size-3" /> project
+            </button>
+            {open && (
+                <div className="absolute left-0 top-full mt-1 z-50 bg-white border rounded-md shadow-lg min-w-[180px] py-1">
+                    {projects.map((project) => (
+                        <button
+                            key={project.id}
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onAdd(project.id);
+                                setOpen(false);
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-gray-50 text-left"
+                        >
+                            <Layers className="size-3 text-blue-400 shrink-0" />
+                            <span className="truncate">{project.name}</span>
+                            <span className="ml-auto text-gray-400 shrink-0">{project.document_count} docs</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ─── Inline rename input for a tag section header ────────────
 
 function InlineRename({
@@ -466,6 +522,7 @@ function KnowledgeBase() {
             toast.success("Document added to project");
             setShowAddDocDialog(false);
             invalidateProjects(projectId);
+            void queryClient.invalidateQueries({ queryKey: ["kb_project_detail"] });
         },
         onError: (err: Error) => toast.error(err.message),
     });
@@ -701,7 +758,7 @@ function KnowledgeBase() {
                         <Eye className="size-3" /> View
                     </span>
                 </div>
-                {/* Tag pills */}
+                {/* Tag pills + project picker */}
                 <div className="flex items-center gap-1.5 flex-wrap mt-0.5" onClick={(e) => e.stopPropagation()}>
                     {doc.tags.map((tag) => (
                         <TagPill
@@ -715,6 +772,11 @@ function KnowledgeBase() {
                         allTags={allTags}
                         docTagIds={doc.tags.map((t) => t.id)}
                         onAdd={(tagId) => addDocTagMutation.mutate({ docId: doc.id, tagId })}
+                    />
+                    <AddToProjectDropdown
+                        docId={doc.id}
+                        projects={projects}
+                        onAdd={(projectId) => addDocToProjectMutation.mutate({ projectId, documentId: doc.id })}
                     />
                 </div>
             </button>
@@ -795,6 +857,11 @@ function KnowledgeBase() {
                         allTags={allTags}
                         docTagIds={doc.tags.map((t) => t.id)}
                         onAdd={(tagId) => addDocTagMutation.mutate({ docId: doc.id, tagId })}
+                    />
+                    <AddToProjectDropdown
+                        docId={doc.id}
+                        projects={projects}
+                        onAdd={(projectId) => addDocToProjectMutation.mutate({ projectId, documentId: doc.id })}
                     />
                 </div>
             </button>
