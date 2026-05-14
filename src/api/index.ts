@@ -291,6 +291,7 @@ body=${JSON.stringify(body)}
                 if (!body?.meeting_url) throw new Error("meeting_url is required");
 
                 const userEmail: string | undefined = (req as any).userEmail;
+                const userId: string = (req as any).userId;
                 if (!userEmail) {
                     res.writeHead(401, { "Content-Type": "application/json" });
                     res.end(JSON.stringify({ error: "Unable to resolve user email from auth token" }));
@@ -302,6 +303,20 @@ body=${JSON.stringify(body)}
                 if (!bot_type) {
                     const settings = await bot_settings_get();
                     bot_type = settings.bot_mode === "voice_agent" ? "voice_agent" : "recording";
+                }
+
+                if (body.project_id) {
+                    const { data: proj } = await supabase
+                        .from("kb_projects")
+                        .select("id")
+                        .eq("id", body.project_id)
+                        .eq("user_id", userId)
+                        .maybeSingle();
+                    if (!proj) {
+                        res.writeHead(404, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: "Project not found" }));
+                        return;
+                    }
                 }
 
                 const result = await bot_join({ ...body, bot_type, user_email: userEmail });
