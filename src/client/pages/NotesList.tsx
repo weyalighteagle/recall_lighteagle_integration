@@ -1,6 +1,6 @@
 import { useAuth } from "@clerk/react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Calendar, ChevronLeft, ChevronRight, Download, FileText, Loader2, Pencil, Users } from "lucide-react";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { Calendar, ChevronLeft, ChevronRight, Download, FileText, Layers, Loader2, Pencil, Users, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -29,6 +29,18 @@ interface Meeting {
 
 interface NotesResponse {
     meetings: Meeting[];
+}
+
+interface Project {
+    id: string;
+    name: string;
+    description: string | null;
+    document_count: number;
+}
+
+interface KBTranscriptDoc {
+    id: string;
+    metadata: Record<string, unknown>;
 }
 
 interface MeetingTagPickerProps {
@@ -171,6 +183,107 @@ function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
     );
 }
 
+interface MeetingProjectPickerProps {
+    kbDocumentId: string | null;
+    projects: Project[];
+    getToken: () => Promise<string | null>;
+}
+
+function MeetingProjectPicker({ kbDocumentId, projects, getToken }: MeetingProjectPickerProps) {
+    const queryClient = useQueryClient();
+    const [showPicker, setShowPicker] = useState(false);
+    const pickerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (!showPicker) return;
+        const handler = (e: MouseEvent) => {
+            if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+                setShowPicker(false);
+            }
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, [showPicker]);
+
+    const addToProjectMutation = useMutation({
+        mutationFn: async (projectId: string) => {
+            if (!kbDocumentId) throw new Error("Transcript not yet ingested into KB");
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${projectId}/documents`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ document_id: kbDocumentId }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+        },
+        onSuccess: () => {
+            void queryClient.invalidateQueries({ queryKey: ["kb_projects"] });
+            setShowPicker(false);
+            toast.success("Added to project");
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
+    if (!kbDocumentId) {
+        return (
+            <span
+                className="text-xs text-gray-300 cursor-not-allowed"
+                title="Transcript not yet ingested into KB"
+            >
+                + project
+            </span>
+        );
+    }
+
+    return (
+        <div className="relative inline-flex items-center" ref={pickerRef}>
+            <button
+                type="button"
+                className="text-xs text-gray-400 hover:text-gray-600"
+                onClick={() => setShowPicker((v) => !v)}
+                disabled={addToProjectMutation.isPending}
+            >
+                {addToProjectMutation.isPending ? (
+                    <Loader2 className="size-3 animate-spin inline" />
+                ) : (
+                    "+ project"
+                )}
+            </button>
+            {showPicker && (
+                <div className="absolute top-full left-0 mt-1 z-10 bg-white border border-gray-200 rounded-lg shadow-lg p-1.5 min-w-[200px]">
+                    <div className="flex items-center justify-between px-2 py-1 mb-0.5">
+                        <span className="text-xs font-medium text-gray-500">Add to project</span>
+                        <button
+                            type="button"
+                            onClick={() => setShowPicker(false)}
+                            className="text-gray-400 hover:text-gray-600"
+                        >
+                            <X className="size-3" />
+                        </button>
+                    </div>
+                    {projects.length === 0 ? (
+                        <p className="text-xs text-gray-400 px-2 py-1">No projects yet — create one in the Knowledge Base</p>
+                    ) : (
+                        projects.map((project) => (
+                            <button
+                                key={project.id}
+                                type="button"
+                                className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded hover:bg-gray-50 text-sm"
+                                onClick={() => addToProjectMutation.mutate(project.id)}
+                                disabled={addToProjectMutation.isPending}
+                            >
+                                <Layers className="size-3 text-blue-400 shrink-0" />
+                                <span className="truncate">{project.name}</span>
+                                <span className="ml-auto text-xs text-gray-400 shrink-0">{project.document_count} docs</span>
+                            </button>
+                        ))
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function NotesList() {
     const navigate = useNavigate();
     const { getToken } = useAuth();
@@ -195,6 +308,39 @@ function NotesList() {
             return res.json();
         },
     });
+
+    const { data: projectsData } = useQuery<{ projects: Project[] }>({
+        queryKey: ["kb_projects"],
+        queryFn: async () => {
+            const token = await getToken();
+            const res = await fetch("/api/projects", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        },
+    });
+
+    const { data: transcriptsData } = useQuery<{ documents: KBTranscriptDoc[] }>({
+        queryKey: ["kb_transcripts"],
+        queryFn: async () => {
+            const token = await getToken();
+            const res = await fetch("/api/kb/transcripts", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        },
+    });
+
+    const projects = projectsData?.projects ?? [];
+
+    // Map botId → kb_document id using metadata.botId stored during transcript ingest
+    const kbDocByBotId = new Map<string, string>(
+        (transcriptsData?.documents ?? [])
+            .filter((d) => typeof d.metadata?.botId === "string")
+            .map((d) => [d.metadata.botId as string, d.id]),
+    );
 
     const allMeetings = data?.meetings ?? [];
     const totalPages = Math.max(1, Math.ceil(allMeetings.length / ITEMS_PER_PAGE));
@@ -416,7 +562,14 @@ function NotesList() {
                                                 </span>
                                             )}
                                         </div>
-                                        <MeetingTagPicker botId={meeting.bot_id} getToken={getToken} />
+                                        <div className="flex items-center gap-3 flex-wrap">
+                                            <MeetingTagPicker botId={meeting.bot_id} getToken={getToken} />
+                                            <MeetingProjectPicker
+                                                kbDocumentId={kbDocByBotId.get(meeting.bot_id) ?? null}
+                                                projects={projects}
+                                                getToken={getToken}
+                                            />
+                                        </div>
                                     </div>
                                     <div className="flex items-center gap-2 shrink-0">
                                         <span

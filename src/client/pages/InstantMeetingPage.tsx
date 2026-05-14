@@ -7,10 +7,11 @@ import { Card, CardContent } from "../components/ui/Card";
 
 type BotMode = "transcriptor" | "voice_agent";
 
-interface KbTag {
+interface Project {
   id: string;
   name: string;
-  color: string | null;
+  description: string | null;
+  document_count: number;
 }
 
 const BOT_MODES: { value: BotMode; label: string }[] = [
@@ -21,9 +22,9 @@ const BOT_MODES: { value: BotMode; label: string }[] = [
 export default function InstantMeetingPage() {
   const [botMode, setBotMode] = useState<BotMode>("transcriptor");
   const { getToken } = useAuth();
-  const [tags, setTags] = useState<KbTag[]>([]);
-  const [selectedTagId, setSelectedTagId] = useState<string>("");
-  const [tagsLoading, setTagsLoading] = useState(true);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const [projectsLoading, setProjectsLoading] = useState(true);
   const [meetingUrl, setMeetingUrl] = useState("");
   const [isJoining, setIsJoining] = useState(false);
 
@@ -31,17 +32,17 @@ export default function InstantMeetingPage() {
     Promise.all([
       fetch("/api/bot-settings").then((r) => r.json()) as Promise<{ bot_mode: BotMode }>,
       getToken().then((token) =>
-        fetch("/api/kb/tags", {
+        fetch("/api/projects", {
           headers: { Authorization: `Bearer ${token}` },
         }).then((r) => r.json())
-      ) as Promise<{ tags: KbTag[] }>,
+      ) as Promise<{ projects: Project[] }>,
     ])
-      .then(([settings, tagData]) => {
+      .then(([settings, projectData]) => {
         setBotMode(settings.bot_mode);
-        setTags(tagData.tags ?? []);
+        setProjects(projectData.projects ?? []);
       })
       .catch(console.error)
-      .finally(() => setTagsLoading(false));
+      .finally(() => setProjectsLoading(false));
   }, []);
 
   const handleModeChange = (mode: BotMode) => {
@@ -58,22 +59,17 @@ export default function InstantMeetingPage() {
     setIsJoining(true);
     try {
       const token = await getToken();
+      const body: Record<string, string> = { meeting_url: meetingUrl.trim() };
+      if (botMode === "voice_agent" && selectedProjectId) {
+        body.project_id = selectedProjectId;
+      }
       const res = await fetch("/api/bot/join", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ meeting_url: meetingUrl.trim() }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-
-      if (botMode === "voice_agent" && selectedTagId && data.bot_id) {
-        await fetch(`/api/meetings/${data.bot_id}/tags`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ tag_ids: [selectedTagId] }),
-        }).catch(console.error);
-      }
-
       toast.success(`Bot sent! ID: ${data.bot_id}`);
       setMeetingUrl("");
     } catch (err) {
@@ -122,30 +118,30 @@ export default function InstantMeetingPage() {
             </div>
           </div>
 
-          {/* Category — only for Voice Agent mode */}
+          {/* Project — only for Voice Agent mode */}
           {botMode === "voice_agent" && (
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">
-                Category
+                Project
               </p>
               <p className="text-xs text-gray-500">
-                Voice Agent will only answer from this category&apos;s documents
+                Voice Agent will only search documents inside this project
               </p>
-              {tagsLoading ? (
+              {projectsLoading ? (
                 <div className="flex items-center gap-2 text-sm text-gray-500 py-1">
                   <Loader2 className="size-4 animate-spin" />
                   Loading…
                 </div>
               ) : (
                 <select
-                  value={selectedTagId}
-                  onChange={(e) => setSelectedTagId(e.target.value)}
+                  value={selectedProjectId}
+                  onChange={(e) => setSelectedProjectId(e.target.value)}
                   className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                 >
-                  <option value="">No filter — answers from all documents</option>
-                  {tags.map((tag) => (
-                    <option key={tag.id} value={tag.id}>
-                      {tag.name}
+                  <option value="">No project — searches all active documents</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}{project.document_count > 0 ? ` (${project.document_count} docs)` : ""}
                     </option>
                   ))}
                 </select>

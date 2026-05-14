@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { toast } from "sonner";
 import {
     Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye, Star, Tag, X, Mic,
+    FolderOpen, Layers,
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import {
@@ -78,6 +79,30 @@ interface KBDocumentFull {
     source_type: string;
     is_active: boolean;
     created_at: string;
+}
+
+interface Project {
+    id: string;
+    name: string;
+    description: string | null;
+    document_count: number;
+    created_at: string;
+}
+
+interface ProjectDocument {
+    id: string;
+    title: string;
+    source_type: string;
+    is_active: boolean;
+    created_at: string;
+}
+
+interface ProjectDetail {
+    id: string;
+    name: string;
+    description: string | null;
+    created_at: string;
+    documents: ProjectDocument[];
 }
 
 // ─── Small helpers ───────────────────────────────────────────
@@ -240,6 +265,20 @@ function KnowledgeBase() {
     // ── Inline rename state ───────────────────────────────────────────
     const [renamingTagId, setRenamingTagId] = useState<string | null>(null);
 
+    // ── Project state ─────────────────────────────────────────────
+    const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
+    const [newProjectName, setNewProjectName] = useState("");
+    const [newProjectDescription, setNewProjectDescription] = useState("");
+
+    const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+    const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+
+    const [editingProject, setEditingProject] = useState<Project | null>(null);
+    const [editProjectName, setEditProjectName] = useState("");
+    const [editProjectDescription, setEditProjectDescription] = useState("");
+
+    const [showAddDocDialog, setShowAddDocDialog] = useState(false);
+
     // ── Queries ───────────────────────────────────────────────────────
     const { data, isPending } = useQuery<{ documents: KBDocument[] }>({
         queryKey: ["kb_documents"],
@@ -294,6 +333,33 @@ function KnowledgeBase() {
         },
     });
 
+    const { data: projectsData, isPending: isProjectsPending } = useQuery<{ projects: Project[] }>({
+        queryKey: ["kb_projects"],
+        queryFn: async () => {
+            const token = await getToken();
+            const res = await fetch("/api/projects", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        },
+    });
+
+    const { data: projectDetail, isPending: isProjectDetailPending } = useQuery<ProjectDetail>({
+        queryKey: ["kb_project_detail", selectedProjectId],
+        queryFn: async () => {
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${selectedProjectId}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        },
+        enabled: !!selectedProjectId,
+    });
+
+    const projects = projectsData?.projects ?? [];
+
     const documents = data?.documents ?? [];
     const transcriptDocuments = transcriptsData?.documents ?? [];
     const allTags = tagsData?.tags ?? [];
@@ -321,6 +387,104 @@ function KnowledgeBase() {
         void queryClient.invalidateQueries({ queryKey: ["kb_tags"] });
         void queryClient.invalidateQueries({ queryKey: ["kb_transcripts"] });
     };
+
+    const invalidateProjects = (projectId?: string) => {
+        void queryClient.invalidateQueries({ queryKey: ["kb_projects"] });
+        if (projectId) void queryClient.invalidateQueries({ queryKey: ["kb_project_detail", projectId] });
+    };
+
+    const createProjectMutation = useMutation({
+        mutationFn: async () => {
+            const token = await getToken();
+            const res = await fetch("/api/projects", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ name: newProjectName.trim(), description: newProjectDescription.trim() || undefined }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json() as Promise<Project>;
+        },
+        onSuccess: (p) => {
+            toast.success(`Project "${p.name}" created`);
+            setNewProjectName("");
+            setNewProjectDescription("");
+            setShowNewProjectDialog(false);
+            invalidateProjects();
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
+    const updateProjectMutation = useMutation({
+        mutationFn: async () => {
+            if (!editingProject) throw new Error("No project selected");
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${editingProject.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ name: editProjectName.trim(), description: editProjectDescription.trim() || null }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json() as Promise<Project>;
+        },
+        onSuccess: (p) => {
+            toast.success(`Project renamed to "${p.name}"`);
+            setEditingProject(null);
+            invalidateProjects(p.id);
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
+    const deleteProjectMutation = useMutation({
+        mutationFn: async (id: string) => {
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${id}`, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+        },
+        onSuccess: () => {
+            toast.success("Project deleted");
+            setProjectToDelete(null);
+            if (selectedProjectId === projectToDelete?.id) setSelectedProjectId(null);
+            invalidateProjects();
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
+    const addDocToProjectMutation = useMutation({
+        mutationFn: async ({ projectId, documentId }: { projectId: string; documentId: string }) => {
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${projectId}/documents`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ document_id: documentId }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+        },
+        onSuccess: (_data, { projectId }) => {
+            toast.success("Document added to project");
+            setShowAddDocDialog(false);
+            invalidateProjects(projectId);
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
+    const removeDocFromProjectMutation = useMutation({
+        mutationFn: async ({ projectId, documentId }: { projectId: string; documentId: string }) => {
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${projectId}/documents/${documentId}`, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+        },
+        onSuccess: (_data, { projectId }) => {
+            toast.success("Document removed from project");
+            invalidateProjects(projectId);
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
 
     const createMutation = useMutation({
         mutationFn: async () => {
@@ -668,6 +832,15 @@ function KnowledgeBase() {
                     <Button
                         variant="outline"
                         size="sm"
+                        onClick={() => setShowNewProjectDialog(true)}
+                        className="flex items-center gap-1"
+                    >
+                        <Layers className="size-4" />
+                        New Project
+                    </Button>
+                    <Button
+                        variant="outline"
+                        size="sm"
                         onClick={() => setShowNewTagDialog(true)}
                         className="flex items-center gap-1"
                     >
@@ -766,6 +939,98 @@ function KnowledgeBase() {
                     </CardContent>
                 </Card>
             )}
+
+            {/* ── Projects grid ──────────────────────────────────────────── */}
+            <div>
+                <div className="flex items-center gap-2 mb-3">
+                    <Layers className="size-4 text-blue-500" />
+                    <h2 className="text-base font-semibold text-gray-700">Projects</h2>
+                    {!isProjectsPending && (
+                        <span className="text-xs text-gray-400">({projects.length})</span>
+                    )}
+                </div>
+
+                {isProjectsPending ? (
+                    <div className="flex items-center justify-center py-8">
+                        <Loader2 className="size-6 text-blue-500 animate-spin" />
+                    </div>
+                ) : projects.length === 0 ? (
+                    <Card className="border-dashed">
+                        <CardContent className="flex flex-col items-center justify-center py-10">
+                            <Layers className="size-8 text-gray-300 mb-2" />
+                            <p className="text-sm text-gray-500">No projects yet</p>
+                            <p className="text-xs text-gray-400 mt-1">Create a project to scope your voice agent's knowledge</p>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="mt-4 flex items-center gap-1"
+                                onClick={() => setShowNewProjectDialog(true)}
+                            >
+                                <Plus className="size-4" /> New Project
+                            </Button>
+                        </CardContent>
+                    </Card>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {projects.map((project) => (
+                            <Card
+                                key={project.id}
+                                className="group cursor-pointer hover:shadow-md transition-shadow border border-gray-200"
+                                onClick={() => setSelectedProjectId(project.id)}
+                            >
+                                <CardContent className="p-4 flex flex-col gap-2 min-h-[120px]">
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            <span className="size-3 rounded-sm shrink-0 bg-blue-500" />
+                                            <span className="text-sm font-semibold text-gray-800 truncate">{project.name}</span>
+                                        </div>
+                                        <div
+                                            className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                title="Edit project"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setEditingProject(project);
+                                                    setEditProjectName(project.name);
+                                                    setEditProjectDescription(project.description ?? "");
+                                                }}
+                                            >
+                                                <Pencil className="size-3.5 text-gray-400" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
+                                                title="Delete project"
+                                                onClick={(e) => { e.stopPropagation(); setProjectToDelete(project); }}
+                                                className="text-red-400 hover:text-red-600"
+                                            >
+                                                <Trash2 className="size-3.5" />
+                                            </Button>
+                                        </div>
+                                    </div>
+                                    {project.description && (
+                                        <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">
+                                            {project.description}
+                                        </p>
+                                    )}
+                                    <div className="mt-auto flex items-center gap-1.5 pt-2">
+                                        <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 font-medium">
+                                            {project.document_count} {project.document_count === 1 ? "doc" : "docs"}
+                                        </span>
+                                        <span className="text-xs text-gray-400">
+                                            {new Date(project.created_at).toLocaleDateString()}
+                                        </span>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                )}
+            </div>
 
             {/* ── Document sections (grouped by tag) ───────────────────────── */}
             {isPending ? (
@@ -1122,6 +1387,234 @@ function KnowledgeBase() {
                                         Edit
                                     </Button>
                                 )}
+                            </DialogFooter>
+                        </>
+                    )}
+                </DialogContent>
+            </Dialog>
+
+            {/* ── New Project Dialog ────────────────────────────────────────── */}
+            <Dialog open={showNewProjectDialog} onOpenChange={(open) => { if (!open) { setShowNewProjectDialog(false); setNewProjectName(""); setNewProjectDescription(""); } }}>
+                <DialogContent className="sm:max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Layers className="size-4" />
+                            New Project
+                        </DialogTitle>
+                        <DialogDescription>Projects scope your voice agent to a specific set of documents.</DialogDescription>
+                    </DialogHeader>
+                    <div className="flex flex-col gap-3">
+                        <input
+                            type="text"
+                            placeholder="Project name (e.g. Investor Relations)"
+                            value={newProjectName}
+                            onChange={(e) => setNewProjectName(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter" && newProjectName.trim()) createProjectMutation.mutate(); }}
+                            className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            autoFocus
+                        />
+                        <textarea
+                            placeholder="Description (optional) — what is this project about?"
+                            value={newProjectDescription}
+                            onChange={(e) => setNewProjectDescription(e.target.value)}
+                            rows={3}
+                            className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" size="sm" onClick={() => setShowNewProjectDialog(false)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            size="sm"
+                            disabled={!newProjectName.trim() || createProjectMutation.isPending}
+                            onClick={() => createProjectMutation.mutate()}
+                            className="flex items-center gap-2"
+                        >
+                            {createProjectMutation.isPending ? <><Loader2 className="size-4 animate-spin" />Creating…</> : "Create Project"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ── Edit Project Dialog ───────────────────────────────────────── */}
+            <Dialog open={!!editingProject} onOpenChange={(open) => { if (!open) setEditingProject(null); }}>
+                <DialogContent className="sm:max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Pencil className="size-4" />
+                            Edit Project
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="flex flex-col gap-3">
+                        <input
+                            type="text"
+                            placeholder="Project name"
+                            value={editProjectName}
+                            onChange={(e) => setEditProjectName(e.target.value)}
+                            className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            autoFocus
+                        />
+                        <textarea
+                            placeholder="Description (optional)"
+                            value={editProjectDescription}
+                            onChange={(e) => setEditProjectDescription(e.target.value)}
+                            rows={3}
+                            className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" size="sm" onClick={() => setEditingProject(null)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            size="sm"
+                            disabled={!editProjectName.trim() || updateProjectMutation.isPending}
+                            onClick={() => updateProjectMutation.mutate()}
+                            className="flex items-center gap-2"
+                        >
+                            {updateProjectMutation.isPending ? <><Loader2 className="size-4 animate-spin" />Saving…</> : "Save"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ── Delete Project Dialog ─────────────────────────────────────── */}
+            <Dialog open={!!projectToDelete} onOpenChange={(open) => { if (!open) setProjectToDelete(null); }}>
+                <DialogContent className="sm:max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle className="text-red-600">Delete Project</DialogTitle>
+                        <DialogDescription>
+                            Delete &quot;{projectToDelete?.name}&quot;? The project will be removed but its documents will not be deleted. This cannot be undone.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" size="sm" onClick={() => setProjectToDelete(null)}>
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            size="sm"
+                            disabled={deleteProjectMutation.isPending}
+                            onClick={() => projectToDelete && deleteProjectMutation.mutate(projectToDelete.id)}
+                            className="flex items-center gap-2"
+                        >
+                            {deleteProjectMutation.isPending ? <><Loader2 className="size-4 animate-spin" />Deleting…</> : "Delete"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ── Project Detail Dialog ─────────────────────────────────────── */}
+            <Dialog open={!!selectedProjectId} onOpenChange={(open) => { if (!open) { setSelectedProjectId(null); setShowAddDocDialog(false); } }}>
+                <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+                    {isProjectDetailPending ? (
+                        <div className="flex flex-col items-center justify-center py-12">
+                            <Loader2 className="size-8 text-blue-500 mb-3 animate-spin" />
+                            <p className="text-sm text-gray-500">Loading project…</p>
+                        </div>
+                    ) : !projectDetail ? (
+                        <div className="py-12 text-center text-sm text-red-500">Project not found.</div>
+                    ) : (
+                        <>
+                            <DialogHeader>
+                                <DialogTitle className="flex items-center gap-2">
+                                    <Layers className="size-4 text-blue-500" />
+                                    {projectDetail.name}
+                                </DialogTitle>
+                                {projectDetail.description && (
+                                    <DialogDescription>{projectDetail.description}</DialogDescription>
+                                )}
+                            </DialogHeader>
+
+                            {/* Document list */}
+                            <div className="flex flex-col gap-2">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-sm font-medium text-gray-700">
+                                        Documents ({projectDetail.documents.length})
+                                    </span>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="flex items-center gap-1"
+                                        onClick={() => setShowAddDocDialog((v) => !v)}
+                                    >
+                                        <Plus className="size-3.5" /> Add Document
+                                    </Button>
+                                </div>
+
+                                {/* Add doc picker — inline dropdown */}
+                                {showAddDocDialog && (
+                                    <Card className="border-blue-200 bg-blue-50">
+                                        <CardContent className="p-3">
+                                            <p className="text-xs text-gray-600 mb-2 font-medium">Select a document to add:</p>
+                                            <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
+                                                {[...documents, ...transcriptDocuments]
+                                                    .filter((d) => !projectDetail.documents.some((pd) => pd.id === d.id))
+                                                    .map((doc) => (
+                                                        <button
+                                                            key={doc.id}
+                                                            type="button"
+                                                            onClick={() => addDocToProjectMutation.mutate({ projectId: projectDetail.id, documentId: doc.id })}
+                                                            disabled={addDocToProjectMutation.isPending}
+                                                            className="flex items-center gap-2 px-2 py-1.5 rounded text-left text-xs hover:bg-white transition-colors w-full"
+                                                        >
+                                                            {doc.source_type === "transcript" ? (
+                                                                <Mic className="size-3 text-purple-500 shrink-0" />
+                                                            ) : (
+                                                                <BookOpen className="size-3 text-gray-400 shrink-0" />
+                                                            )}
+                                                            <span className="truncate">{doc.title}</span>
+                                                        </button>
+                                                    ))}
+                                                {[...documents, ...transcriptDocuments].filter((d) => !projectDetail.documents.some((pd) => pd.id === d.id)).length === 0 && (
+                                                    <p className="text-xs text-gray-400 px-2 py-1">All documents are already in this project.</p>
+                                                )}
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+                                )}
+
+                                {projectDetail.documents.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center py-8 border rounded-md border-dashed">
+                                        <FolderOpen className="size-7 text-gray-300 mb-2" />
+                                        <p className="text-sm text-gray-400">No documents in this project yet</p>
+                                    </div>
+                                ) : (
+                                    <div className="divide-y border rounded-md">
+                                        {projectDetail.documents.map((doc) => (
+                                            <div key={doc.id} className="flex items-center justify-between px-3 py-2.5">
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    {doc.source_type === "transcript" ? (
+                                                        <Mic className="size-3.5 text-purple-500 shrink-0" />
+                                                    ) : (
+                                                        <BookOpen className="size-3.5 text-gray-400 shrink-0" />
+                                                    )}
+                                                    <span className="text-sm text-gray-700 truncate">{doc.title}</span>
+                                                    <span className={`text-xs shrink-0 ${doc.is_active ? "text-green-500" : "text-gray-400"}`}>
+                                                        {doc.is_active ? "Active" : "Inactive"}
+                                                    </span>
+                                                </div>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon-sm"
+                                                    title="Remove from project"
+                                                    disabled={removeDocFromProjectMutation.isPending}
+                                                    onClick={() => removeDocFromProjectMutation.mutate({ projectId: projectDetail.id, documentId: doc.id })}
+                                                    className="text-red-400 hover:text-red-600 shrink-0"
+                                                >
+                                                    <X className="size-4" />
+                                                </Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            <DialogFooter>
+                                <Button variant="outline" size="sm" onClick={() => setSelectedProjectId(null)}>
+                                    Close
+                                </Button>
                             </DialogFooter>
                         </>
                     )}
