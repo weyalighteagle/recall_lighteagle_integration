@@ -729,6 +729,29 @@ async function handleBotDone(body: any): Promise<void> {
         console.log(`[handleBotDone] KB ingest skipped: ${result.reason}`);
       } else {
         console.log(`[handleBotDone] ✅ KB ingested: "${docTitle}" (${result.chunkCount} chunks, ${transcriptText.length} chars)`);
+        if (result.docId) {
+          try {
+            const { data: mpRow } = await supabase
+              .from("meeting_projects")
+              .select("project_id")
+              .eq("bot_id", botId)
+              .maybeSingle();
+            if (mpRow?.project_id) {
+              const { error: linkErr } = await supabase
+                .from("kb_document_projects")
+                .insert({ document_id: result.docId, project_id: mpRow.project_id });
+              if (linkErr && (linkErr as any).code === "23505") {
+                // already linked — idempotent
+              } else if (linkErr) {
+                console.error(`[handleBotDone] Auto-link failed for doc ${result.docId}:`, linkErr);
+              } else {
+                console.log(`[handleBotDone] Auto-linked transcript ${result.docId} to project ${mpRow.project_id}`);
+              }
+            }
+          } catch (autoLinkErr) {
+            console.error(`[handleBotDone] Auto-link unexpected error:`, autoLinkErr);
+          }
+        }
       }
     }
   } catch (kbErr) {
