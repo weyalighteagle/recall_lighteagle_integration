@@ -140,20 +140,29 @@ export async function recall_webhook(payload: any): Promise<void> {
           }
 
           try {
-            // Resolve KB override for voice_agent bots
+            // Resolve KB override and project assignment for voice_agent bots
             let kb_id: string | undefined;
+            let project_id: string | undefined;
             if (botTypeToSchedule === "voice_agent") {
-              const { data: kbOverride } = await supabase
-                .from("meeting_kb_overrides")
-                .select("kb_document_id")
-                .eq("calendar_event_id", calendar_event.id)
-                .maybeSingle();
+              const [kbOverrideResult, mpResult] = await Promise.all([
+                supabase
+                  .from("meeting_kb_overrides")
+                  .select("kb_document_id")
+                  .eq("calendar_event_id", calendar_event.id)
+                  .maybeSingle(),
+                supabase
+                  .from("meeting_projects")
+                  .select("project_id")
+                  .eq("calendar_event_id", calendar_event.id)
+                  .maybeSingle(),
+              ]);
               kb_id =
-                kbOverride?.kb_document_id ??
+                kbOverrideResult.data?.kb_document_id ??
                 botSettings.active_kb_id ??
                 undefined;
+              project_id = mpResult.data?.project_id ?? undefined;
               console.log(
-                `[calendar.sync_events] event=${calendar_event.id} effective_kb_id=${kb_id ?? "none"}`,
+                `[calendar.sync_events] event=${calendar_event.id} effective_kb_id=${kb_id ?? "none"} project_id=${project_id ?? "none"}`,
               );
             }
 
@@ -162,6 +171,7 @@ export async function recall_webhook(payload: any): Promise<void> {
               calendar,
               bot_type: botTypeToSchedule,
               kb_id,
+              project_id,
             });
             console.log(
               `[calendar_sync] Scheduled ${botTypeToSchedule} bot for event ` +
@@ -719,6 +729,29 @@ async function handleBotDone(body: any): Promise<void> {
         console.log(`[handleBotDone] KB ingest skipped: ${result.reason}`);
       } else {
         console.log(`[handleBotDone] ✅ KB ingested: "${docTitle}" (${result.chunkCount} chunks, ${transcriptText.length} chars)`);
+        if (result.docId) {
+          try {
+            const { data: mpRow } = await supabase
+              .from("meeting_projects")
+              .select("project_id")
+              .eq("bot_id", botId)
+              .maybeSingle();
+            if (mpRow?.project_id) {
+              const { error: linkErr } = await supabase
+                .from("kb_document_projects")
+                .insert({ document_id: result.docId, project_id: mpRow.project_id });
+              if (linkErr && (linkErr as any).code === "23505") {
+                // already linked — idempotent
+              } else if (linkErr) {
+                console.error(`[handleBotDone] Auto-link failed for doc ${result.docId}:`, linkErr);
+              } else {
+                console.log(`[handleBotDone] Auto-linked transcript ${result.docId} to project ${mpRow.project_id}`);
+              }
+            }
+          } catch (autoLinkErr) {
+            console.error(`[handleBotDone] Auto-link unexpected error:`, autoLinkErr);
+          }
+        }
       }
     }
   } catch (kbErr) {
@@ -1035,6 +1068,7 @@ export async function schedule_bot_for_calendar_event(args: {
   calendar_event: CalendarEventType;
   bot_type?: BotType;
   kb_id?: string;
+  project_id?: string;
 }) {
   const { calendar, calendar_event } = z
     .object({
@@ -1045,6 +1079,7 @@ export async function schedule_bot_for_calendar_event(args: {
 
   const bot_type: BotType = args.bot_type ?? "recording";
   const kb_id: string | undefined = args.kb_id;
+  const project_id: string | undefined = args.project_id;
 
   const { deduplication_key } = generate_bot_deduplication_key({
     one_bot_per: "meeting",
@@ -1068,6 +1103,7 @@ export async function schedule_bot_for_calendar_event(args: {
 
     const pageParams = new URLSearchParams({ wss: env.VOICE_AGENT_WSS_URL });
     if (kb_id) pageParams.set("kb", kb_id);
+    if (project_id) pageParams.set("project", project_id);
     if (meetingToken) pageParams.set("meetingToken", meetingToken);
     const output_media_url = `${env.VOICE_AGENT_PAGE_URL}?${pageParams.toString()}`;
 
@@ -1167,6 +1203,7 @@ export async function schedule_bot_for_calendar_event(args: {
     const updatedPageParams = new URLSearchParams({ wss: env.VOICE_AGENT_WSS_URL! });
     updatedPageParams.set("meetingToken", meetingToken);
     if (kb_id) updatedPageParams.set("kb", kb_id);
+    if (project_id) updatedPageParams.set("project", project_id);
     const updatedOutputMediaUrl = `${env.VOICE_AGENT_PAGE_URL}?${updatedPageParams.toString()}`;
 
     await fetch(

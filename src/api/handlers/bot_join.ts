@@ -2,6 +2,8 @@ import { z } from "zod";
 import { randomUUID } from "crypto";
 import { env } from "../config/env";
 import { supabase } from "../config/supabase";
+import { bot_settings_get } from "./bot_settings.js";
+import { meeting_tags_set } from "./knowledge_base.js";
 
 /**
  * Doğrudan meeting URL'si ile ad-hoc bot gönder.
@@ -17,6 +19,7 @@ export async function bot_join(args: {
     bot_name?: string;
     bot_type?: "recording" | "voice_agent";
     user_email: string;   // required — caller must extract from Clerk auth before calling
+    project_id?: string;
 }) {
     const { meeting_url, bot_name } = z.object({
         meeting_url: z.string().url(),
@@ -42,7 +45,7 @@ export async function bot_join(args: {
     const meetingToken = botType === "voice_agent" ? randomUUID() : null;
 
     if (botType === "voice_agent") {
-        const output_media_url = `${env.VOICE_AGENT_PAGE_URL}?meetingToken=${meetingToken}&wss=${encodeURIComponent(env.VOICE_AGENT_WSS_URL!)}`;
+        const output_media_url = `${env.VOICE_AGENT_PAGE_URL}?meetingToken=${meetingToken}&wss=${encodeURIComponent(env.VOICE_AGENT_WSS_URL!)}${args.project_id ? `&project=${encodeURIComponent(args.project_id)}` : ""}`;
 
         payload = {
             meeting_url,
@@ -117,6 +120,10 @@ export async function bot_join(args: {
 
     const bot = await response.json();
 
+    // Read active_kb_id — needed for meeting_tags write below
+    const settings = await bot_settings_get();
+    const active_kb_id = settings.active_kb_id;
+
     // Supabase'de meeting kaydı oluştur (transcript takibi için) — hem recording hem voice_agent için
     const resolvedBotName: string = (payload as any).bot_name;
     // Use ignoreDuplicates: false so that if handleTranscriptWebhook already created the row
@@ -135,6 +142,33 @@ export async function bot_join(args: {
         },
         { onConflict: "bot_id", ignoreDuplicates: false },
     );
+
+    // ── Write meeting_tags so relay can filter KB by category ──────────────
+    if (botType === "voice_agent" && meetingToken && active_kb_id) {
+        try {
+            // Look up tag_ids for the selected KB document
+            const { data: tagLinks } = await supabase
+                .from("kb_document_tags")
+                .select("tag_id")
+                .eq("document_id", active_kb_id);
+
+            const tag_ids = (tagLinks ?? []).map((t: { tag_id: string }) => t.tag_id);
+
+            if (tag_ids.length > 0) {
+                await meeting_tags_set({
+                    botId: bot.id,
+                    tag_ids,
+                    userEmail: args.user_email ?? "system",
+                });
+                console.log(`[bot_join] meeting_tags written: bot_id=${bot.id} tag_ids=${JSON.stringify(tag_ids)}`);
+            } else {
+                console.log(`[bot_join] no tags found for active_kb_id=${active_kb_id} — meeting_tags not written`);
+            }
+        } catch (tagErr) {
+            // Non-fatal — bot still works, just without category filter
+            console.error(`[bot_join] meeting_tags write failed (non-fatal):`, tagErr);
+        }
+    }
 
     return {
         bot_id: bot.id,

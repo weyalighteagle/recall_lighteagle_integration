@@ -50,6 +50,7 @@ export interface IngestResult {
   skipped: boolean;
   reason?: string;
   chunkCount?: number;
+  docId?: string;
 }
 
 /**
@@ -142,5 +143,5 @@ export async function ingestTranscriptToKB(params: {
   }
 
   await upsertIngestionLog(botId, null, "success", { chunk_count: chunkRows.length });
-  return { skipped: false, chunkCount: chunkRows.length };
+  return { skipped: false, chunkCount: chunkRows.length, docId: doc.id };
 }

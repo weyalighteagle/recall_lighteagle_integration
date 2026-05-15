@@ -1,7 +1,7 @@
 import { useAuth } from "@clerk/react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Calendar, ChevronLeft, ChevronRight, Download, FileText, Loader2, Pencil, Users } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient, useMutation, useQueries } from "@tanstack/react-query";
+import { Calendar, ChevronLeft, ChevronRight, Download, FileText, Layers, Loader2, Pencil, Users, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
@@ -29,6 +29,18 @@ interface Meeting {
 
 interface NotesResponse {
     meetings: Meeting[];
+}
+
+interface Project {
+    id: string;
+    name: string;
+    description: string | null;
+    document_count: number;
+}
+
+interface KBTranscriptDoc {
+    id: string;
+    metadata: Record<string, unknown>;
 }
 
 interface MeetingTagPickerProps {
@@ -171,6 +183,136 @@ function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
     );
 }
 
+interface MeetingProjectPickerProps {
+    kbDocumentId: string | null;
+    projects: Project[];
+    initialAssignedProjects: Project[];
+    getToken: () => Promise<string | null>;
+}
+
+function MeetingProjectPicker({ kbDocumentId, projects, initialAssignedProjects, getToken }: MeetingProjectPickerProps) {
+    const queryClient = useQueryClient();
+    const [showPicker, setShowPicker] = useState(false);
+    const pickerRef = useRef<HTMLDivElement>(null);
+    const [assignedProjectIds, setAssignedProjectIds] = useState<Set<string>>(new Set());
+
+    const initialKey = initialAssignedProjects.map((p) => p.id).join(",");
+    useEffect(() => {
+        const ids = initialKey.split(",").filter(Boolean);
+        if (ids.length > 0) {
+            setAssignedProjectIds((prev) => new Set([...prev, ...ids]));
+        }
+    }, [initialKey]);
+
+    useEffect(() => {
+        if (!showPicker) return;
+        const handler = (e: MouseEvent) => {
+            if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+                setShowPicker(false);
+            }
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, [showPicker]);
+
+    const addToProjectMutation = useMutation({
+        mutationFn: async (projectId: string) => {
+            if (!kbDocumentId) throw new Error("Transcript not yet ingested into KB");
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${projectId}/documents`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ document_id: kbDocumentId }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+        },
+        onSuccess: (_data, projectId) => {
+            void queryClient.invalidateQueries({ queryKey: ["kb_projects"] });
+            void queryClient.invalidateQueries({ queryKey: ["kb_project_detail"] });
+            setAssignedProjectIds((prev) => new Set([...prev, projectId]));
+            setShowPicker(false);
+            toast.success("Added to project");
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
+    if (!kbDocumentId) {
+        return (
+            <span
+                className="text-xs text-gray-300 cursor-not-allowed"
+                title="Transcript not yet ingested into KB"
+            >
+                + project
+            </span>
+        );
+    }
+
+    const assignedProjects = projects.filter((p) => assignedProjectIds.has(p.id));
+
+    return (
+        <div className="relative inline-flex items-center gap-1.5 flex-wrap" ref={pickerRef}>
+            {assignedProjects.map((p) => (
+                <span
+                    key={p.id}
+                    className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium"
+                >
+                    <Layers className="size-2.5" />
+                    {p.name}
+                </span>
+            ))}
+            <button
+                type="button"
+                className="text-xs text-gray-400 hover:text-gray-600"
+                onClick={() => setShowPicker((v) => !v)}
+                disabled={addToProjectMutation.isPending}
+            >
+                {addToProjectMutation.isPending ? (
+                    <Loader2 className="size-3 animate-spin inline" />
+                ) : (
+                    "+ project"
+                )}
+            </button>
+            {showPicker && (
+                <div className="absolute top-full left-0 mt-1 z-10 bg-white border border-gray-200 rounded-lg shadow-lg p-1.5 min-w-[200px]">
+                    <div className="flex items-center justify-between px-2 py-1 mb-0.5">
+                        <span className="text-xs font-medium text-gray-500">Add to project</span>
+                        <button
+                            type="button"
+                            onClick={() => setShowPicker(false)}
+                            className="text-gray-400 hover:text-gray-600"
+                        >
+                            <X className="size-3" />
+                        </button>
+                    </div>
+                    {projects.length === 0 ? (
+                        <p className="text-xs text-gray-400 px-2 py-1">No projects yet — create one in the Knowledge Base</p>
+                    ) : (
+                        projects.map((project) => (
+                            <button
+                                key={project.id}
+                                type="button"
+                                className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded hover:bg-gray-50 text-sm ${assignedProjectIds.has(project.id) ? "opacity-40 cursor-default" : ""}`}
+                                onClick={() => {
+                                    if (!assignedProjectIds.has(project.id)) {
+                                        addToProjectMutation.mutate(project.id);
+                                    }
+                                }}
+                                disabled={addToProjectMutation.isPending || assignedProjectIds.has(project.id)}
+                            >
+                                <Layers className="size-3 text-blue-400 shrink-0" />
+                                <span className="truncate">{project.name}</span>
+                                {assignedProjectIds.has(project.id) && (
+                                    <span className="ml-auto text-blue-500 text-xs">✓</span>
+                                )}
+                            </button>
+                        ))
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
 function NotesList() {
     const navigate = useNavigate();
     const { getToken } = useAuth();
@@ -195,6 +337,70 @@ function NotesList() {
             return res.json();
         },
     });
+
+    const { data: projectsData } = useQuery<{ projects: Project[] }>({
+        queryKey: ["kb_projects"],
+        queryFn: async () => {
+            const token = await getToken();
+            const res = await fetch("/api/projects", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        },
+    });
+
+    const { data: transcriptsData } = useQuery<{ documents: KBTranscriptDoc[] }>({
+        queryKey: ["kb_transcripts"],
+        queryFn: async () => {
+            const token = await getToken();
+            const res = await fetch("/api/kb/transcripts", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        },
+    });
+
+    const projects = projectsData?.projects ?? [];
+
+    const projectDetailQueries = useQueries({
+        queries: projects.map((p) => ({
+            queryKey: ["kb_project_detail", p.id] as const,
+            queryFn: async () => {
+                const token = await getToken();
+                const res = await fetch(`/api/projects/${p.id}`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!res.ok) return { id: p.id, documents: [] as Array<{ id: string }> };
+                return res.json() as Promise<{ id: string; documents: Array<{ id: string }> }>;
+            },
+            staleTime: 60_000,
+            enabled: projects.length > 0,
+        })),
+    });
+
+    const initialDocProjects = useMemo(() => {
+        const map = new Map<string, Project[]>();
+        projectDetailQueries.forEach((query, i) => {
+            const detail = query.data;
+            const project = projects[i];
+            if (detail && project) {
+                for (const doc of detail.documents) {
+                    if (!map.has(doc.id)) map.set(doc.id, []);
+                    map.get(doc.id)!.push(project);
+                }
+            }
+        });
+        return map;
+    }, [projectDetailQueries, projects]);
+
+    // Map botId → kb_document id using metadata.botId stored during transcript ingest
+    const kbDocByBotId = new Map<string, string>(
+        (transcriptsData?.documents ?? [])
+            .filter((d) => typeof d.metadata?.botId === "string")
+            .map((d) => [d.metadata.botId as string, d.id]),
+    );
 
     const allMeetings = data?.meetings ?? [];
     const totalPages = Math.max(1, Math.ceil(allMeetings.length / ITEMS_PER_PAGE));
@@ -416,7 +622,17 @@ function NotesList() {
                                                 </span>
                                             )}
                                         </div>
-                                        <MeetingTagPicker botId={meeting.bot_id} getToken={getToken} />
+                                        <MeetingProjectPicker
+                                            kbDocumentId={kbDocByBotId.get(meeting.bot_id) ?? null}
+                                            projects={projects}
+                                            initialAssignedProjects={
+                                                (() => {
+                                                    const docId = kbDocByBotId.get(meeting.bot_id);
+                                                    return docId ? (initialDocProjects.get(docId) ?? []) : [];
+                                                })()
+                                            }
+                                            getToken={getToken}
+                                        />
                                     </div>
                                     <div className="flex items-center gap-2 shrink-0">
                                         <span
