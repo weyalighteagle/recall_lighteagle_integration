@@ -114,7 +114,7 @@ interface DocTag {
 // ─── KB Document Handlers ────────────────────────────────────
 
 /** GET /api/kb — doküman listesi with tags per document (manual docs only, no transcripts) */
-export async function kb_list(): Promise<{ documents: Array<{
+export async function kb_list(userEmail: string): Promise<{ documents: Array<{
     id: string;
     title: string;
     source_type: string;
@@ -132,6 +132,7 @@ export async function kb_list(): Promise<{ documents: Array<{
             kb_document_tags(tag_id, kb_tags(id, name, color))
         `)
         .neq("source_type", "transcript")
+        .eq("owner_user_id", userEmail)
         .order("created_at", { ascending: false });
 
     if (error) throw new Error(error.message);
@@ -219,12 +220,14 @@ export async function kb_create(body: {
     category: string;
     content: string;
     tag_ids?: string[];
+    owner_user_id?: string;
 }): Promise<{ document_id: string; chunks: number }> {
-    const { title, category, content, tag_ids } = z.object({
+    const { title, category, content, tag_ids, owner_user_id } = z.object({
         title: z.string().min(1),
         category: z.string().min(1),
         content: z.string().min(1),
         tag_ids: z.array(z.string().uuid()).optional(),
+        owner_user_id: z.string().optional(),
     }).parse(body);
 
     // Duplicate check
@@ -256,6 +259,7 @@ export async function kb_create(body: {
             content_hash: contentHash,
             metadata: {},
             org_id: orgId,
+            owner_user_id: owner_user_id ?? null,
         })
         .select("id")
         .single();
