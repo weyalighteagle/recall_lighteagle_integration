@@ -169,14 +169,18 @@ body=${JSON.stringify(body)}
             case "/api/kb": {
                 switch (req.method?.toUpperCase()) {
                     case "GET": {
-                        const results = await kb_list();
+                        if (!await requireAuth(req, res)) return;
+                        const userEmail: string = (req as any).userEmail;
+                        const results = await kb_list(userEmail);
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify(results));
                         return;
                     }
                     case "POST": {
+                        if (!await requireAuth(req, res)) return;
+                        const userEmail: string = (req as any).userEmail;
                         if (!body?.title || !body?.content) throw new Error("title and content are required");
-                        const result = await kb_create(body);
+                        const result = await kb_create({ ...body, owner_user_id: userEmail });
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify(result));
                         return;

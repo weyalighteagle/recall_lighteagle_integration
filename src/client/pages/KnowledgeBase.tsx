@@ -231,7 +231,10 @@ function KnowledgeBase() {
     const { data, isPending } = useQuery<{ documents: KBDocument[] }>({
         queryKey: ["kb_documents"],
         queryFn: async () => {
-            const res = await fetch("/api/kb");
+            const token = await getToken();
+            const res = await fetch("/api/kb", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
             if (!res.ok) throw new Error(await res.text());
             return res.json();
         },
