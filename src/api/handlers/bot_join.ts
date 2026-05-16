@@ -3,7 +3,6 @@ import { randomUUID } from "crypto";
 import { env } from "../config/env";
 import { supabase } from "../config/supabase";
 import { bot_settings_get } from "./bot_settings.js";
-import { meeting_tags_set } from "./knowledge_base.js";
 
 /**
  * Doğrudan meeting URL'si ile ad-hoc bot gönder.
@@ -143,6 +142,15 @@ export async function bot_join(args: {
         { onConflict: "bot_id", ignoreDuplicates: false },
     );
 
+    // ── Write meeting_projects so handleBotDone can auto-link transcript ──
+    if (args.project_id) {
+        await supabase.from("meeting_projects").upsert(
+            { project_id: args.project_id, bot_id: bot.id, calendar_event_id: null },
+            { onConflict: "bot_id" },
+        );
+        console.log(`[bot_join] meeting_projects written: bot_id=${bot.id} project_id=${args.project_id}`);
+    }
+
     // ── Write meeting_tags so relay can filter KB by category ──────────────
     if (botType === "voice_agent" && meetingToken && active_kb_id) {
         try {
@@ -155,11 +163,8 @@ export async function bot_join(args: {
             const tag_ids = (tagLinks ?? []).map((t: { tag_id: string }) => t.tag_id);
 
             if (tag_ids.length > 0) {
-                await meeting_tags_set({
-                    botId: bot.id,
-                    tag_ids,
-                    userEmail: args.user_email ?? "system",
-                });
+                const rows = tag_ids.map((tag_id) => ({ bot_id: bot.id, tag_id }));
+                await supabase.from("meeting_tags").insert(rows);
                 console.log(`[bot_join] meeting_tags written: bot_id=${bot.id} tag_ids=${JSON.stringify(tag_ids)}`);
             } else {
                 console.log(`[bot_join] no tags found for active_kb_id=${active_kb_id} — meeting_tags not written`);
