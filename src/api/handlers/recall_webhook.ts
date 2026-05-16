@@ -1196,10 +1196,12 @@ export async function schedule_bot_for_calendar_event(args: {
     updatedEvent = CalendarEventSchema.parse(await response.json());
   }
 
-  // If bot already exists and we have a meetingToken,
-  // update its output_media_url via v1 PATCH
-  if (existingBots.length > 0 && meetingToken && bot_type === "voice_agent") {
-    const existingBotId = existingBots[0].bot_id;
+  // Always PATCH the bot's output_media_url after scheduling for voice_agent bots.
+  // Using updatedEvent.bots (post-POST) rather than existingBots (pre-POST) ensures
+  // that Recall-deduplicated bots (same dedup key, old URL) are also patched with the
+  // current meetingToken and project_id, not just bots we knew about beforehand.
+  if (updatedEvent.bots.length > 0 && meetingToken && bot_type === "voice_agent") {
+    const existingBotId = updatedEvent.bots[0].bot_id;
     const updatedPageParams = new URLSearchParams({ wss: env.VOICE_AGENT_WSS_URL! });
     updatedPageParams.set("meetingToken", meetingToken);
     if (kb_id) updatedPageParams.set("kb", kb_id);
