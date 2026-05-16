@@ -883,23 +883,6 @@ function CalendarEventCard({
                         <span className="truncate">{event.meeting_url}</span>
                     </a>
                 )}
-                {canToggle && tags.length > 0 && (
-                    <div className="flex items-center gap-1.5">
-                        <span className="text-gray-500">Category:</span>
-                        <select
-                            value={selectedTagId}
-                            onChange={(e) => handleTagChange(e.target.value)}
-                            className="text-xs border rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[160px]"
-                        >
-                            <option value="">All docs</option>
-                            {tags.map((tag) => (
-                                <option key={tag.id} value={tag.id}>
-                                    {tag.name}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                )}
                 {canToggle && projects.length > 0 && (
                     <div className="flex items-center gap-1.5">
                         <span className="text-gray-500">Proje:</span>
