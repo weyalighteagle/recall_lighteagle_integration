@@ -731,35 +731,21 @@ async function handleBotDone(body: any): Promise<void> {
         console.log(`[handleBotDone] ✅ KB ingested: "${docTitle}" (${result.chunkCount} chunks, ${transcriptText.length} chars)`);
         if (result.docId) {
           try {
-            // 1. Try bot_id lookup (instant meetings written by bot_join)
-            let autoLinkProjectId: string | null = null;
-            const { data: mpByBot } = await supabase
+            const { data: mpRow } = await supabase
               .from("meeting_projects")
               .select("project_id")
               .eq("bot_id", botId)
               .maybeSingle();
-            if (mpByBot?.project_id) {
-              autoLinkProjectId = mpByBot.project_id;
-            } else if (meetingRow?.calendar_event_id) {
-              // 2. Fallback: calendar-scheduled bots store project via calendar_event_id
-              const { data: mpByCal } = await supabase
-                .from("meeting_projects")
-                .select("project_id")
-                .eq("calendar_event_id", meetingRow.calendar_event_id)
-                .maybeSingle();
-              autoLinkProjectId = mpByCal?.project_id ?? null;
-            }
-
-            if (autoLinkProjectId) {
+            if (mpRow?.project_id) {
               const { error: linkErr } = await supabase
                 .from("kb_document_projects")
-                .insert({ document_id: result.docId, project_id: autoLinkProjectId });
+                .insert({ document_id: result.docId, project_id: mpRow.project_id });
               if (linkErr && (linkErr as any).code === "23505") {
                 // already linked — idempotent
               } else if (linkErr) {
                 console.error(`[handleBotDone] Auto-link failed for doc ${result.docId}:`, linkErr);
               } else {
-                console.log(`[handleBotDone] Auto-linked transcript ${result.docId} to project ${autoLinkProjectId}`);
+                console.log(`[handleBotDone] Auto-linked transcript ${result.docId} to project ${mpRow.project_id}`);
               }
             }
           } catch (autoLinkErr) {
@@ -1210,10 +1196,12 @@ export async function schedule_bot_for_calendar_event(args: {
     updatedEvent = CalendarEventSchema.parse(await response.json());
   }
 
-  // If bot already exists and we have a meetingToken,
-  // update its output_media_url via v1 PATCH
-  if (existingBots.length > 0 && meetingToken && bot_type === "voice_agent") {
-    const existingBotId = existingBots[0].bot_id;
+  // Always PATCH the bot's output_media_url after scheduling for voice_agent bots.
+  // Using updatedEvent.bots (post-POST) rather than existingBots (pre-POST) ensures
+  // that Recall-deduplicated bots (same dedup key, old URL) are also patched with the
+  // current meetingToken and project_id, not just bots we knew about beforehand.
+  if (updatedEvent.bots.length > 0 && meetingToken && bot_type === "voice_agent") {
+    const existingBotId = updatedEvent.bots[0].bot_id;
     const updatedPageParams = new URLSearchParams({ wss: env.VOICE_AGENT_WSS_URL! });
     updatedPageParams.set("meetingToken", meetingToken);
     if (kb_id) updatedPageParams.set("kb", kb_id);
