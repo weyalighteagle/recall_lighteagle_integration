@@ -124,6 +124,11 @@ interface KbTag {
     color: string | null;
 }
 
+type KbProject = {
+    id: string;
+    name: string;
+};
+
 function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     const { user } = useUser();
     const { getToken } = useAuth();
@@ -131,6 +136,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
 
     // ── Category tags — used by the per-meeting category selector on event cards ──
     const [tags, setTags] = useState<KbTag[]>([]);
+    const [projects, setProjects] = useState<KbProject[]>([]);
     const [autoJoinEnabled, setAutoJoinEnabled] = useState<boolean>(true);
 
     useEffect(() => {
@@ -141,10 +147,16 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                     headers: { Authorization: `Bearer ${token}` },
                 }).then((r) => r.json())
             ) as Promise<{ tags: KbTag[] }>,
+            getToken().then((token) =>
+                fetch("/api/projects", {
+                    headers: { Authorization: `Bearer ${token}` },
+                }).then((r) => r.json())
+            ) as Promise<{ projects: KbProject[] }>,
         ])
-            .then(([settings, tagData]) => {
+            .then(([settings, tagData, projectData]) => {
                 setAutoJoinEnabled(settings.auto_join_enabled ?? true);
                 setTags(tagData.tags ?? []);
+                setProjects(Array.isArray(projectData?.projects) ? projectData.projects : []);
             })
             .catch(console.error);
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -253,6 +265,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                                     key={calendar.id}
                                     calendar={calendar}
                                     tags={tags}
+                                    projects={projects}
                                 />
                             ))}
                         </div>
@@ -263,7 +276,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     );
 }
 
-function CalendarDetails({ calendar, tags }: { calendar: CalendarType; tags: KbTag[] }) {
+function CalendarDetails({ calendar, tags, projects }: { calendar: CalendarType; tags: KbTag[]; projects: KbProject[] }) {
     const { user } = useUser();
     const [searchParams, setSearchParams] = useSearchParams();
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -461,6 +474,7 @@ function CalendarDetails({ calendar, tags }: { calendar: CalendarType; tags: KbT
                     startTimeGte={selectedStartDate}
                     startTimeLte={selectedEndDate}
                     tags={tags}
+                    projects={projects}
                 />
             </div>
         </div>
@@ -472,11 +486,13 @@ function CalendarEventsList({
     startTimeGte,
     startTimeLte,
     tags,
+    projects,
 }: {
     calendar: CalendarType;
     startTimeGte: string;
     startTimeLte: string;
     tags: KbTag[];
+    projects: KbProject[];
 }) {
     const latestStatus = calendar.status_changes.at(0)?.status;
     const isConnecting = latestStatus === "connecting";
@@ -557,6 +573,7 @@ function CalendarEventsList({
                                         formatTime={formatTime}
                                         getEventTitle={getEventTitle}
                                         tags={tags}
+                                        projects={projects}
                                     />
                                 ))}
                         </div>
@@ -573,12 +590,14 @@ function CalendarEventCard({
     formatTime,
     getEventTitle,
     tags,
+    projects,
 }: {
     event: CalendarEventType;
     calendarId: string;
     formatTime: (dateString: string) => string;
     getEventTitle: (event: CalendarEventType) => string;
     tags: KbTag[];
+    projects: KbProject[];
 }) {
     // Recording bot toggle hook
     const {
@@ -606,6 +625,8 @@ function CalendarEventCard({
     const navigate = useNavigate();
     const [isExporting, setIsExporting] = useState(false);
     const [selectedTagId, setSelectedTagId] = useState<string>("");
+    const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+    const [projectLoading, setProjectLoading] = useState(true);
     const pendingTagRef = useRef<string>("");
     const prevHasVoiceAgentBot = useRef(false);
 
@@ -625,6 +646,22 @@ function CalendarEventCard({
                 .catch(console.error)
         );
     }, [event.id]);
+
+    // Load persisted project selection from server on mount
+    useEffect(() => {
+        if (!event.id) return;
+        getToken().then((token) =>
+            fetch(`/api/meeting-project?calendar_event_id=${event.id}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            })
+                .then((r) => r.json())
+                .then((data: { project_id: string | null }) => {
+                    setSelectedProjectId(data.project_id ?? "");
+                })
+                .catch(console.error)
+                .finally(() => setProjectLoading(false))
+        );
+    }, [event.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const isInFuture = new Date(event.start_time) > new Date();
     const hasMeetingUrl = !!event.meeting_url;
@@ -704,6 +741,23 @@ function CalendarEventCard({
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
             body: JSON.stringify({ tag_ids: [tagId] }),
         }).catch(console.error);
+    };
+
+    const handleProjectChange = async (projectId: string) => {
+        setSelectedProjectId(projectId);
+        const token = await getToken();
+        if (projectId) {
+            fetch("/api/meeting-project", {
+                method: "PUT",
+                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                body: JSON.stringify({ calendar_event_id: event.id, project_id: projectId }),
+            }).catch(console.error);
+        } else {
+            fetch(`/api/meeting-project?calendar_event_id=${event.id}`, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` },
+            }).catch(console.error);
+        }
     };
 
     useEffect(() => {
@@ -829,19 +883,18 @@ function CalendarEventCard({
                         <span className="truncate">{event.meeting_url}</span>
                     </a>
                 )}
-                {canToggle && tags.length > 0 && (
+                {canToggle && projects.length > 0 && (
                     <div className="flex items-center gap-1.5">
-                        <span className="text-gray-500">Category:</span>
+                        <span className="text-gray-500">Proje:</span>
                         <select
-                            value={selectedTagId}
-                            onChange={(e) => handleTagChange(e.target.value)}
+                            value={selectedProjectId}
+                            onChange={(e) => handleProjectChange(e.target.value)}
+                            disabled={!canToggle || projectLoading}
                             className="text-xs border rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[160px]"
                         >
-                            <option value="">All docs</option>
-                            {tags.map((tag) => (
-                                <option key={tag.id} value={tag.id}>
-                                    {tag.name}
-                                </option>
+                            <option value="">— Proje seçilmedi —</option>
+                            {projects.map((p) => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
                             ))}
                         </select>
                     </div>

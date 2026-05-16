@@ -19,8 +19,7 @@ import { cn } from "../../utils/cn";
 
 const SidebarItems = [
   { icon: Home, label: "Dashboard", href: "#sample-link" },
-  // CALENDAR_HIDDEN - LIG-11: hidden until Phase 2 rebuild
-  // { icon: Calendar, label: "Calendars", href: "/dashboard/calendar" },
+  { icon: Calendar, label: "Calendars", href: "/dashboard/calendar" },
   { icon: Video, label: "Meetings", href: "#sample-link-meetings" },
   { icon: Zap, label: "Instant Meeting", href: "/dashboard/instant-meeting" },
   { icon: FileText, label: "Notes", href: "/dashboard/notes" },
