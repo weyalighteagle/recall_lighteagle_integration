@@ -345,7 +345,15 @@ body=${JSON.stringify(body)}
                         const calendar = await calendar_retrieve({ calendar_id: calendar_event.calendar_id });
                         if (!calendar) throw new Error("Calendar not found");
 
-                        const results = await schedule_bot_for_calendar_event({ calendar, calendar_event, bot_type });
+                        const mpResult = await supabase
+                            .from("meeting_projects")
+                            .select("project_id")
+                            .eq("calendar_event_id", calendar_event.id)
+                            .maybeSingle();
+                        const project_id: string | undefined = mpResult.data?.project_id ?? undefined;
+                        console.log(`[calendar/events/bot] calendar_event_id=${calendar_event.id} project_id=${project_id ?? "null"}`);
+
+                        const results = await schedule_bot_for_calendar_event({ calendar, calendar_event, bot_type, project_id });
                         console.log(`Scheduled Bot for Calendar Event: ${JSON.stringify(results)}`);
 
                         res.writeHead(200, { "Content-Type": "application/json" });
