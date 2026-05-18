@@ -46,7 +46,12 @@ export async function bot_join(args: {
 
     if (botType === "voice_agent") {
         console.log(`[bot_join] project_id from args: ${args.project_id}`);
-        const output_media_url = `${env.VOICE_AGENT_PAGE_URL}?meetingToken=${meetingToken}&wss=${encodeURIComponent(env.VOICE_AGENT_WSS_URL!)}${args.project_id ? `&project=${encodeURIComponent(args.project_id)}` : ""}`;
+        const wssUrl = new URL(env.VOICE_AGENT_WSS_URL!);
+        wssUrl.searchParams.set("meetingToken", meetingToken!);
+        if (args.project_id) {
+            wssUrl.searchParams.set("project", args.project_id);
+        }
+        const output_media_url = `${env.VOICE_AGENT_PAGE_URL}?wss=${encodeURIComponent(wssUrl.toString())}`;
         console.log(`[bot_join] output_media_url: ${output_media_url}`);
 
         payload = {
