@@ -143,6 +143,25 @@ export async function bot_join(args: {
         { onConflict: "bot_id", ignoreDuplicates: false },
     );
 
+    // ── Link instant meeting bot to project so handleBotDone can auto-link transcript ──
+    if (args.project_id) {
+        try {
+            const { error: mpError } = await supabase
+                .from("meeting_projects")
+                .upsert(
+                    { project_id: args.project_id, bot_id: bot.id, calendar_event_id: null },
+                    { onConflict: "bot_id" },
+                );
+            if (mpError) {
+                console.error(`[bot_join] meeting_projects write failed (non-fatal): bot_id=${bot.id} project_id=${args.project_id}:`, mpError);
+            } else {
+                console.log(`[bot_join] meeting_projects written: bot_id=${bot.id} project_id=${args.project_id}`);
+            }
+        } catch (mpErr) {
+            console.error(`[bot_join] meeting_projects write unexpected error (non-fatal):`, mpErr);
+        }
+    }
+
     // ── Write meeting_tags so relay can filter KB by category ──────────────
     if (botType === "voice_agent" && meetingToken && active_kb_id) {
         try {
