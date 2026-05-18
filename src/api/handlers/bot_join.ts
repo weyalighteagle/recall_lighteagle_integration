@@ -146,7 +146,7 @@ export async function bot_join(args: {
     );
 
     // ── Link instant meeting bot to project so handleBotDone can auto-link transcript ──
-    if (args.project_id) {
+    if (args.project_id && botType === "voice_agent") {
         try {
             const { error: mpError } = await supabase
                 .from("meeting_projects")
