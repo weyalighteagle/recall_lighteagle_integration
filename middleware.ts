@@ -31,7 +31,15 @@ export default async function middleware(request: Request): Promise<Response> {
         method: request.method,
         headers,
         body: body ?? undefined,
+        redirect: 'manual',
     });
+
+    if (response.status >= 300 && response.status < 400) {
+        return new Response(null, {
+            status: response.status,
+            headers: response.headers,
+        });
+    }
 
     const responseHeaders = new Headers(response.headers);
     responseHeaders.set("Access-Control-Allow-Origin", "*");

@@ -396,6 +396,29 @@ export async function handleTranscriptWebhook(
                       console.log(`[transcript.done/assemblyai] KB ingest skipped: ${result.reason}`);
                     } else {
                       console.log(`[transcript.done/assemblyai] ✅ KB ingested: "${docTitle}" (${result.chunkCount} chunks)`);
+                      if (result.docId) {
+                        try {
+                          const { data: mp } = await supabase
+                            .from("meeting_projects")
+                            .select("project_id")
+                            .eq("bot_id", botId)
+                            .maybeSingle();
+                          if (mp?.project_id) {
+                            const { error: linkErr } = await supabase
+                              .from("kb_document_projects")
+                              .insert({ document_id: result.docId, project_id: mp.project_id });
+                            if (linkErr && (linkErr as any).code === "23505") {
+                              // already linked — idempotent
+                            } else if (linkErr) {
+                              console.error(`[transcript_webhook] kb_document_projects insert failed:`, linkErr);
+                            } else {
+                              console.log(`[transcript_webhook] ✅ Linked doc ${result.docId} to project ${mp.project_id}`);
+                            }
+                          }
+                        } catch (autoLinkErr) {
+                          console.error(`[transcript_webhook] kb_document_projects auto-link unexpected error:`, autoLinkErr);
+                        }
+                      }
                     }
                   } catch (kbErr) {
                     await upsertIngestionLog(botId, null, "failed", { error_message: String(kbErr) });
