@@ -184,13 +184,14 @@ function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
 }
 
 interface MeetingProjectPickerProps {
+    botId: string;
     kbDocumentId: string | null;
     projects: Project[];
     initialAssignedProjects: Project[];
     getToken: () => Promise<string | null>;
 }
 
-function MeetingProjectPicker({ kbDocumentId, projects, initialAssignedProjects, getToken }: MeetingProjectPickerProps) {
+function MeetingProjectPicker({ botId, kbDocumentId, projects, initialAssignedProjects, getToken }: MeetingProjectPickerProps) {
     const queryClient = useQueryClient();
     const [showPicker, setShowPicker] = useState(false);
     const pickerRef = useRef<HTMLDivElement>(null);
@@ -236,6 +237,29 @@ function MeetingProjectPicker({ kbDocumentId, projects, initialAssignedProjects,
         onError: (err: Error) => toast.error(err.message),
     });
 
+    const removeFromProjectMutation = useMutation({
+        mutationFn: async (projectId: string) => {
+            if (!kbDocumentId) return;
+            const token = await getToken();
+            const res = await fetch(
+                `/api/projects/${projectId}/documents/${kbDocumentId}?bot_id=${encodeURIComponent(botId)}`,
+                { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+            );
+            if (!res.ok) throw new Error(await res.text());
+        },
+        onSuccess: (_data, projectId) => {
+            void queryClient.invalidateQueries({ queryKey: ["kb_projects"] });
+            void queryClient.invalidateQueries({ queryKey: ["kb_project_detail"] });
+            setAssignedProjectIds((prev) => {
+                const next = new Set(prev);
+                next.delete(projectId);
+                return next;
+            });
+            toast.success("Removed from project");
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
     if (!kbDocumentId) {
         return (
             <span
@@ -254,17 +278,26 @@ function MeetingProjectPicker({ kbDocumentId, projects, initialAssignedProjects,
             {assignedProjects.map((p) => (
                 <span
                     key={p.id}
-                    className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium"
+                    className="group inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium"
                 >
-                    <Layers className="size-2.5" />
+                    <Layers className="size-2.5 shrink-0" />
                     {p.name}
+                    <button
+                        type="button"
+                        className="text-blue-400 hover:text-blue-700 opacity-0 group-hover:opacity-100 transition-opacity leading-none ml-0.5 disabled:opacity-30"
+                        onClick={(e) => { e.stopPropagation(); removeFromProjectMutation.mutate(p.id); }}
+                        disabled={removeFromProjectMutation.isPending}
+                        title="Remove from project"
+                    >
+                        ×
+                    </button>
                 </span>
             ))}
             <button
                 type="button"
                 className="text-xs text-gray-400 hover:text-gray-600"
                 onClick={() => setShowPicker((v) => !v)}
-                disabled={addToProjectMutation.isPending}
+                disabled={addToProjectMutation.isPending || removeFromProjectMutation.isPending}
             >
                 {addToProjectMutation.isPending ? (
                     <Loader2 className="size-3 animate-spin inline" />
@@ -623,6 +656,7 @@ function NotesList() {
                                             )}
                                         </div>
                                         <MeetingProjectPicker
+                                            botId={meeting.bot_id}
                                             kbDocumentId={kbDocByBotId.get(meeting.bot_id) ?? null}
                                             projects={projects}
                                             initialAssignedProjects={
