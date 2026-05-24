@@ -176,6 +176,7 @@ export async function handleTranscriptWebhook(
       // AssemblyAI diarized result for a voice_agent bot.
       // Download, parse, replace real-time utterances, and mark done.
       if (isAssemblyAiAsync) {
+        console.log(`[transcript.done/assemblyai] pre-claim check: bot_id=${botId}, transcript_id=${transcriptId}, looking for done=false row in meetings`);
         const { data: claimed, error: claimError } = await supabase
           .from('meetings')
           .update({ done: true })
@@ -184,6 +185,7 @@ export async function handleTranscriptWebhook(
           .select('bot_id, calendar_event_id')
           .single();
 
+        console.log(`[transcript.done/assemblyai] claim result: claimed=${!!claimed}, claimError=${claimError?.message ?? 'none'}`);
         if (claimError || !claimed) {
           console.log(`[transcript.done/assemblyai] already claimed or not found for bot_id=${botId}, skipping`);
           return { status: 200 };
