@@ -181,7 +181,7 @@ export async function handleTranscriptWebhook(
           .update({ done: true })
           .eq('bot_id', botId)
           .eq('done', false)
-          .select('bot_id')
+          .select('bot_id, calendar_event_id')
           .single();
 
         if (claimError || !claimed) {
@@ -398,11 +398,25 @@ export async function handleTranscriptWebhook(
                       console.log(`[transcript.done/assemblyai] ✅ KB ingested: "${docTitle}" (${result.chunkCount} chunks)`);
                       if (result.docId) {
                         try {
-                          const { data: mp } = await supabase
+                          // Look up by bot_id first (instant-meeting bots); fall back to
+                          // calendar_event_id for calendar bots whose meeting_projects row
+                          // was written with calendar_event_id and bot_id = null.
+                          let mp: { project_id: string } | null = null;
+                          const { data: mpDirect } = await supabase
                             .from("meeting_projects")
                             .select("project_id")
                             .eq("bot_id", botId)
                             .maybeSingle();
+                          mp = mpDirect;
+                          if (!mp && claimed?.calendar_event_id) {
+                            const { data: mpVia } = await supabase
+                              .from("meeting_projects")
+                              .select("project_id")
+                              .eq("calendar_event_id", claimed.calendar_event_id)
+                              .maybeSingle();
+                            mp = mpVia;
+                          }
+                          console.log(`[transcript_webhook] Auto-link verification: bot_id=${botId}, meeting_projects_found=${!!mp}, project_id=${mp?.project_id || 'none'}`);
                           if (mp?.project_id) {
                             const { error: linkErr } = await supabase
                               .from("kb_document_projects")
