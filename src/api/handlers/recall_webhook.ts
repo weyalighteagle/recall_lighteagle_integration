@@ -731,11 +731,25 @@ async function handleBotDone(body: any): Promise<void> {
         console.log(`[handleBotDone] ✅ KB ingested: "${docTitle}" (${result.chunkCount} chunks, ${transcriptText.length} chars)`);
         if (result.docId) {
           try {
-            const { data: mpRow } = await supabase
+            // Look up by bot_id first (instant-meeting bots); fall back to
+            // calendar_event_id for calendar bots whose meeting_projects row
+            // was written with calendar_event_id and bot_id = null.
+            let mpRow: { project_id: string } | null = null;
+            const { data: mpDirect } = await supabase
               .from("meeting_projects")
               .select("project_id")
               .eq("bot_id", botId)
               .maybeSingle();
+            mpRow = mpDirect;
+            if (!mpRow && meetingRow?.calendar_event_id) {
+              const { data: mpVia } = await supabase
+                .from("meeting_projects")
+                .select("project_id")
+                .eq("calendar_event_id", meetingRow.calendar_event_id)
+                .maybeSingle();
+              mpRow = mpVia;
+            }
+            console.log(`[handleBotDone] Auto-link verification: bot_id=${botId}, meeting_projects_found=${!!mpRow}, project_id=${mpRow?.project_id || 'none'}`);
             if (mpRow?.project_id) {
               const { error: linkErr } = await supabase
                 .from("kb_document_projects")
