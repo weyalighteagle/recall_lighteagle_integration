@@ -875,7 +875,7 @@ body=${JSON.stringify(body)}
                     const userId: string = (req as any).userId;
                     const projectId = pathname.split("/")[3]!;
                     const docId = pathname.split("/")[5]!;
-                    const result = await project_document_remove(projectId, docId, userId);
+                    const result = await project_document_remove(projectId, docId, userId, search_params.bot_id);
                     res.writeHead(200, { "Content-Type": "application/json" });
                     res.end(JSON.stringify(result));
                     return;

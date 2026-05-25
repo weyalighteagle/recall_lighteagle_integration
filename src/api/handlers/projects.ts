@@ -238,11 +238,13 @@ export async function project_document_add(
     return { message: "Document added to project" };
 }
 
-/** DELETE /api/projects/:id/documents/:docId — remove a document from a project (document itself is NOT deleted) */
+/** DELETE /api/projects/:id/documents/:docId — remove a document from a project (document itself is NOT deleted).
+ *  Pass ?bot_id=... to also clean up the meeting_projects row so auto-link doesn't re-fire on next ingest. */
 export async function project_document_remove(
     projectId: string,
     docId: string,
     userId: string,
+    botId?: string,
 ): Promise<{ message: string }> {
     const validProjectId = z.string().uuid().parse(projectId);
     const validDocId = z.string().uuid().parse(docId);
@@ -266,5 +268,43 @@ export async function project_document_remove(
     if (error) throw new Error(error.message);
 
     console.log(`[projects] Removed document ${validDocId} from project ${validProjectId}`);
+
+    // Clean up meeting_projects so auto-link doesn't re-create the row on next ingest.
+    // Try bot_id column first (instant-meeting bots), then fall back to calendar_event_id
+    // (calendar bots whose meeting_projects row has bot_id = null).
+    if (botId) {
+        const { data: mpByBot } = await supabase
+            .from("meeting_projects")
+            .select("id, kb_projects!inner(user_id)")
+            .eq("kb_projects.user_id", userId)
+            .eq("bot_id", botId)
+            .maybeSingle();
+
+        if (mpByBot) {
+            await supabase.from("meeting_projects").delete().eq("id", (mpByBot as any).id); // eslint-disable-line @typescript-eslint/no-explicit-any
+            console.log(`[projects] Removed meeting_projects row for bot_id=${botId}`);
+        } else {
+            const { data: meetingRow } = await supabase
+                .from("meetings")
+                .select("calendar_event_id")
+                .eq("bot_id", botId)
+                .maybeSingle();
+
+            if (meetingRow?.calendar_event_id) {
+                const { data: mpByEvent } = await supabase
+                    .from("meeting_projects")
+                    .select("id, kb_projects!inner(user_id)")
+                    .eq("kb_projects.user_id", userId)
+                    .eq("calendar_event_id", meetingRow.calendar_event_id)
+                    .maybeSingle();
+
+                if (mpByEvent) {
+                    await supabase.from("meeting_projects").delete().eq("id", (mpByEvent as any).id); // eslint-disable-line @typescript-eslint/no-explicit-any
+                    console.log(`[projects] Removed meeting_projects row for calendar_event_id=${meetingRow.calendar_event_id}`);
+                }
+            }
+        }
+    }
+
     return { message: "Document removed from project" };
 }

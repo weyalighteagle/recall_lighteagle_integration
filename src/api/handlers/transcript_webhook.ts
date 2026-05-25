@@ -176,14 +176,16 @@ export async function handleTranscriptWebhook(
       // AssemblyAI diarized result for a voice_agent bot.
       // Download, parse, replace real-time utterances, and mark done.
       if (isAssemblyAiAsync) {
+        console.log(`[transcript.done/assemblyai] pre-claim check: bot_id=${botId}, transcript_id=${transcriptId}, looking for done=false row in meetings`);
         const { data: claimed, error: claimError } = await supabase
           .from('meetings')
           .update({ done: true })
           .eq('bot_id', botId)
           .eq('done', false)
-          .select('bot_id')
+          .select('bot_id, calendar_event_id')
           .single();
 
+        console.log(`[transcript.done/assemblyai] claim result: claimed=${!!claimed}, claimError=${claimError?.message ?? 'none'}`);
         if (claimError || !claimed) {
           console.log(`[transcript.done/assemblyai] already claimed or not found for bot_id=${botId}, skipping`);
           return { status: 200 };
@@ -398,11 +400,25 @@ export async function handleTranscriptWebhook(
                       console.log(`[transcript.done/assemblyai] ✅ KB ingested: "${docTitle}" (${result.chunkCount} chunks)`);
                       if (result.docId) {
                         try {
-                          const { data: mp } = await supabase
+                          // Look up by bot_id first (instant-meeting bots); fall back to
+                          // calendar_event_id for calendar bots whose meeting_projects row
+                          // was written with calendar_event_id and bot_id = null.
+                          let mp: { project_id: string } | null = null;
+                          const { data: mpDirect } = await supabase
                             .from("meeting_projects")
                             .select("project_id")
                             .eq("bot_id", botId)
                             .maybeSingle();
+                          mp = mpDirect;
+                          if (!mp && claimed?.calendar_event_id) {
+                            const { data: mpVia } = await supabase
+                              .from("meeting_projects")
+                              .select("project_id")
+                              .eq("calendar_event_id", claimed.calendar_event_id)
+                              .maybeSingle();
+                            mp = mpVia;
+                          }
+                          console.log(`[transcript_webhook] Auto-link verification: bot_id=${botId}, meeting_projects_found=${!!mp}, project_id=${mp?.project_id || 'none'}`);
                           if (mp?.project_id) {
                             const { error: linkErr } = await supabase
                               .from("kb_document_projects")

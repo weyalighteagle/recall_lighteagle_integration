@@ -264,7 +264,16 @@ async function handleBotDone(body: any): Promise<void> {
     `[handleBotDone] ── START bot_id=${botId} ─────────────────────────────`,
   );
 
-  // Step 1: Fetch bot details from Recall v1 API to get transcript download URLs
+  // Voice agent bots don't need Recall download URLs — their transcript arrives via
+  // AssemblyAI async transcript.done. Return early here so the Recall API fetch below
+  // (and its done=true error-path setter) cannot run and corrupt the claim state that
+  // transcript.done depends on.
+  if (inferredBotType === "voice_agent") {
+    console.log(`[handleBotDone] voice_agent bot — transcript will arrive via assembly_ai_async transcript.done, skipping download`);
+    return;
+  }
+
+  // Step 1: Fetch bot details from Recall v1 API to get transcript download URLs (recording bots only)
   let downloadUrls: string[] = [];
   let botName: string = "";
   let botMeetingUrl: string | null = null;
@@ -375,11 +384,6 @@ async function handleBotDone(body: any): Promise<void> {
       console.error(`[handleBotDone] failed to mark done after Recall API failure for bot ${botId}:`, doneErr);
     }
     await upsertIngestionLog(botId, null, "failed", { error_message: "Could not fetch bot details from Recall API" });
-    return;
-  }
-
-  if (inferredBotType === "voice_agent") {
-    console.log(`[handleBotDone] voice_agent bot — transcript will arrive via assembly_ai_async transcript.done, skipping download`);
     return;
   }
 
@@ -731,11 +735,25 @@ async function handleBotDone(body: any): Promise<void> {
         console.log(`[handleBotDone] ✅ KB ingested: "${docTitle}" (${result.chunkCount} chunks, ${transcriptText.length} chars)`);
         if (result.docId) {
           try {
-            const { data: mpRow } = await supabase
+            // Look up by bot_id first (instant-meeting bots); fall back to
+            // calendar_event_id for calendar bots whose meeting_projects row
+            // was written with calendar_event_id and bot_id = null.
+            let mpRow: { project_id: string } | null = null;
+            const { data: mpDirect } = await supabase
               .from("meeting_projects")
               .select("project_id")
               .eq("bot_id", botId)
               .maybeSingle();
+            mpRow = mpDirect;
+            if (!mpRow && meetingRow?.calendar_event_id) {
+              const { data: mpVia } = await supabase
+                .from("meeting_projects")
+                .select("project_id")
+                .eq("calendar_event_id", meetingRow.calendar_event_id)
+                .maybeSingle();
+              mpRow = mpVia;
+            }
+            console.log(`[handleBotDone] Auto-link verification: bot_id=${botId}, meeting_projects_found=${!!mpRow}, project_id=${mpRow?.project_id || 'none'}`);
             if (mpRow?.project_id) {
               const { error: linkErr } = await supabase
                 .from("kb_document_projects")
