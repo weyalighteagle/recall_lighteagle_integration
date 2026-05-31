@@ -213,7 +213,7 @@ export async function handleNotesList(userEmail: string): Promise<{
         // Guest path: meetings the user attended but didn't schedule
         supabase
             .from("meetings")
-            .select("bot_id, bot_type, meeting_url, done, created_at, meeting_start_time")
+            .select("bot_id, bot_type, meeting_url, done, created_at, meeting_title, meeting_start_time")
             .contains("attendee_emails", [userEmail])
             .neq("user_email", userEmail)
             .or(`done.eq.true,meeting_start_time.lte.${nowIso}`)

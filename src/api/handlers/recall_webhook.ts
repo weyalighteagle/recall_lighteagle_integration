@@ -303,6 +303,8 @@ async function handleBotDone(body: any): Promise<void> {
       console.log(
         `[handleBotDone] bot_name="${botData?.bot_name}" meeting_url="${botData?.meeting_url}" status="${botData?.status_changes?.at(-1)?.code}"`,
       );
+      console.log(`[handleBotDone] botData top-level keys: ${Object.keys(botData).join(", ")}`);
+      console.log(`[handleBotDone] meeting_metadata: ${JSON.stringify(botData?.meeting_metadata ?? null)}`);
       const recordings: any[] = Array.isArray(botData?.recordings)
         ? botData.recordings
         : [];
