@@ -403,12 +403,6 @@ async function handleBotDone(body: any): Promise<void> {
   console.log(`[handleBotDone] botData top-level keys: ${Object.keys(botData).join(", ")}`);
   console.log(`[handleBotDone] meeting_metadata: ${JSON.stringify(botData?.meeting_metadata ?? null)}`);
 
-  if (inferredBotType === "voice_agent") {
-    console.log(`[handleBotDone] voice_agent bot — transcript will arrive via assembly_ai_async transcript.done, skipping download`);
-    return;
-  }
-
-
   if (downloadUrls.length === 0) {
     console.warn(
       `[handleBotDone] No transcript URLs for bot ${botId} — Recall returned empty/no recordings. Marking done and exiting.`,
