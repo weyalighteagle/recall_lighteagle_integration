@@ -256,7 +256,7 @@ async function handleBotDone(body: any): Promise<void> {
     return;
   }
 
-  const inferredBotType: "voice_agent" | "recording" = meetingRow?.bot_type === "voice_agent"
+  const inferredBotType: "voice_agent" | "recording" = (meetingRow?.bot_type as string | null | undefined) === "voice_agent"
     ? "voice_agent"
     : "recording";
 
