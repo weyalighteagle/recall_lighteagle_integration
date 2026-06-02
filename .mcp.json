@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "recall-docs": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://mcp.inkeep.com/recallai/mcp"]
+    },
+    "recall-workspace": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://eu-central-1.recall.ai/mcp"],
+      "env": {
+        "RECALL_API_KEY": "${RECALL_API_KEY}"
+      }
+    }
+  }
+}

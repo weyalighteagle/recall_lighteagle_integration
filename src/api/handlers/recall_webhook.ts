@@ -264,7 +264,16 @@ async function handleBotDone(body: any): Promise<void> {
     `[handleBotDone] ── START bot_id=${botId} ─────────────────────────────`,
   );
 
-  // Step 1: Fetch bot details from Recall v1 API to get transcript download URLs
+  // Voice agent bots don't need Recall download URLs — their transcript arrives via
+  // AssemblyAI async transcript.done. Return early here so the Recall API fetch below
+  // (and its done=true error-path setter) cannot run and corrupt the claim state that
+  // transcript.done depends on.
+  if (inferredBotType === "voice_agent") {
+    console.log(`[handleBotDone] voice_agent bot — transcript will arrive via assembly_ai_async transcript.done, skipping download`);
+    return;
+  }
+
+  // Step 1: Fetch bot details from Recall v1 API to get transcript download URLs (recording bots only)
   let downloadUrls: string[] = [];
   let botName: string = "";
   let botMeetingUrl: string | null = null;
@@ -390,6 +399,7 @@ async function handleBotDone(body: any): Promise<void> {
     return;
   }
 
+
   console.log(`[handleBotDone] botData top-level keys: ${Object.keys(botData).join(", ")}`);
   console.log(`[handleBotDone] meeting_metadata: ${JSON.stringify(botData?.meeting_metadata ?? null)}`);
 
@@ -397,6 +407,7 @@ async function handleBotDone(body: any): Promise<void> {
     console.log(`[handleBotDone] voice_agent bot — transcript will arrive via assembly_ai_async transcript.done, skipping download`);
     return;
   }
+
 
   if (downloadUrls.length === 0) {
     console.warn(
