@@ -216,7 +216,7 @@ async function handleBotDone(body: any): Promise<void> {
   try {
   const { data: meetingRow } = await supabase
     .from('meetings')
-    .select('id, done, bot_type, calendar_event_id')
+    .select('id, done, bot_type, calendar_event_id, meeting_title')
     .eq('bot_id', botId)
     .single();
   const meetingDbId = meetingRow?.id as string | undefined;
@@ -294,8 +294,6 @@ async function handleBotDone(body: any): Promise<void> {
       console.log(
         `[handleBotDone] bot_name="${botData?.bot_name}" meeting_url="${botData?.meeting_url}" status="${botData?.status_changes?.at(-1)?.code}"`,
       );
-      console.log(`[handleBotDone] botData top-level keys: ${Object.keys(botData).join(", ")}`);
-      console.log(`[handleBotDone] meeting_metadata: ${JSON.stringify(botData?.meeting_metadata ?? null)}`);
       const recordings: any[] = Array.isArray(botData?.recordings)
         ? botData.recordings
         : [];
@@ -348,6 +346,18 @@ async function handleBotDone(body: any): Promise<void> {
         };
         // Only overwrite meeting_url when the API returns a plain string (not Zoom's object shape)
         if (botMeetingUrl) backfillUpdate.meeting_url = botMeetingUrl;
+        // Extract meeting title from Recall API response
+        // Try multiple possible field names — we'll confirm the correct one from logs
+        const metadataTitle =
+          botData?.meeting_metadata?.title ??
+          botData?.meeting_metadata?.zoom_meeting_topic ??
+          botData?.meeting_metadata?.meeting_topic ??
+          botData?.meeting_metadata?.topic ??
+          null;
+        // Only write if meeting_title is currently null (preserve user renames)
+        if (metadataTitle && !meetingRow?.meeting_title) {
+          backfillUpdate.meeting_title = metadataTitle;
+        }
         await supabase
           .from("meetings")
           .update(backfillUpdate)
@@ -379,6 +389,9 @@ async function handleBotDone(body: any): Promise<void> {
     await upsertIngestionLog(botId, null, "failed", { error_message: "Could not fetch bot details from Recall API" });
     return;
   }
+
+  console.log(`[handleBotDone] botData top-level keys: ${Object.keys(botData).join(", ")}`);
+  console.log(`[handleBotDone] meeting_metadata: ${JSON.stringify(botData?.meeting_metadata ?? null)}`);
 
   if (inferredBotType === "voice_agent") {
     console.log(`[handleBotDone] voice_agent bot — transcript will arrive via assembly_ai_async transcript.done, skipping download`);
