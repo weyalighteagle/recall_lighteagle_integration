@@ -355,22 +355,35 @@ async function handleBotDone(body: any): Promise<void> {
         };
         // Only overwrite meeting_url when the API returns a plain string (not Zoom's object shape)
         if (botMeetingUrl) backfillUpdate.meeting_url = botMeetingUrl;
-        // Extract meeting title from Recall API response
-        // Try multiple possible field names — we'll confirm the correct one from logs
-        const metadataTitle =
+        // Extract meeting title — field names vary by platform; try top-level first then nested.
+        // Railway logs from the [handleBotDone] meeting_metadata diagnostic will confirm which fires.
+        const rawTitle: string | null | undefined =
           botData?.meeting_metadata?.title ??
+          botData?.zoom_meeting_topic ??
+          botData?.meeting_topic ??
+          botData?.topic ??
           botData?.meeting_metadata?.zoom_meeting_topic ??
           botData?.meeting_metadata?.meeting_topic ??
           botData?.meeting_metadata?.topic ??
+          botData?.meeting_metadata?.meeting_name ??
+          botData?.display_name ??
           null;
-        // Only write if meeting_title is currently null (preserve user renames)
-        if (metadataTitle && !meetingRow?.meeting_title) {
-          backfillUpdate.meeting_title = metadataTitle;
-        }
+        // Treat empty/whitespace-only strings the same as null
+        const title: string | null = typeof rawTitle === "string" ? rawTitle.trim() || null : null;
+        const shouldWrite = !!title && !meetingRow?.meeting_title;
         await supabase
           .from("meetings")
           .update(backfillUpdate)
           .eq("bot_id", botId);
+        // Separate update with IS NULL in SQL prevents overwriting a user rename in a race window
+        if (shouldWrite) {
+          await supabase
+            .from("meetings")
+            .update({ meeting_title: title })
+            .eq("bot_id", botId)
+            .is("meeting_title", null);
+        }
+        console.log(`[handleBotDone] meeting_title resolved: "${title}" for bot_id=${botId} (skipped=${!shouldWrite})`);
         console.log(
           `Backfilled meeting_url=${botMeetingUrl} bot_type=${inferredBotType} bot_name="${botName}" for bot ${botId}`,
         );
