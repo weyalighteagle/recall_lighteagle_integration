@@ -21,6 +21,7 @@ import { knowledge_bases_list, knowledge_base_by_slug } from "./handlers/knowled
 import { meeting_kb_get, meeting_kb_upsert, meeting_kb_delete } from "./handlers/meeting_kb_override";
 import { meeting_project_get, meeting_project_upsert, meeting_project_delete } from "./handlers/meeting_project";
 import { project_list, project_create, project_get, project_update, project_delete, project_document_add, project_document_remove } from "./handlers/projects";
+import { createInvite, getInvitation, acceptInvitation } from "./handlers/invitations";
 import { supabase } from "./config/supabase";
 import { requireAuth } from "./middleware/auth";
 
@@ -893,6 +894,39 @@ body=${JSON.stringify(body)}
                         return;
                     }
                     const result = await project_document_add(projectId, body.document_id, userId);
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // ── POST /api/projects/:id/invite — generate invite link ──
+                if (pathname.match(/^\/api\/projects\/[^/]+\/invite$/) && req.method?.toUpperCase() === "POST") {
+                    if (!await requireAuth(req, res)) return;
+                    const projectId = pathname.split("/")[3]!;
+                    const userId: string = (req as any).userId;
+                    const userEmail: string = (req as any).userEmail;
+                    const result = await createInvite({ projectId, userId, userEmail, invitedEmail: body?.email });
+                    res.writeHead(201, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // ── GET /api/invitations/:token — resolve invite metadata ─
+                if (pathname.match(/^\/api\/invitations\/[^/]+$/) && req.method?.toUpperCase() === "GET") {
+                    const token = pathname.split("/")[3]!;
+                    const result = await getInvitation({ token });
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // ── POST /api/invitations/:token/accept — accept invite ───
+                if (pathname.match(/^\/api\/invitations\/[^/]+\/accept$/) && req.method?.toUpperCase() === "POST") {
+                    if (!await requireAuth(req, res)) return;
+                    const token = pathname.split("/")[3]!;
+                    const userId: string = (req as any).userId;
+                    const userEmail: string = (req as any).userEmail;
+                    const result = await acceptInvitation({ token, userId, userEmail });
                     res.writeHead(200, { "Content-Type": "application/json" });
                     res.end(JSON.stringify(result));
                     return;
