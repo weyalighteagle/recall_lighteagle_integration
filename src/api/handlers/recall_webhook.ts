@@ -877,8 +877,10 @@ async function handleMeetingMetadataDone(body: any): Promise<void> {
   console.log(`[meeting_metadata.done] bot_id=${botId} metadata_id=${metadataId}`);
 
   try {
+    // The /api/v1/meeting-metadata/{id}/ endpoint does not exist in Recall's API.
+    // The bot detail endpoint already exposes meeting_metadata — use it instead.
     const metaRes = await fetch(
-      `https://${env.RECALL_REGION}.recall.ai/api/v1/meeting-metadata/${metadataId}/`,
+      `https://${env.RECALL_REGION}.recall.ai/api/v1/bot/${botId}/`,
       {
         headers: {
           Authorization: `${env.RECALL_API_KEY}`,
@@ -889,20 +891,23 @@ async function handleMeetingMetadataDone(body: any): Promise<void> {
 
     if (!metaRes.ok) {
       console.log(
-        `[meeting_metadata.done] Recall API error: ${metaRes.status} for metadata_id=${metadataId}`,
+        `[meeting_metadata.done] Recall API error: ${metaRes.status} for bot_id=${botId}`,
       );
       return;
     }
 
-    const metaBody = await metaRes.json();
-    // Log full response so Railway logs confirm the exact field names returned
-    console.log(`[meeting_metadata.done] raw response:`, JSON.stringify(metaBody));
+    const botDetail = await metaRes.json();
+    console.log(`[meeting_metadata.done] bot detail keys:`, Object.keys(botDetail));
+    console.log(`[meeting_metadata.done] meeting_metadata:`, JSON.stringify(botDetail.meeting_metadata));
+    console.log(`[meeting_metadata.done] meeting_url:`, JSON.stringify(botDetail.meeting_url));
 
+    const mm = botDetail.meeting_metadata;
     const rawTitle: string | null | undefined =
-      metaBody?.zoom_meeting_topic ??
-      metaBody?.title ??
-      metaBody?.meeting_topic ??
-      metaBody?.topic ??
+      mm?.title ??
+      mm?.zoom_meeting_topic ??
+      mm?.meeting_topic ??
+      mm?.topic ??
+      botDetail.meeting_url?.title ??
       null;
 
     const title: string | null =
