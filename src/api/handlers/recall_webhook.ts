@@ -72,6 +72,14 @@ export async function recall_webhook(payload: any): Promise<void> {
     return;
   }
 
+  // Recall sends "meeting_metadata.done" for Instant Meetings once the platform
+  // has resolved the meeting room topic. This is the only reliable source of a
+  // human-readable title for ad-hoc / Instant Meetings that have no calendar event.
+  if (payload?.event === "meeting_metadata.done") {
+    await handleMeetingMetadataDone(payload);
+    return;
+  }
+
   const result = z
     .discriminatedUnion("event", [
       CalendarUpdateEventSchema,
@@ -847,6 +855,81 @@ export async function kb_retry_ingestion(args: { botId: string }): Promise<{ sta
   });
 
   return { status: "retry_triggered" };
+}
+
+/**
+ * Handle meeting_metadata.done webhook: fired by Recall for Instant Meetings once the
+ * platform (e.g. Zoom) has resolved the room topic. Fetches the metadata object and
+ * writes the resolved title into meetings.meeting_title — only when that column is
+ * currently NULL so calendar meeting titles and user renames are never overwritten.
+ */
+async function handleMeetingMetadataDone(body: any): Promise<void> {
+  const botId: string | undefined = body?.data?.bot?.id;
+  const metadataId: string | undefined = body?.data?.meeting_metadata?.id;
+
+  if (!botId || !metadataId) {
+    console.log(
+      `[meeting_metadata.done] missing bot_id or metadata_id — bot_id=${botId} metadata_id=${metadataId}, skipping`,
+    );
+    return;
+  }
+
+  console.log(`[meeting_metadata.done] bot_id=${botId} metadata_id=${metadataId}`);
+
+  try {
+    const metaRes = await fetch(
+      `https://${env.RECALL_REGION}.recall.ai/api/v1/meeting-metadata/${metadataId}/`,
+      {
+        headers: {
+          Authorization: `${env.RECALL_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+
+    if (!metaRes.ok) {
+      console.log(
+        `[meeting_metadata.done] Recall API error: ${metaRes.status} for metadata_id=${metadataId}`,
+      );
+      return;
+    }
+
+    const metaBody = await metaRes.json();
+    // Log full response so Railway logs confirm the exact field names returned
+    console.log(`[meeting_metadata.done] raw response:`, JSON.stringify(metaBody));
+
+    const rawTitle: string | null | undefined =
+      metaBody?.zoom_meeting_topic ??
+      metaBody?.title ??
+      metaBody?.meeting_topic ??
+      metaBody?.topic ??
+      null;
+
+    const title: string | null =
+      typeof rawTitle === "string" ? rawTitle.trim() || null : null;
+
+    if (title) {
+      const { error } = await supabase
+        .from("meetings")
+        .update({ meeting_title: title })
+        .eq("bot_id", botId)
+        .is("meeting_title", null);
+
+      if (error) {
+        console.log(`[meeting_metadata.done] DB update error:`, error.message);
+      } else {
+        console.log(
+          `[meeting_metadata.done] meeting_title set to "${title}" for bot_id=${botId}`,
+        );
+      }
+    } else {
+      console.log(
+        `[meeting_metadata.done] no title found in metadata for bot_id=${botId}`,
+      );
+    }
+  } catch (err: any) {
+    console.log(`[meeting_metadata.done] fetch error:`, err?.message ?? String(err));
+  }
 }
 
 /**
