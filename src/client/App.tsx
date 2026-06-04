@@ -39,6 +39,7 @@ import { useCalendar } from "./hooks/use-calendar";
 import { useCalendarEvents } from "./hooks/use-calendar-events";
 import { useDeleteCalendar } from "./hooks/use-delete-calendar";
 import { useToggleRecording } from "./hooks/use-toggle-recording";
+import { toast } from "sonner";
 
 function App() {
     const { isLoaded } = useAuth();
@@ -138,6 +139,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     const [tags, setTags] = useState<KbTag[]>([]);
     const [projects, setProjects] = useState<KbProject[]>([]);
     const [autoJoinEnabled, setAutoJoinEnabled] = useState<boolean>(true);
+    const [isAutoJoinSyncing, setIsAutoJoinSyncing] = useState(false);
 
     useEffect(() => {
         Promise.all([
@@ -161,13 +163,34 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
             .catch(console.error);
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const handleAutoJoinToggle = (enabled: boolean) => {
+    const handleAutoJoinToggle = async (enabled: boolean) => {
         setAutoJoinEnabled(enabled);
-        fetch("/api/bot-settings", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ auto_join_enabled: enabled }),
-        }).catch(console.error);
+        setIsAutoJoinSyncing(enabled);
+        try {
+            const res = await fetch("/api/bot-settings", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ auto_join_enabled: enabled }),
+            });
+            if (!res.ok) {
+                setAutoJoinEnabled(!enabled);
+                toast.error("Failed to update Auto Join setting");
+                return;
+            }
+            const data = await res.json();
+            if (enabled && data.scheduled_count > 0) {
+                toast.success(`Auto Join enabled — ${data.scheduled_count} bot(s) scheduled for upcoming meetings`);
+            } else if (enabled) {
+                toast.success("Auto Join enabled — no upcoming meetings found");
+            } else {
+                toast.success("Auto Join disabled");
+            }
+        } catch {
+            setAutoJoinEnabled(!enabled);
+            toast.error("Failed to update Auto Join setting");
+        } finally {
+            setIsAutoJoinSyncing(false);
+        }
     };
 
     // Her email adresi için ayrı tab
@@ -198,13 +221,23 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                     <button
                         onClick={() => handleAutoJoinToggle(!autoJoinEnabled)}
                         className="flex items-center gap-2 text-sm"
+                        disabled={isAutoJoinSyncing}
                         title={autoJoinEnabled ? "Auto-join is ON — bots join all meetings automatically" : "Auto-join is OFF — schedule bots manually per meeting"}
                     >
                         <span className="text-gray-600">Auto Join</span>
                         <div className={`relative w-9 h-5 rounded-full transition-colors ${autoJoinEnabled ? "bg-green-500" : "bg-gray-300"}`}>
-                            <div className={`absolute top-0.5 size-4 bg-white rounded-full shadow transition-transform ${autoJoinEnabled ? "translate-x-4" : "translate-x-0.5"}`} />
+                            {isAutoJoinSyncing ? (
+                                <Loader2 className="absolute top-0.5 left-1 size-4 animate-spin text-white" />
+                            ) : (
+                                <div className={`absolute top-0.5 size-4 bg-white rounded-full shadow transition-transform ${autoJoinEnabled ? "translate-x-4" : "translate-x-0.5"}`} />
+                            )}
                         </div>
                     </button>
+                    <p className="text-xs text-gray-400">
+                        {autoJoinEnabled
+                            ? "WEYA will automatically join all upcoming meetings."
+                            : "Manually add the bot to each meeting."}
+                    </p>
                     <Button
                         variant="outline"
                         size="sm"
