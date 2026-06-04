@@ -218,26 +218,29 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
             <div className="flex items-center justify-between">
                 <h1 className="text-lg font-semibold">Your Calendars</h1>
                 <div className="flex items-center gap-4">
-                    <button
-                        onClick={() => handleAutoJoinToggle(!autoJoinEnabled)}
-                        className="flex items-center gap-2 text-sm"
-                        disabled={isAutoJoinSyncing}
-                        title={autoJoinEnabled ? "Auto-join is ON — bots join all meetings automatically" : "Auto-join is OFF — schedule bots manually per meeting"}
-                    >
-                        <span className="text-gray-600">Auto Join</span>
-                        <div className={`relative w-9 h-5 rounded-full transition-colors ${autoJoinEnabled ? "bg-green-500" : "bg-gray-300"}`}>
+                    <div className="flex items-center gap-3 px-3 py-1.5 bg-white border rounded-lg shadow-sm">
+                        <div className="flex flex-col">
+                            <span className="text-sm font-medium text-gray-700">Auto Join</span>
+                            <span className="text-[11px] text-gray-400 leading-tight">
+                                {autoJoinEnabled
+                                    ? "Bots join all upcoming meetings"
+                                    : "Manually add bots per meeting"}
+                            </span>
+                        </div>
+                        <button
+                            onClick={() => handleAutoJoinToggle(!autoJoinEnabled)}
+                            disabled={isAutoJoinSyncing}
+                            className="relative w-9 h-5 rounded-full transition-colors flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 disabled:opacity-50"
+                            style={{ backgroundColor: autoJoinEnabled ? '#22c55e' : '#d1d5db' }}
+                            title={autoJoinEnabled ? "Auto-join is ON" : "Auto-join is OFF"}
+                        >
                             {isAutoJoinSyncing ? (
                                 <Loader2 className="absolute top-0.5 left-1 size-4 animate-spin text-white" />
                             ) : (
                                 <div className={`absolute top-0.5 size-4 bg-white rounded-full shadow transition-transform ${autoJoinEnabled ? "translate-x-4" : "translate-x-0.5"}`} />
                             )}
-                        </div>
-                    </button>
-                    <p className="text-xs text-gray-400">
-                        {autoJoinEnabled
-                            ? "WEYA will automatically join all upcoming meetings."
-                            : "Manually add the bot to each meeting."}
-                    </p>
+                        </button>
+                    </div>
                     <Button
                         variant="outline"
                         size="sm"
