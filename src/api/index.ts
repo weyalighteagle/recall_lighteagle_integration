@@ -243,8 +243,63 @@ body=${JSON.stringify(body)}
                     }
                     case "PATCH": {
                         const updated = await bot_settings_update(body ?? {});
+
+                        let scheduled_count = 0;
+                        if (body?.auto_join_enabled === true) {
+                            try {
+                                console.log("[bot-settings] auto_join_enabled turned ON — running catchup scan");
+                                const { calendars: allCalendars } = await calendars_list({});
+
+                                for (const calendar of allCalendars) {
+                                    try {
+                                        const now = new Date().toISOString();
+                                        let next: string | null = null;
+                                        do {
+                                            const { calendar_events, next: newNext } = await calendar_events_list({
+                                                calendar_id: calendar.id,
+                                                next,
+                                                start_time__gte: now,
+                                                start_time__lte: null,
+                                            });
+
+                                            for (const event of calendar_events) {
+                                                if (event.is_deleted) continue;
+                                                if (!event.meeting_url || !event.start_time) continue;
+                                                if (new Date(event.start_time) <= new Date()) continue;
+
+                                                const bot_type = updated.bot_mode === "voice_agent" ? "voice_agent" : "recording";
+                                                if (bot_type === "voice_agent" && (!env.VOICE_AGENT_PAGE_URL || !env.VOICE_AGENT_WSS_URL)) {
+                                                    console.warn(`[catchup] voice_agent env vars missing — skipping event ${event.id}`);
+                                                    continue;
+                                                }
+
+                                                try {
+                                                    await schedule_bot_for_calendar_event({
+                                                        calendar_event: event,
+                                                        calendar,
+                                                        bot_type,
+                                                        kb_id: bot_type === "voice_agent" ? (updated.active_kb_id ?? undefined) : undefined,
+                                                    });
+                                                    scheduled_count++;
+                                                    console.log(`[catchup] Scheduled ${bot_type} bot for event ${event.id}`);
+                                                } catch (err) {
+                                                    console.log(`[catchup] ${bot_type} bot for event ${event.id}: ${(err as Error).message?.slice(0, 100)}`);
+                                                }
+                                            }
+                                            next = newNext;
+                                        } while (next);
+                                    } catch (calErr) {
+                                        console.error(`[catchup] Failed to scan calendar ${calendar.id}:`, calErr);
+                                    }
+                                }
+                                console.log(`[catchup] Done — scheduled ${scheduled_count} bots total`);
+                            } catch (err) {
+                                console.error("[catchup] Failed to run catchup scan:", err);
+                            }
+                        }
+
                         res.writeHead(200, { "Content-Type": "application/json" });
-                        res.end(JSON.stringify(updated));
+                        res.end(JSON.stringify({ ...updated, scheduled_count }));
                         return;
                     }
                     default:
