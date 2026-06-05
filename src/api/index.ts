@@ -21,6 +21,7 @@ import { knowledge_bases_list, knowledge_base_by_slug } from "./handlers/knowled
 import { meeting_kb_get, meeting_kb_upsert, meeting_kb_delete } from "./handlers/meeting_kb_override";
 import { meeting_project_get, meeting_project_upsert, meeting_project_delete } from "./handlers/meeting_project";
 import { project_list, project_create, project_get, project_update, project_delete, project_document_add, project_document_remove } from "./handlers/projects";
+import { createInvite, getInvitation, acceptInvitation } from "./handlers/invitations";
 import { supabase } from "./config/supabase";
 import { requireAuth } from "./middleware/auth";
 
@@ -242,8 +243,63 @@ body=${JSON.stringify(body)}
                     }
                     case "PATCH": {
                         const updated = await bot_settings_update(body ?? {});
+
+                        let scheduled_count = 0;
+                        if (body?.auto_join_enabled === true) {
+                            try {
+                                console.log("[bot-settings] auto_join_enabled turned ON — running catchup scan");
+                                const { calendars: allCalendars } = await calendars_list({});
+
+                                for (const calendar of allCalendars) {
+                                    try {
+                                        const now = new Date().toISOString();
+                                        let next: string | null = null;
+                                        do {
+                                            const { calendar_events, next: newNext } = await calendar_events_list({
+                                                calendar_id: calendar.id,
+                                                next,
+                                                start_time__gte: now,
+                                                start_time__lte: null,
+                                            });
+
+                                            for (const event of calendar_events) {
+                                                if (event.is_deleted) continue;
+                                                if (!event.meeting_url || !event.start_time) continue;
+                                                if (new Date(event.start_time) <= new Date()) continue;
+
+                                                const bot_type = updated.bot_mode === "voice_agent" ? "voice_agent" : "recording";
+                                                if (bot_type === "voice_agent" && (!env.VOICE_AGENT_PAGE_URL || !env.VOICE_AGENT_WSS_URL)) {
+                                                    console.warn(`[catchup] voice_agent env vars missing — skipping event ${event.id}`);
+                                                    continue;
+                                                }
+
+                                                try {
+                                                    await schedule_bot_for_calendar_event({
+                                                        calendar_event: event,
+                                                        calendar,
+                                                        bot_type,
+                                                        kb_id: bot_type === "voice_agent" ? (updated.active_kb_id ?? undefined) : undefined,
+                                                    });
+                                                    scheduled_count++;
+                                                    console.log(`[catchup] Scheduled ${bot_type} bot for event ${event.id}`);
+                                                } catch (err) {
+                                                    console.log(`[catchup] ${bot_type} bot for event ${event.id}: ${(err as Error).message?.slice(0, 100)}`);
+                                                }
+                                            }
+                                            next = newNext;
+                                        } while (next);
+                                    } catch (calErr) {
+                                        console.error(`[catchup] Failed to scan calendar ${calendar.id}:`, calErr);
+                                    }
+                                }
+                                console.log(`[catchup] Done — scheduled ${scheduled_count} bots total`);
+                            } catch (err) {
+                                console.error("[catchup] Failed to run catchup scan:", err);
+                            }
+                        }
+
                         res.writeHead(200, { "Content-Type": "application/json" });
-                        res.end(JSON.stringify(updated));
+                        res.end(JSON.stringify({ ...updated, scheduled_count }));
                         return;
                     }
                     default:
@@ -893,6 +949,39 @@ body=${JSON.stringify(body)}
                         return;
                     }
                     const result = await project_document_add(projectId, body.document_id, userId);
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // ── POST /api/projects/:id/invite — generate invite link ──
+                if (pathname.match(/^\/api\/projects\/[^/]+\/invite$/) && req.method?.toUpperCase() === "POST") {
+                    if (!await requireAuth(req, res)) return;
+                    const projectId = pathname.split("/")[3]!;
+                    const userId: string = (req as any).userId;
+                    const userEmail: string = (req as any).userEmail;
+                    const result = await createInvite({ projectId, userId, userEmail, invitedEmail: body?.email });
+                    res.writeHead(201, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // ── GET /api/invitations/:token — resolve invite metadata ─
+                if (pathname.match(/^\/api\/invitations\/[^/]+$/) && req.method?.toUpperCase() === "GET") {
+                    const token = pathname.split("/")[3]!;
+                    const result = await getInvitation({ token });
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // ── POST /api/invitations/:token/accept — accept invite ───
+                if (pathname.match(/^\/api\/invitations\/[^/]+\/accept$/) && req.method?.toUpperCase() === "POST") {
+                    if (!await requireAuth(req, res)) return;
+                    const token = pathname.split("/")[3]!;
+                    const userId: string = (req as any).userId;
+                    const userEmail: string = (req as any).userEmail;
+                    const result = await acceptInvitation({ token, userId, userEmail });
                     res.writeHead(200, { "Content-Type": "application/json" });
                     res.end(JSON.stringify(result));
                     return;

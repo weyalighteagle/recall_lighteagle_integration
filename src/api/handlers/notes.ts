@@ -185,6 +185,48 @@ export async function handleNotesList(userEmail: string): Promise<{
         participants: string[];
     }[];
 }> {
+    // ── Safety net: resolve stale "Processing" meetings (Fix C) ──────────
+    // LIG-16 Fix A/B cover errors inside handleBotDone. This covers the case
+    // where handleBotDone never runs at all — bot cancelled before joining,
+    // webhook lost, or scheduling failure. If a meeting's start time was 2+
+    // hours ago and it's still done=false, no webhook is coming.
+    try {
+        const staleThreshold = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+        // Meetings with a start time that's 2+ hours past
+        const { data: staleWithStart } = await supabase
+            .from("meetings")
+            .update({ done: true })
+            .eq("done", false)
+            .not("meeting_start_time", "is", null)
+            .lt("meeting_start_time", staleThreshold)
+            .select("bot_id");
+
+        if (staleWithStart && staleWithStart.length > 0) {
+            console.log(
+                `[handleNotesList] safety-net: marked ${staleWithStart.length} stale meeting(s) done: ${staleWithStart.map((r: any) => r.bot_id).join(", ")}`,
+            );
+        }
+
+        // Meetings without meeting_start_time — use created_at as fallback
+        const { data: staleNoStart } = await supabase
+            .from("meetings")
+            .update({ done: true })
+            .eq("done", false)
+            .is("meeting_start_time", null)
+            .lt("created_at", staleThreshold)
+            .select("bot_id");
+
+        if (staleNoStart && staleNoStart.length > 0) {
+            console.log(
+                `[handleNotesList] safety-net: marked ${staleNoStart.length} stale meeting(s) done (no start time): ${staleNoStart.map((r: any) => r.bot_id).join(", ")}`,
+            );
+        }
+    } catch (err) {
+        // Cleanup failure must NEVER break the Notes page
+        console.error("[handleNotesList] stale meeting cleanup failed:", err);
+    }
+
     // Fetch user's calendar bot IDs + titles first (needed to build the DB filter)
     const calendarMeta = await fetchCalendarBotMeta(userEmail);
     const calendarBotIds = [...calendarMeta.keys()];
@@ -213,7 +255,7 @@ export async function handleNotesList(userEmail: string): Promise<{
         // Guest path: meetings the user attended but didn't schedule
         supabase
             .from("meetings")
-            .select("bot_id, bot_type, meeting_url, done, created_at, meeting_start_time")
+            .select("bot_id, bot_type, meeting_url, done, created_at, meeting_title, meeting_start_time")
             .contains("attendee_emails", [userEmail])
             .neq("user_email", userEmail)
             .or(`done.eq.true,meeting_start_time.lte.${nowIso}`)
