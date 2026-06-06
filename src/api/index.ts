@@ -22,6 +22,7 @@ import { meeting_kb_get, meeting_kb_upsert, meeting_kb_delete } from "./handlers
 import { meeting_project_get, meeting_project_upsert, meeting_project_delete } from "./handlers/meeting_project";
 import { project_list, project_create, project_get, project_update, project_delete, project_document_add, project_document_remove } from "./handlers/projects";
 import { createInvite, getInvitation, acceptInvitation } from "./handlers/invitations";
+import { getSharedProjects, getProjectMembers, removeMember, leaveProject } from "./handlers/projectMembers";
 import { supabase } from "./config/supabase";
 import { requireAuth } from "./middleware/auth";
 
@@ -862,6 +863,17 @@ body=${JSON.stringify(body)}
                     return;
                 }
 
+                // ── GET /api/projects/shared — projects where caller is a member ──
+                // Must be matched BEFORE /api/projects/:id to avoid "shared" being captured as :id
+                if (pathname === "/api/projects/shared" && req.method?.toUpperCase() === "GET") {
+                    if (!await requireAuth(req, res)) return;
+                    const userEmail: string = (req as any).userEmail;
+                    const result = await getSharedProjects({ userEmail });
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
                 // ── /api/projects — list + create ─────────────────────────
                 if (pathname === "/api/projects") {
                     switch (req.method?.toUpperCase()) {
@@ -982,6 +994,44 @@ body=${JSON.stringify(body)}
                     const userId: string = (req as any).userId;
                     const userEmail: string = (req as any).userEmail;
                     const result = await acceptInvitation({ token, userId, userEmail });
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // ── GET /api/projects/:id/members — list project members ──
+                if (pathname.match(/^\/api\/projects\/[^/]+\/members$/) && req.method?.toUpperCase() === "GET") {
+                    if (!await requireAuth(req, res)) return;
+                    const projectId = pathname.split("/")[3]!;
+                    const userId: string = (req as any).userId;
+                    const userEmail: string = (req as any).userEmail;
+                    const result = await getProjectMembers({ projectId, userId, userEmail });
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // ── DELETE /api/projects/:id/members/:email — owner removes member ──
+                if (pathname.match(/^\/api\/projects\/[^/]+\/members\/[^/]+$/) && req.method?.toUpperCase() === "DELETE") {
+                    if (!await requireAuth(req, res)) return;
+                    const parts = pathname.split("/");
+                    const projectId = parts[3]!;
+                    const targetEmail = decodeURIComponent(parts[5]!);
+                    const userId: string = (req as any).userId;
+                    const userEmail: string = (req as any).userEmail;
+                    const result = await removeMember({ projectId, userId, userEmail, targetEmail });
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify(result));
+                    return;
+                }
+
+                // ── POST /api/projects/:id/leave — member leaves a project ──
+                if (pathname.match(/^\/api\/projects\/[^/]+\/leave$/) && req.method?.toUpperCase() === "POST") {
+                    if (!await requireAuth(req, res)) return;
+                    const projectId = pathname.split("/")[3]!;
+                    const userId: string = (req as any).userId;
+                    const userEmail: string = (req as any).userEmail;
+                    const result = await leaveProject({ projectId, userId, userEmail });
                     res.writeHead(200, { "Content-Type": "application/json" });
                     res.end(JSON.stringify(result));
                     return;
