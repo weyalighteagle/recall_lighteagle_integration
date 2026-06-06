@@ -156,6 +156,11 @@ export async function recall_webhook(payload: any): Promise<void> {
                   console.log(
                     `[calendar.sync_events] Unscheduled stale ${botType} bot for event ${calendar_event.id} (old key: ${staleBot.deduplication_key})`
                   );
+                  // Remove the unscheduled bot from in-memory array so Phase 2 scheduling
+                  // doesn't see it and skip the Recall API call
+                  calendar_event.bots = calendar_event.bots.filter(
+                    (b) => b.deduplication_key !== staleBot.deduplication_key
+                  );
                 } catch (err) {
                   console.error(
                     `[calendar.sync_events] Failed to unschedule stale ${botType} bot for event ${calendar_event.id}:`,
