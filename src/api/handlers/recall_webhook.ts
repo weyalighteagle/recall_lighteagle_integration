@@ -107,12 +107,6 @@ export async function recall_webhook(payload: any): Promise<void> {
       const botSettings = await bot_settings_get();
       console.log(`[calendar.sync_events] bot_mode=${botSettings.bot_mode}`);
 
-      // Auto-join toggle kontrolü — kapalıysa webhook'tan otomatik bot schedule etme
-      if (!botSettings.auto_join_enabled) {
-        console.log("Auto-join disabled — skipping automatic bot scheduling");
-        return;
-      }
-
       let next: string | null = null;
       do {
         const { results, next: new_next } = await calendar_events_list({
@@ -131,45 +125,53 @@ export async function recall_webhook(payload: any): Promise<void> {
           // Skip calendar events that have already passed.
           if (new Date(calendar_event.start_time) <= new Date()) continue;
 
-          // ── Unschedule stale bots if meeting time changed ──
-          const botTypesToCheck: { type: BotType; prefix: string }[] = [
-            { type: "recording", prefix: "rec-" },
-          ];
-          if (botSettings.bot_mode === "voice_agent") {
-            botTypesToCheck.push({ type: "voice_agent", prefix: "va-" });
-          }
+          // ── Phase 1: Stale bot cleanup (ALWAYS runs, even when auto-join is disabled) ──
+          if (calendar_event.bots.length > 0) {
+            const botTypesToCheck: { type: BotType; prefix: string }[] = [
+              { type: "recording", prefix: "rec-" },
+            ];
+            if (botSettings.bot_mode === "voice_agent") {
+              botTypesToCheck.push({ type: "voice_agent", prefix: "va-" });
+            }
 
-          for (const { type: botType, prefix } of botTypesToCheck) {
-            const { deduplication_key: expectedKey } = generate_bot_deduplication_key({
-              one_bot_per: "meeting",
-              email: calendar.platform_email!,
-              meeting_url: calendar_event.meeting_url!,
-              meeting_start_timestamp: calendar_event.start_time,
-              bot_type: botType,
-            });
+            for (const { type: botType, prefix } of botTypesToCheck) {
+              const { deduplication_key: expectedKey } = generate_bot_deduplication_key({
+                one_bot_per: "meeting",
+                email: calendar.platform_email!,
+                meeting_url: calendar_event.meeting_url!,
+                meeting_start_timestamp: calendar_event.start_time,
+                bot_type: botType,
+              });
 
-            const staleBot = calendar_event.bots.find(
-              (b) => b.deduplication_key.startsWith(prefix) && b.deduplication_key !== expectedKey
-            );
+              const staleBot = calendar_event.bots.find(
+                (b) => b.deduplication_key.startsWith(prefix) && b.deduplication_key !== expectedKey
+              );
 
-            if (staleBot) {
-              try {
-                await unschedule_bot_for_calendar_event({
-                  calendar_event_id: calendar_event.id,
-                  deduplication_key: staleBot.deduplication_key,
-                });
-                console.log(
-                  `[calendar.sync_events] Unscheduled stale ${botType} bot for event ${calendar_event.id} (old key: ${staleBot.deduplication_key})`
-                );
-              } catch (err) {
-                console.error(
-                  `[calendar.sync_events] Failed to unschedule stale ${botType} bot for event ${calendar_event.id}:`,
-                  err
-                );
+              if (staleBot) {
+                try {
+                  await unschedule_bot_for_calendar_event({
+                    calendar_event_id: calendar_event.id,
+                    deduplication_key: staleBot.deduplication_key,
+                  });
+                  console.log(
+                    `[calendar.sync_events] Unscheduled stale ${botType} bot for event ${calendar_event.id} (old key: ${staleBot.deduplication_key})`
+                  );
+                } catch (err) {
+                  console.error(
+                    `[calendar.sync_events] Failed to unschedule stale ${botType} bot for event ${calendar_event.id}:`,
+                    err
+                  );
+                }
               }
             }
           }
-          // ── End stale bot cleanup ──
+          // ── End Phase 1 ──
+
+          // ── Phase 2: Bot scheduling (only when auto-join is enabled) ──
+          if (!botSettings.auto_join_enabled) {
+            console.log(`Auto-join disabled — skipping automatic bot scheduling for event ${calendar_event.id}`);
+            continue;
+          }
 
           // Schedule exactly one bot type — voice_agent takes priority over recording
           const botTypeToSchedule: BotType = botSettings.bot_mode === "voice_agent"
