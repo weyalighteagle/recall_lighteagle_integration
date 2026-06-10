@@ -797,7 +797,8 @@ body=${JSON.stringify(body)}
                         case "GET": {
                             if (!await requireAuth(req, res)) return;
                             const userId: string = (req as any).userId;
-                            const result = await meeting_project_get(search_params, userId);
+                            const userEmail: string = (req as any).userEmail;
+                            const result = await meeting_project_get(search_params, userId, userEmail);
                             res.writeHead(200, { "Content-Type": "application/json" });
                             res.end(JSON.stringify(result));
                             return;
@@ -814,7 +815,8 @@ body=${JSON.stringify(body)}
                         case "DELETE": {
                             if (!await requireAuth(req, res)) return;
                             const userId: string = (req as any).userId;
-                            const result = await meeting_project_delete(search_params, userId);
+                            const userEmail: string = (req as any).userEmail;
+                            const result = await meeting_project_delete(search_params, userId, userEmail);
                             res.writeHead(200, { "Content-Type": "application/json" });
                             res.end(JSON.stringify(result));
                             return;

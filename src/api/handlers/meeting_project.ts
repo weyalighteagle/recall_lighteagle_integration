@@ -36,6 +36,7 @@ export async function meeting_project_upsert(
 export async function meeting_project_get(
     params: { calendar_event_id?: string; bot_id?: string },
     userId: string,
+    userEmail: string,
 ): Promise<{ project_id: string | null }> {
     const { calendar_event_id, bot_id } = params;
 
@@ -44,8 +45,7 @@ export async function meeting_project_get(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let query: any = supabase
         .from("meeting_projects")
-        .select("project_id, kb_projects!inner(user_id)")
-        .eq("kb_projects.user_id", userId);
+        .select("project_id");
 
     query = calendar_event_id
         ? query.eq("calendar_event_id", calendar_event_id)
@@ -53,24 +53,33 @@ export async function meeting_project_get(
 
     const { data, error } = await query.maybeSingle();
     if (error) throw new Error(error.message);
-    return { project_id: (data as any)?.project_id ?? null }; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+    const projectId: string | null = (data as any)?.project_id ?? null; // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (!projectId) return { project_id: null };
+
+    try {
+        await assertProjectAccess({ projectId, userId, userEmail });
+    } catch {
+        return { project_id: null };
+    }
+
+    return { project_id: projectId };
 }
 
 /** DELETE /api/meeting-project?calendar_event_id=... OR ?bot_id=... — silent no-op if not found */
 export async function meeting_project_delete(
     params: { calendar_event_id?: string; bot_id?: string },
     userId: string,
+    userEmail: string,
 ): Promise<{ message: string }> {
     const { calendar_event_id, bot_id } = params;
 
     if (!calendar_event_id && !bot_id) return { message: "Assignment removed" };
 
-    // Fetch with ownership join — returns null if row absent or project isn't owned by caller
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let query: any = supabase
         .from("meeting_projects")
-        .select("id, kb_projects!inner(user_id)")
-        .eq("kb_projects.user_id", userId);
+        .select("id, project_id");
 
     query = calendar_event_id
         ? query.eq("calendar_event_id", calendar_event_id)
@@ -80,10 +89,17 @@ export async function meeting_project_delete(
     if (fetchErr) throw new Error(fetchErr.message);
     if (!data) return { message: "Assignment removed" };
 
+    const row = data as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    try {
+        await assertProjectAccess({ projectId: row.project_id, userId, userEmail });
+    } catch {
+        return { message: "Assignment removed" };
+    }
+
     const { error } = await supabase
         .from("meeting_projects")
         .delete()
-        .eq("id", (data as any).id); // eslint-disable-line @typescript-eslint/no-explicit-any
+        .eq("id", row.id);
 
     if (error) throw new Error(error.message);
     return { message: "Assignment removed" };
