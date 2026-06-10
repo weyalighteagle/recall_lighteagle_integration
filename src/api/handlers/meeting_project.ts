@@ -1,9 +1,11 @@
 import { supabase } from "../config/supabase";
+import { assertProjectAccess } from "../helpers/projectAccess";
 
 /** PUT /api/meeting-project — assign a meeting to a project (upsert) */
 export async function meeting_project_upsert(
     body: Record<string, unknown>,
     userId: string,
+    userEmail: string,
 ): Promise<{ message: string }> {
     const { project_id, calendar_event_id, bot_id } = body as {
         project_id?: string;
@@ -15,19 +17,7 @@ export async function meeting_project_upsert(
     if (calendar_event_id && bot_id) throw new Error("Provide either calendar_event_id or bot_id, not both");
     if (!calendar_event_id && !bot_id) throw new Error("Either calendar_event_id or bot_id is required");
 
-    const { data: project, error: projectErr } = await supabase
-        .from("kb_projects")
-        .select("id")
-        .eq("id", project_id)
-        .eq("user_id", userId)
-        .maybeSingle();
-
-    if (projectErr) throw new Error(projectErr.message);
-    if (!project) {
-        const e = new Error("Project not found");
-        (e as any).statusCode = 404; // eslint-disable-line @typescript-eslint/no-explicit-any
-        throw e;
-    }
+    await assertProjectAccess({ projectId: project_id, userId, userEmail });
 
     const conflictCol = calendar_event_id ? "calendar_event_id" : "bot_id";
 
