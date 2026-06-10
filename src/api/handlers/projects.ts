@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { supabase } from "../config/supabase";
+import { assertProjectAccess } from "../helpers/projectAccess";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -82,6 +83,7 @@ export async function project_create(
 export async function project_get(
     projectId: string,
     userId: string,
+    userEmail: string,
 ): Promise<{
     id: string;
     name: string;
@@ -96,6 +98,7 @@ export async function project_get(
     }>;
 }> {
     const validId = z.string().uuid().parse(projectId);
+    await assertProjectAccess({ projectId: validId, userId, userEmail });
 
     const { data: project, error } = await supabase
         .from("kb_projects")
@@ -106,7 +109,6 @@ export async function project_get(
             )
         `)
         .eq("id", validId)
-        .eq("user_id", userId)
         .maybeSingle();
 
     if (error) throw new Error(error.message);
@@ -130,22 +132,15 @@ export async function project_update(
     projectId: string,
     body: { name?: string; description?: string | null },
     userId: string,
+    userEmail: string,
 ): Promise<ProjectRow> {
     const validId = z.string().uuid().parse(projectId);
+    await assertProjectAccess({ projectId: validId, userId, userEmail, requiredRole: "owner" });
+
     const { name, description } = z.object({
         name: z.string().min(1).optional(),
         description: z.string().nullable().optional(),
     }).parse(body);
-
-    const { data: existing, error: fetchErr } = await supabase
-        .from("kb_projects")
-        .select("id")
-        .eq("id", validId)
-        .eq("user_id", userId)
-        .maybeSingle();
-
-    if (fetchErr) throw new Error(fetchErr.message);
-    if (!existing) notFound();
 
     const updates: Record<string, unknown> = {};
     if (name !== undefined) updates.name = name;
@@ -174,18 +169,9 @@ export async function project_update(
 }
 
 /** DELETE /api/projects/:id — delete a project (cascade removes kb_document_projects and meeting_projects; documents are NOT deleted) */
-export async function project_delete(projectId: string, userId: string): Promise<void> {
+export async function project_delete(projectId: string, userId: string, userEmail: string): Promise<void> {
     const validId = z.string().uuid().parse(projectId);
-
-    const { data: existing, error: fetchErr } = await supabase
-        .from("kb_projects")
-        .select("id")
-        .eq("id", validId)
-        .eq("user_id", userId)
-        .maybeSingle();
-
-    if (fetchErr) throw new Error(fetchErr.message);
-    if (!existing) notFound();
+    await assertProjectAccess({ projectId: validId, userId, userEmail, requiredRole: "owner" });
 
     const { error } = await supabase
         .from("kb_projects")
@@ -201,19 +187,11 @@ export async function project_document_add(
     projectId: string,
     documentId: string,
     userId: string,
+    userEmail: string,
 ): Promise<{ message: string }> {
     const validProjectId = z.string().uuid().parse(projectId);
     const validDocumentId = z.string().uuid().parse(documentId);
-
-    const { data: project, error: projectErr } = await supabase
-        .from("kb_projects")
-        .select("id")
-        .eq("id", validProjectId)
-        .eq("user_id", userId)
-        .maybeSingle();
-
-    if (projectErr) throw new Error(projectErr.message);
-    if (!project) notFound();
+    await assertProjectAccess({ projectId: validProjectId, userId, userEmail });
 
     const { data: doc, error: docErr } = await supabase
         .from("kb_documents")
@@ -244,20 +222,12 @@ export async function project_document_remove(
     projectId: string,
     docId: string,
     userId: string,
+    userEmail: string,
     botId?: string,
 ): Promise<{ message: string }> {
     const validProjectId = z.string().uuid().parse(projectId);
     const validDocId = z.string().uuid().parse(docId);
-
-    const { data: project, error: projectErr } = await supabase
-        .from("kb_projects")
-        .select("id")
-        .eq("id", validProjectId)
-        .eq("user_id", userId)
-        .maybeSingle();
-
-    if (projectErr) throw new Error(projectErr.message);
-    if (!project) notFound();
+    await assertProjectAccess({ projectId: validProjectId, userId, userEmail, requiredRole: "owner" });
 
     const { error } = await supabase
         .from("kb_document_projects")

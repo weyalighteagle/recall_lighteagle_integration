@@ -12,7 +12,7 @@ export async function assertProjectAccess(args: {
         .from("project_members")
         .select("role")
         .eq("project_id", projectId)
-        .eq("user_email", userEmail)
+        .or(`user_email.eq.${userEmail},clerk_user_id.eq.${userId}`)
         .maybeSingle();
 
     if (memberErr) throw new Error(memberErr.message);
@@ -39,7 +39,7 @@ export async function assertProjectAccess(args: {
     if (project) {
         const { error: seedErr } = await supabase
             .from("project_members")
-            .insert({ project_id: projectId, user_email: userEmail, role: "owner", invited_by: userEmail });
+            .insert({ project_id: projectId, user_email: userEmail, role: "owner", invited_by: userEmail, clerk_user_id: userId });
         if (seedErr) throw new Error(seedErr.message);
         return { role: "owner" };
     }

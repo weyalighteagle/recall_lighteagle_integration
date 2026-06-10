@@ -23,6 +23,7 @@ import { meeting_project_get, meeting_project_upsert, meeting_project_delete } f
 import { project_list, project_create, project_get, project_update, project_delete, project_document_add, project_document_remove } from "./handlers/projects";
 import { createInvite, getInvitation, acceptInvitation } from "./handlers/invitations";
 import { getSharedProjects, getProjectMembers, removeMember, leaveProject } from "./handlers/projectMembers";
+import { assertProjectAccess } from "./helpers/projectAccess";
 import { supabase } from "./config/supabase";
 import { requireAuth } from "./middleware/auth";
 
@@ -367,17 +368,7 @@ body=${JSON.stringify(body)}
                 }
 
                 if (body.project_id) {
-                    const { data: proj } = await supabase
-                        .from("kb_projects")
-                        .select("id")
-                        .eq("id", body.project_id)
-                        .eq("user_id", userId)
-                        .maybeSingle();
-                    if (!proj) {
-                        res.writeHead(404, { "Content-Type": "application/json" });
-                        res.end(JSON.stringify({ error: "Project not found" }));
-                        return;
-                    }
+                    await assertProjectAccess({ projectId: body.project_id, userId, userEmail });
                 }
 
                 const result = await bot_join({ ...body, bot_type, user_email: userEmail });
@@ -806,7 +797,8 @@ body=${JSON.stringify(body)}
                         case "GET": {
                             if (!await requireAuth(req, res)) return;
                             const userId: string = (req as any).userId;
-                            const result = await meeting_project_get(search_params, userId);
+                            const userEmail: string = (req as any).userEmail;
+                            const result = await meeting_project_get(search_params, userId, userEmail);
                             res.writeHead(200, { "Content-Type": "application/json" });
                             res.end(JSON.stringify(result));
                             return;
@@ -814,7 +806,8 @@ body=${JSON.stringify(body)}
                         case "PUT": {
                             if (!await requireAuth(req, res)) return;
                             const userId: string = (req as any).userId;
-                            const result = await meeting_project_upsert(body ?? {}, userId);
+                            const userEmail: string = (req as any).userEmail;
+                            const result = await meeting_project_upsert(body ?? {}, userId, userEmail);
                             res.writeHead(200, { "Content-Type": "application/json" });
                             res.end(JSON.stringify(result));
                             return;
@@ -822,7 +815,8 @@ body=${JSON.stringify(body)}
                         case "DELETE": {
                             if (!await requireAuth(req, res)) return;
                             const userId: string = (req as any).userId;
-                            const result = await meeting_project_delete(search_params, userId);
+                            const userEmail: string = (req as any).userEmail;
+                            const result = await meeting_project_delete(search_params, userId, userEmail);
                             res.writeHead(200, { "Content-Type": "application/json" });
                             res.end(JSON.stringify(result));
                             return;
@@ -910,7 +904,8 @@ body=${JSON.stringify(body)}
                         case "GET": {
                             if (!await requireAuth(req, res)) return;
                             const userId: string = (req as any).userId;
-                            const result = await project_get(projectId, userId);
+                            const userEmail: string = (req as any).userEmail;
+                            const result = await project_get(projectId, userId, userEmail);
                             res.writeHead(200, { "Content-Type": "application/json" });
                             res.end(JSON.stringify(result));
                             return;
@@ -918,7 +913,8 @@ body=${JSON.stringify(body)}
                         case "PATCH": {
                             if (!await requireAuth(req, res)) return;
                             const userId: string = (req as any).userId;
-                            const result = await project_update(projectId, body ?? {}, userId);
+                            const userEmail: string = (req as any).userEmail;
+                            const result = await project_update(projectId, body ?? {}, userId, userEmail);
                             res.writeHead(200, { "Content-Type": "application/json" });
                             res.end(JSON.stringify(result));
                             return;
@@ -926,7 +922,8 @@ body=${JSON.stringify(body)}
                         case "DELETE": {
                             if (!await requireAuth(req, res)) return;
                             const userId: string = (req as any).userId;
-                            await project_delete(projectId, userId);
+                            const userEmail: string = (req as any).userEmail;
+                            await project_delete(projectId, userId, userEmail);
                             res.writeHead(200, { "Content-Type": "application/json" });
                             res.end(JSON.stringify({ message: "Project deleted" }));
                             return;
@@ -941,9 +938,10 @@ body=${JSON.stringify(body)}
                     if (req.method?.toUpperCase() !== "DELETE") throw new Error(`Method not allowed: ${req.method}`);
                     if (!await requireAuth(req, res)) return;
                     const userId: string = (req as any).userId;
+                    const userEmail: string = (req as any).userEmail;
                     const projectId = pathname.split("/")[3]!;
                     const docId = pathname.split("/")[5]!;
-                    const result = await project_document_remove(projectId, docId, userId, search_params.bot_id);
+                    const result = await project_document_remove(projectId, docId, userId, userEmail, search_params.bot_id);
                     res.writeHead(200, { "Content-Type": "application/json" });
                     res.end(JSON.stringify(result));
                     return;
@@ -954,13 +952,14 @@ body=${JSON.stringify(body)}
                     if (req.method?.toUpperCase() !== "POST") throw new Error(`Method not allowed: ${req.method}`);
                     if (!await requireAuth(req, res)) return;
                     const userId: string = (req as any).userId;
+                    const userEmail: string = (req as any).userEmail;
                     const projectId = pathname.split("/")[3]!;
                     if (!body?.document_id) {
                         res.writeHead(400, { "Content-Type": "application/json" });
                         res.end(JSON.stringify({ error: "document_id is required" }));
                         return;
                     }
-                    const result = await project_document_add(projectId, body.document_id, userId);
+                    const result = await project_document_add(projectId, body.document_id, userId, userEmail);
                     res.writeHead(200, { "Content-Type": "application/json" });
                     res.end(JSON.stringify(result));
                     return;

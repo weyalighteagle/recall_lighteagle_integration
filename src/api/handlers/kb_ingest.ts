@@ -66,6 +66,7 @@ export async function ingestTranscriptToKB(params: {
   meetingType?: string;
   calendarTitle?: string;
   tagIds?: string[];
+  ownerUserEmail?: string;
 }): Promise<IngestResult> {
   const { botId, transcriptText, docTitle, meetingDate, meetingType, calendarTitle, tagIds } = params;
 
@@ -112,6 +113,7 @@ export async function ingestTranscriptToKB(params: {
         meeting_title: calendarTitle ?? docTitle,
       },
       created_at: meetingDate.toISOString(),
+      owner_user_id: params.ownerUserEmail ?? null,
     })
     .select("id")
     .single();

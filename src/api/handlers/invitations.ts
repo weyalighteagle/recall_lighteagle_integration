@@ -40,7 +40,7 @@ export async function createInvite(args: {
         if (project.user_id === userId) {
             const { error: seedErr } = await supabase
                 .from("project_members")
-                .insert({ project_id: projectId, user_email: userEmail, role: "owner", invited_by: userEmail });
+                .insert({ project_id: projectId, user_email: userEmail, role: "owner", invited_by: userEmail, clerk_user_id: userId });
             if (seedErr) throw new Error(seedErr.message);
         } else {
             const e = new Error("Not authorized");
@@ -199,6 +199,7 @@ export async function acceptInvitation(args: {
             user_email: userEmail,
             role: "member",
             invited_by: r.invited_by,
+            clerk_user_id: userId,
         });
 
     if (insertErr) throw new Error(insertErr.message);
