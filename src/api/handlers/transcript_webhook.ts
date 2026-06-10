@@ -182,7 +182,7 @@ export async function handleTranscriptWebhook(
           .update({ done: true })
           .eq('bot_id', botId)
           .eq('done', false)
-          .select('bot_id, calendar_event_id')
+          .select('bot_id, calendar_event_id, user_email')
           .single();
 
         console.log(`[transcript.done/assemblyai] claim result: claimed=${!!claimed}, claimError=${claimError?.message ?? 'none'}`);
@@ -392,6 +392,7 @@ export async function handleTranscriptWebhook(
                       meetingType: kbMeetingType,
                       calendarTitle,
                       tagIds: kbTagIds,
+                      ownerUserEmail: claimed?.user_email ?? undefined,
                     });
 
                     if (result.skipped) {

@@ -271,7 +271,7 @@ async function handleBotDone(body: any): Promise<void> {
   try {
   const { data: meetingRow } = await supabase
     .from('meetings')
-    .select('id, done, bot_type, calendar_event_id, meeting_title')
+    .select('id, done, bot_type, calendar_event_id, meeting_title, user_email')
     .eq('bot_id', botId)
     .single();
   const meetingDbId = meetingRow?.id as string | undefined;
@@ -811,6 +811,7 @@ async function handleBotDone(body: any): Promise<void> {
         meetingType: kbMeetingType,
         calendarTitle,
         tagIds: kbTagIds,
+        ownerUserEmail: meetingRow?.user_email ?? undefined,
       });
 
       if (result.skipped) {
