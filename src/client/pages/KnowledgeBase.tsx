@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import {
     Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye, Star, X, Mic,
-    FolderOpen, Layers, Share2, Copy, Check,
+    FolderOpen, Layers, Share2, Copy, Check, Users, LogOut,
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import {
@@ -102,6 +102,21 @@ interface ProjectDetail {
     description: string | null;
     created_at: string;
     documents: ProjectDocument[];
+}
+
+interface SharedProject {
+    id: string;
+    name: string;
+    description: string | null;
+    owner_email: string;
+    member_count: number;
+    joined_at: string;
+}
+
+interface Member {
+    user_email: string;
+    role: "owner" | "member";
+    joined_at: string;
 }
 
 // ─── Small helpers ───────────────────────────────────────────
@@ -227,6 +242,8 @@ function KnowledgeBase() {
 
     const [showAddDocDialog, setShowAddDocDialog] = useState(false);
 
+    const [selectedProjectRole, setSelectedProjectRole] = useState<"owner" | "member" | null>(null);
+
     // ── Share / invite state ──────────────────────────────────────────
     const [shareProject, setShareProject] = useState<Project | null>(null);
     const [inviteUrl, setInviteUrl] = useState<string | null>(null);
@@ -301,7 +318,33 @@ function KnowledgeBase() {
         enabled: !!selectedProjectId,
     });
 
+    const { data: sharedData, isPending: isSharedPending } = useQuery<{ projects: SharedProject[] }>({
+        queryKey: ["shared_projects"],
+        queryFn: async () => {
+            const token = await getToken();
+            const res = await fetch("/api/projects/shared", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        },
+    });
+
+    const { data: membersData, isPending: isMembersLoading } = useQuery<{ members: Member[] }>({
+        queryKey: ["project_members", selectedProjectId],
+        queryFn: async () => {
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${selectedProjectId}/members`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        },
+        enabled: !!selectedProjectId,
+    });
+
     const projects = projectsData?.projects ?? [];
+    const sharedProjects = sharedData?.projects ?? [];
 
     const projectDetailQueries = useQueries({
         queries: projects.map((p) => ({
@@ -440,6 +483,40 @@ function KnowledgeBase() {
         onSuccess: (_data, { projectId }) => {
             toast.success("Document removed from project");
             invalidateProjects(projectId);
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
+    const removeMemberMutation = useMutation({
+        mutationFn: async ({ projectId, email }: { projectId: string; email: string }) => {
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${projectId}/members/${encodeURIComponent(email)}`, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+        },
+        onSuccess: () => {
+            toast.success("Member removed");
+            void queryClient.invalidateQueries({ queryKey: ["project_members", selectedProjectId] });
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
+    const leaveProjectMutation = useMutation({
+        mutationFn: async (projectId: string) => {
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${projectId}/leave`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+        },
+        onSuccess: () => {
+            toast.success("Left project");
+            setSelectedProjectId(null);
+            setSelectedProjectRole(null);
+            void queryClient.invalidateQueries({ queryKey: ["shared_projects"] });
         },
         onError: (err: Error) => toast.error(err.message),
     });
@@ -757,7 +834,7 @@ function KnowledgeBase() {
                             <Card
                                 key={project.id}
                                 className="group cursor-pointer hover:shadow-md transition-shadow border border-gray-200"
-                                onClick={() => setSelectedProjectId(project.id)}
+                                onClick={() => { setSelectedProjectId(project.id); setSelectedProjectRole("owner"); }}
                             >
                                 <CardContent className="p-4 flex flex-col gap-2 min-h-[120px]">
                                     <div className="flex items-start justify-between gap-2">
@@ -817,6 +894,59 @@ function KnowledgeBase() {
                                         </span>
                                         <span className="text-xs text-gray-400">
                                             {new Date(project.created_at).toLocaleDateString()}
+                                        </span>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            {/* ── Shared with me ───────────────────────────────────────────── */}
+            <div>
+                <div className="flex items-center gap-2 mb-3">
+                    <Users className="size-4 text-purple-500" />
+                    <h2 className="text-base font-semibold text-gray-700">Shared with me</h2>
+                    {!isSharedPending && sharedProjects.length > 0 && (
+                        <span className="text-xs text-gray-400">({sharedProjects.length})</span>
+                    )}
+                </div>
+
+                {isSharedPending ? (
+                    <div className="flex items-center justify-center py-4">
+                        <Loader2 className="size-5 text-purple-400 animate-spin" />
+                    </div>
+                ) : sharedProjects.length === 0 ? (
+                    <p className="text-sm text-gray-400 py-1">No shared projects yet.</p>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {sharedProjects.map((project) => (
+                            <Card
+                                key={project.id}
+                                className="cursor-pointer hover:shadow-md transition-shadow border border-purple-100"
+                                onClick={() => { setSelectedProjectId(project.id); setSelectedProjectRole("member"); }}
+                            >
+                                <CardContent className="p-4 flex flex-col gap-2 min-h-[120px]">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <span className="size-3 rounded-sm shrink-0 bg-purple-400" />
+                                        <span className="text-sm font-semibold text-gray-800 truncate">{project.name}</span>
+                                    </div>
+                                    <p className="text-xs text-gray-500 flex items-center gap-1 truncate">
+                                        <Users className="size-3 shrink-0" />
+                                        Shared by {project.owner_email}
+                                    </p>
+                                    {project.description && (
+                                        <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">
+                                            {project.description}
+                                        </p>
+                                    )}
+                                    <div className="mt-auto flex items-center gap-1.5 pt-2">
+                                        <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600 font-medium">
+                                            {project.member_count} {project.member_count === 1 ? "member" : "members"}
+                                        </span>
+                                        <span className="text-xs text-gray-400">
+                                            Joined {new Date(project.joined_at).toLocaleDateString()}
                                         </span>
                                     </div>
                                 </CardContent>
@@ -1164,7 +1294,7 @@ function KnowledgeBase() {
             </Dialog>
 
             {/* ── Project Detail Dialog ─────────────────────────────────────── */}
-            <Dialog open={!!selectedProjectId} onOpenChange={(open) => { if (!open) { setSelectedProjectId(null); setShowAddDocDialog(false); } }}>
+            <Dialog open={!!selectedProjectId} onOpenChange={(open) => { if (!open) { setSelectedProjectId(null); setSelectedProjectRole(null); setShowAddDocDialog(false); } }}>
                 <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
                     {isProjectDetailPending ? (
                         <div className="flex flex-col items-center justify-center py-12">
@@ -1269,10 +1399,72 @@ function KnowledgeBase() {
                                 )}
                             </div>
 
+                            {/* Members section */}
+                            <div className="flex flex-col gap-2">
+                                <div className="flex items-center gap-2">
+                                    <Users className="size-4 text-gray-500" />
+                                    <span className="text-sm font-medium text-gray-700">
+                                        Members{membersData ? ` (${membersData.members.length})` : ""}
+                                    </span>
+                                    {isMembersLoading && <Loader2 className="size-3 animate-spin text-gray-400" />}
+                                </div>
+                                {membersData && membersData.members.length > 0 && (
+                                    <div className="divide-y border rounded-md">
+                                        {membersData.members.map((member) => (
+                                            <div key={member.user_email} className="flex items-center justify-between px-3 py-2">
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    <span className="text-sm text-gray-700 truncate">{member.user_email}</span>
+                                                    <span className={`text-xs shrink-0 px-1.5 py-0.5 rounded-full font-medium ${
+                                                        member.role === "owner"
+                                                            ? "bg-yellow-50 text-yellow-700"
+                                                            : "bg-gray-100 text-gray-600"
+                                                    }`}>
+                                                        {member.role === "owner" ? "Owner" : "Member"}
+                                                    </span>
+                                                </div>
+                                                {selectedProjectRole === "owner" && member.role === "member" && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon-sm"
+                                                        title="Remove member"
+                                                        disabled={removeMemberMutation.isPending}
+                                                        onClick={() => {
+                                                            if (confirm(`Remove ${member.user_email} from this project?`)) {
+                                                                removeMemberMutation.mutate({ projectId: projectDetail.id, email: member.user_email });
+                                                            }
+                                                        }}
+                                                        className="text-red-400 hover:text-red-600 shrink-0"
+                                                    >
+                                                        <X className="size-4" />
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
                             <DialogFooter>
                                 <Button variant="outline" size="sm" onClick={() => setSelectedProjectId(null)}>
                                     Close
                                 </Button>
+                                {selectedProjectRole === "member" && (
+                                    <Button
+                                        variant="destructive"
+                                        size="sm"
+                                        disabled={leaveProjectMutation.isPending}
+                                        onClick={() => {
+                                            if (selectedProjectId && confirm("Leave this project? You'll lose access to its documents.")) {
+                                                leaveProjectMutation.mutate(selectedProjectId);
+                                            }
+                                        }}
+                                        className="flex items-center gap-2"
+                                    >
+                                        {leaveProjectMutation.isPending
+                                            ? <><Loader2 className="size-4 animate-spin" />Leaving…</>
+                                            : <><LogOut className="size-4" />Leave Project</>}
+                                    </Button>
+                                )}
                             </DialogFooter>
                         </>
                     )}
