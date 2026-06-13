@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import {
     Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye, Star, X, Mic,
-    FolderOpen, Layers,
+    FolderOpen, Layers, Share2, Copy, Check,
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import {
@@ -227,6 +227,11 @@ function KnowledgeBase() {
 
     const [showAddDocDialog, setShowAddDocDialog] = useState(false);
 
+    // ── Share / invite state ──────────────────────────────────────────
+    const [shareProject, setShareProject] = useState<Project | null>(null);
+    const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+    const [isCopied, setIsCopied] = useState(false);
+
     // ── Queries ───────────────────────────────────────────────────────
     const { data, isPending } = useQuery<{ documents: KBDocument[] }>({
         queryKey: ["kb_documents"],
@@ -435,6 +440,23 @@ function KnowledgeBase() {
         onSuccess: (_data, { projectId }) => {
             toast.success("Document removed from project");
             invalidateProjects(projectId);
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
+    const generateInviteMutation = useMutation({
+        mutationFn: async (projectId: string) => {
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${projectId}/invite`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({}),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json() as Promise<{ invite_url: string; expires_at: string }>;
+        },
+        onSuccess: (data) => {
+            setInviteUrl(data.invite_url);
         },
         onError: (err: Error) => toast.error(err.message),
     });
@@ -750,6 +772,19 @@ function KnowledgeBase() {
                                             <Button
                                                 variant="ghost"
                                                 size="icon-sm"
+                                                title="Share project"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setShareProject(project);
+                                                    setInviteUrl(null);
+                                                    setIsCopied(false);
+                                                }}
+                                            >
+                                                <Share2 className="size-3.5 text-gray-400" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon-sm"
                                                 title="Edit project"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
@@ -1044,6 +1079,86 @@ function KnowledgeBase() {
                         >
                             {deleteProjectMutation.isPending ? <><Loader2 className="size-4 animate-spin" />Deleting…</> : "Delete"}
                         </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ── Share Project Dialog ──────────────────────────────────────── */}
+            <Dialog
+                open={!!shareProject}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setShareProject(null);
+                        setInviteUrl(null);
+                        setIsCopied(false);
+                        generateInviteMutation.reset();
+                    }
+                }}
+            >
+                <DialogContent className="sm:max-w-lg max-w-[calc(100%-2rem)]">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Share2 className="size-4" />
+                            Share Project
+                        </DialogTitle>
+                        <DialogDescription>
+                            Generate a link to invite someone to &quot;{shareProject?.name}&quot;
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    {inviteUrl ? (
+                        <div className="flex flex-col gap-3">
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="text"
+                                    readOnly
+                                    value={inviteUrl}
+                                    className="flex-1 px-3 py-2 border rounded-md text-sm bg-gray-50 text-gray-700 focus:outline-none select-all"
+                                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                                />
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="shrink-0 flex items-center gap-1.5"
+                                    onClick={() => {
+                                        void navigator.clipboard.writeText(inviteUrl).then(() => {
+                                            setIsCopied(true);
+                                            toast.success("Link copied to clipboard");
+                                            setTimeout(() => setIsCopied(false), 2000);
+                                        });
+                                    }}
+                                >
+                                    {isCopied ? (
+                                        <><Check className="size-4 text-green-600" />Copied</>
+                                    ) : (
+                                        <><Copy className="size-4" />Copy</>
+                                    )}
+                                </Button>
+                            </div>
+                            <p className="text-xs text-gray-400">Expires in 7 days</p>
+                        </div>
+                    ) : (
+                        <p className="text-sm text-gray-500">
+                            Anyone with the link can join this project. The link expires in 7 days.
+                        </p>
+                    )}
+
+                    <DialogFooter>
+                        <Button variant="outline" size="sm" onClick={() => setShareProject(null)}>
+                            Close
+                        </Button>
+                        {!inviteUrl && (
+                            <Button
+                                size="sm"
+                                disabled={generateInviteMutation.isPending}
+                                onClick={() => shareProject && generateInviteMutation.mutate(shareProject.id)}
+                                className="flex items-center gap-2"
+                            >
+                                {generateInviteMutation.isPending ? (
+                                    <><Loader2 className="size-4 animate-spin" />Generating…</>
+                                ) : "Generate Invite Link"}
+                            </Button>
+                        )}
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
