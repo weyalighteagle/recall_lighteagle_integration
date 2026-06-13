@@ -318,7 +318,7 @@ function KnowledgeBase() {
         enabled: !!selectedProjectId,
     });
 
-    const { data: sharedData, isPending: isSharedPending } = useQuery<{ projects: SharedProject[] }>({
+    const { data: sharedData, isPending: isSharedPending } = useQuery<SharedProject[]>({
         queryKey: ["shared_projects"],
         queryFn: async () => {
             const token = await getToken();
@@ -330,7 +330,7 @@ function KnowledgeBase() {
         },
     });
 
-    const { data: membersData, isPending: isMembersLoading } = useQuery<{ members: Member[] }>({
+    const { data: membersData, isPending: isMembersLoading } = useQuery<Member[]>({
         queryKey: ["project_members", selectedProjectId],
         queryFn: async () => {
             const token = await getToken();
@@ -344,7 +344,7 @@ function KnowledgeBase() {
     });
 
     const projects = projectsData?.projects ?? [];
-    const sharedProjects = sharedData?.projects ?? [];
+    const sharedProjects = sharedData ?? [];
 
     const projectDetailQueries = useQueries({
         queries: projects.map((p) => ({
@@ -1404,13 +1404,13 @@ function KnowledgeBase() {
                                 <div className="flex items-center gap-2">
                                     <Users className="size-4 text-gray-500" />
                                     <span className="text-sm font-medium text-gray-700">
-                                        Members{membersData ? ` (${membersData.members.length})` : ""}
+                                        Members{membersData ? ` (${membersData.length})` : ""}
                                     </span>
                                     {isMembersLoading && <Loader2 className="size-3 animate-spin text-gray-400" />}
                                 </div>
-                                {membersData && membersData.members.length > 0 && (
+                                {membersData && membersData.length > 0 && (
                                     <div className="divide-y border rounded-md">
-                                        {membersData.members.map((member) => (
+                                        {membersData.map((member) => (
                                             <div key={member.user_email} className="flex items-center justify-between px-3 py-2">
                                                 <div className="flex items-center gap-2 min-w-0">
                                                     <span className="text-sm text-gray-700 truncate">{member.user_email}</span>
