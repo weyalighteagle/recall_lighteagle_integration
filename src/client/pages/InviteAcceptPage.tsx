@@ -1,6 +1,6 @@
 import { useAuth } from "@clerk/react";
 import { SignIn } from "@clerk/react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -31,6 +31,7 @@ export default function InviteAcceptPage() {
     const { token } = useParams<{ token: string }>();
     const { isLoaded, isSignedIn, getToken } = useAuth();
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
     const [showSignIn, setShowSignIn] = useState(false);
 
     const { data: invite, isPending: isInviteLoading, error: inviteError } = useQuery<InviteDetails>({
@@ -42,6 +43,8 @@ export default function InviteAcceptPage() {
         },
         enabled: !!token,
         retry: false,
+        staleTime: 0,
+        gcTime: 0,
     });
 
     const acceptMutation = useMutation({
@@ -56,6 +59,8 @@ export default function InviteAcceptPage() {
         },
         onSuccess: (data) => {
             toast.success(`You joined ${data.project_name}!`);
+            void queryClient.invalidateQueries({ queryKey: ["invite", token] });
+            void queryClient.invalidateQueries({ queryKey: ["shared_projects"] });
             navigate("/dashboard/knowledge-base");
         },
         onError: (err: Error) => toast.error(err.message),
