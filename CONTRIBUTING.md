@@ -16,6 +16,7 @@ work together on this codebase. Read it once, keep it open when you're unsure.
 7. [Releasing to production](#releasing-to-production)
 8. [Environment variables](#environment-variables)
 9. [CI pipeline](#ci-pipeline)
+10. [Knowledge graph (graphify)](#knowledge-graph-graphify)
 
 ---
 
@@ -242,6 +243,45 @@ Common CI failures and fixes:
 
 Always run `npx tsc --noEmit` locally before pushing if you've made significant
 type-related changes. Catching it locally is faster than waiting for CI.
+
+---
+
+## Knowledge graph (graphify)
+
+**Optional, opt-in tooling.** [graphify](https://pypi.org/project/graphify/) builds a
+queryable knowledge graph of the codebase (call graph, modules, "god nodes") that an AI
+assistant can traverse instead of blindly grepping. It is **not** part of the app, the
+build, or CI — nothing in `src/` imports it, so it cannot affect runtime behaviour. The
+generated graph lives in `graphify-out/`, which is **gitignored** — everyone builds it
+locally (no API key required).
+
+If you want to use it:
+
+```bash
+# 1. Install the CLI (once, machine-wide)
+pipx install graphify          # or: uv tool install graphify
+
+# 2. Build the graph for this repo (instant, no API cost)
+graphify update .
+
+# 3. (Optional) Wire it into your AI assistant — graph-first code exploration
+graphify claude install        # Claude Code; also: codex / cursor / gemini install
+
+# 4. (Optional) Keep the graph fresh automatically on commit/checkout
+graphify hook install
+```
+
+Day-to-day usage:
+
+```bash
+graphify query "how does transcript ingestion work"   # scoped subgraph for a question
+graphify explain "ingestTranscriptToKB"               # a node and its neighbours
+graphify path "recall_webhook()" "ingestTranscriptToKB()"  # trace a call path
+```
+
+The git hooks (step 4) run in the background, are non-blocking, and only exist on your
+machine if you install them — they are not shared by `git clone`, so opting in never
+affects other contributors.
 
 ---
 
