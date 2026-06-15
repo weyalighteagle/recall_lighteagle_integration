@@ -28,6 +28,7 @@ npm-debug.log*
 
 # Local tooling
 .claude/
+graphify-out/
 supabase/.temp/
 scripts/demo_files/
 scripts/ingest_demo.ts
