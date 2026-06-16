@@ -39,6 +39,7 @@ import { useCalendar } from "./hooks/use-calendar";
 import { useCalendarEvents } from "./hooks/use-calendar-events";
 import { useDeleteCalendar } from "./hooks/use-delete-calendar";
 import { useToggleRecording } from "./hooks/use-toggle-recording";
+import { useProjects, type ProjectOption } from "./hooks/use-projects";
 import { toast } from "sonner";
 
 function App() {
@@ -125,11 +126,6 @@ interface KbTag {
     color: string | null;
 }
 
-type KbProject = {
-    id: string;
-    name: string;
-};
-
 function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     const { user } = useUser();
     const { getToken } = useAuth();
@@ -137,7 +133,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
 
     // ── Category tags — used by the per-meeting category selector on event cards ──
     const [tags, setTags] = useState<KbTag[]>([]);
-    const [projects, setProjects] = useState<KbProject[]>([]);
+    const { allProjects: projects } = useProjects();
     const [autoJoinEnabled, setAutoJoinEnabled] = useState<boolean>(true);
     const [isAutoJoinSyncing, setIsAutoJoinSyncing] = useState(false);
 
@@ -149,16 +145,10 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                     headers: { Authorization: `Bearer ${token}` },
                 }).then((r) => r.json())
             ) as Promise<{ tags: KbTag[] }>,
-            getToken().then((token) =>
-                fetch("/api/projects", {
-                    headers: { Authorization: `Bearer ${token}` },
-                }).then((r) => r.json())
-            ) as Promise<{ projects: KbProject[] }>,
         ])
-            .then(([settings, tagData, projectData]) => {
+            .then(([settings, tagData]) => {
                 setAutoJoinEnabled(settings.auto_join_enabled ?? true);
                 setTags(tagData.tags ?? []);
-                setProjects(Array.isArray(projectData?.projects) ? projectData.projects : []);
             })
             .catch(console.error);
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -312,7 +302,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     );
 }
 
-function CalendarDetails({ calendar, tags, projects }: { calendar: CalendarType; tags: KbTag[]; projects: KbProject[] }) {
+function CalendarDetails({ calendar, tags, projects }: { calendar: CalendarType; tags: KbTag[]; projects: ProjectOption[] }) {
     const { user } = useUser();
     const [searchParams, setSearchParams] = useSearchParams();
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -528,7 +518,7 @@ function CalendarEventsList({
     startTimeGte: string;
     startTimeLte: string;
     tags: KbTag[];
-    projects: KbProject[];
+    projects: ProjectOption[];
 }) {
     const latestStatus = calendar.status_changes.at(0)?.status;
     const isConnecting = latestStatus === "connecting";
@@ -633,7 +623,7 @@ function CalendarEventCard({
     formatTime: (dateString: string) => string;
     getEventTitle: (event: CalendarEventType) => string;
     tags: KbTag[];
-    projects: KbProject[];
+    projects: ProjectOption[];
 }) {
     // Recording bot toggle hook
     const {
@@ -929,9 +919,18 @@ function CalendarEventCard({
                             className="text-xs border rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[160px]"
                         >
                             <option value="">— Proje seçilmedi —</option>
-                            {projects.map((p) => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                            ))}
+                            <optgroup label="My Projects">
+                                {projects.filter((p) => !p.isShared).map((p) => (
+                                    <option key={p.id} value={p.id}>{p.name}</option>
+                                ))}
+                            </optgroup>
+                            {projects.some((p) => p.isShared) && (
+                                <optgroup label="Shared with me">
+                                    {projects.filter((p) => p.isShared).map((p) => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                </optgroup>
+                            )}
                         </select>
                     </div>
                 )}

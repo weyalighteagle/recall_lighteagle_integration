@@ -4,15 +4,9 @@ import { Loader2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "../utils/cn";
 import { Card, CardContent } from "../components/ui/Card";
+import { useProjects } from "../hooks/use-projects";
 
 type BotMode = "transcriptor" | "voice_agent";
-
-interface Project {
-  id: string;
-  name: string;
-  description: string | null;
-  document_count: number;
-}
 
 const BOT_MODES: { value: BotMode; label: string }[] = [
   { value: "transcriptor", label: "Transcriptor" },
@@ -22,27 +16,16 @@ const BOT_MODES: { value: BotMode; label: string }[] = [
 export default function InstantMeetingPage() {
   const [botMode, setBotMode] = useState<BotMode>("transcriptor");
   const { getToken } = useAuth();
-  const [projects, setProjects] = useState<Project[]>([]);
+  const { ownedProjects, sharedProjects, isLoading: projectsLoading } = useProjects();
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
-  const [projectsLoading, setProjectsLoading] = useState(true);
   const [meetingUrl, setMeetingUrl] = useState("");
   const [isJoining, setIsJoining] = useState(false);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/bot-settings").then((r) => r.json()) as Promise<{ bot_mode: BotMode }>,
-      getToken().then((token) =>
-        fetch("/api/projects", {
-          headers: { Authorization: `Bearer ${token}` },
-        }).then((r) => r.json())
-      ) as Promise<{ projects: Project[] }>,
-    ])
-      .then(([settings, projectData]) => {
-        setBotMode(settings.bot_mode);
-        setProjects(projectData.projects ?? []);
-      })
-      .catch(console.error)
-      .finally(() => setProjectsLoading(false));
+    fetch("/api/bot-settings")
+      .then((r) => r.json())
+      .then((settings: { bot_mode: BotMode }) => setBotMode(settings.bot_mode))
+      .catch(console.error);
   }, []);
 
   const handleModeChange = (mode: BotMode) => {
@@ -139,11 +122,22 @@ export default function InstantMeetingPage() {
                   className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                 >
                   <option value="">No project — searches all active documents</option>
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name}{project.document_count > 0 ? ` (${project.document_count} docs)` : ""}
-                    </option>
-                  ))}
+                  <optgroup label="My Projects">
+                    {ownedProjects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}{project.documentCount ? ` (${project.documentCount} docs)` : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                  {sharedProjects.length > 0 && (
+                    <optgroup label="Shared with me">
+                      {sharedProjects.map((project) => (
+                        <option key={project.id} value={project.id}>
+                          {project.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               )}
             </div>
