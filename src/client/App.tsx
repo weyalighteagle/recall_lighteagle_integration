@@ -39,7 +39,6 @@ import { useCalendar } from "./hooks/use-calendar";
 import { useCalendarEvents } from "./hooks/use-calendar-events";
 import { useDeleteCalendar } from "./hooks/use-delete-calendar";
 import { useToggleRecording } from "./hooks/use-toggle-recording";
-import { useProjects, type ProjectOption } from "./hooks/use-projects";
 import { toast } from "sonner";
 
 function App() {
@@ -126,6 +125,16 @@ interface KbTag {
     color: string | null;
 }
 
+type KbProject = {
+    id: string;
+    name: string;
+};
+
+type SharedKbProject = {
+    id: string;
+    name: string;
+};
+
 function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     const { user } = useUser();
     const { getToken } = useAuth();
@@ -133,7 +142,8 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
 
     // ── Category tags — used by the per-meeting category selector on event cards ──
     const [tags, setTags] = useState<KbTag[]>([]);
-    const { allProjects: projects } = useProjects();
+    const [projects, setProjects] = useState<KbProject[]>([]);
+    const [sharedProjects, setSharedProjects] = useState<SharedKbProject[]>([]);
     const [autoJoinEnabled, setAutoJoinEnabled] = useState<boolean>(true);
     const [isAutoJoinSyncing, setIsAutoJoinSyncing] = useState(false);
 
@@ -145,10 +155,23 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                     headers: { Authorization: `Bearer ${token}` },
                 }).then((r) => r.json())
             ) as Promise<{ tags: KbTag[] }>,
+            getToken().then((token) =>
+                fetch("/api/projects", {
+                    headers: { Authorization: `Bearer ${token}` },
+                }).then((r) => r.json())
+            ) as Promise<{ projects: KbProject[] }>,
+            getToken().then((token) =>
+                fetch("/api/projects/shared", {
+                    headers: { Authorization: `Bearer ${token}` },
+                }).then((r) => r.json())
+            ) as Promise<SharedKbProject[]>,
         ])
-            .then(([settings, tagData]) => {
+            .then(([settings, tagData, projectData, sharedData]) => {
                 setAutoJoinEnabled(settings.auto_join_enabled ?? true);
                 setTags(tagData.tags ?? []);
+                setProjects(Array.isArray(projectData?.projects) ? projectData.projects : []);
+                // /api/projects/shared returns a bare array, not { projects: [...] }
+                setSharedProjects(Array.isArray(sharedData) ? sharedData : []);
             })
             .catch(console.error);
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -292,6 +315,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                                     calendar={calendar}
                                     tags={tags}
                                     projects={projects}
+                                    sharedProjects={sharedProjects}
                                 />
                             ))}
                         </div>
@@ -302,7 +326,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     );
 }
 
-function CalendarDetails({ calendar, tags, projects }: { calendar: CalendarType; tags: KbTag[]; projects: ProjectOption[] }) {
+function CalendarDetails({ calendar, tags, projects, sharedProjects }: { calendar: CalendarType; tags: KbTag[]; projects: KbProject[]; sharedProjects: SharedKbProject[] }) {
     const { user } = useUser();
     const [searchParams, setSearchParams] = useSearchParams();
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -501,6 +525,7 @@ function CalendarDetails({ calendar, tags, projects }: { calendar: CalendarType;
                     startTimeLte={selectedEndDate}
                     tags={tags}
                     projects={projects}
+                    sharedProjects={sharedProjects}
                 />
             </div>
         </div>
@@ -513,12 +538,14 @@ function CalendarEventsList({
     startTimeLte,
     tags,
     projects,
+    sharedProjects,
 }: {
     calendar: CalendarType;
     startTimeGte: string;
     startTimeLte: string;
     tags: KbTag[];
-    projects: ProjectOption[];
+    projects: KbProject[];
+    sharedProjects: SharedKbProject[];
 }) {
     const latestStatus = calendar.status_changes.at(0)?.status;
     const isConnecting = latestStatus === "connecting";
@@ -600,6 +627,7 @@ function CalendarEventsList({
                                         getEventTitle={getEventTitle}
                                         tags={tags}
                                         projects={projects}
+                                        sharedProjects={sharedProjects}
                                     />
                                 ))}
                         </div>
@@ -617,13 +645,15 @@ function CalendarEventCard({
     getEventTitle,
     tags,
     projects,
+    sharedProjects,
 }: {
     event: CalendarEventType;
     calendarId: string;
     formatTime: (dateString: string) => string;
     getEventTitle: (event: CalendarEventType) => string;
     tags: KbTag[];
-    projects: ProjectOption[];
+    projects: KbProject[];
+    sharedProjects: SharedKbProject[];
 }) {
     // Recording bot toggle hook
     const {
@@ -909,7 +939,7 @@ function CalendarEventCard({
                         <span className="truncate">{event.meeting_url}</span>
                     </a>
                 )}
-                {canToggle && projects.length > 0 && (
+                {canToggle && (projects.length > 0 || sharedProjects.length > 0) && (
                     <div className="flex items-center gap-1.5">
                         <span className="text-gray-500">Proje:</span>
                         <select
@@ -920,13 +950,13 @@ function CalendarEventCard({
                         >
                             <option value="">— Proje seçilmedi —</option>
                             <optgroup label="My Projects">
-                                {projects.filter((p) => !p.isShared).map((p) => (
+                                {projects.map((p) => (
                                     <option key={p.id} value={p.id}>{p.name}</option>
                                 ))}
                             </optgroup>
-                            {projects.some((p) => p.isShared) && (
+                            {sharedProjects.length > 0 && (
                                 <optgroup label="Shared with me">
-                                    {projects.filter((p) => p.isShared).map((p) => (
+                                    {sharedProjects.map((p) => (
                                         <option key={p.id} value={p.id}>{p.name}</option>
                                     ))}
                                 </optgroup>
