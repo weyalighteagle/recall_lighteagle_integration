@@ -38,7 +38,7 @@ type SharedProjectsResponse = Array<{
  * should use allProjects.
  */
 export function useProjects() {
-    const { getToken } = useAuth();
+    const { getToken, isSignedIn } = useAuth();
 
     const { data: ownedProjects = [], isPending: ownedPending, error: ownedError } = useQuery({
         queryKey: ["kb_projects"],
@@ -57,6 +57,7 @@ export function useProjects() {
                 documentCount: p.document_count,
             }));
         },
+        enabled: !!isSignedIn,
     });
 
     const { data: sharedProjects = [], isPending: sharedPending, error: sharedError } = useQuery({
@@ -76,6 +77,7 @@ export function useProjects() {
                 ownerEmail: p.owner_email,
             }));
         },
+        enabled: !!isSignedIn,
     });
 
     return {
