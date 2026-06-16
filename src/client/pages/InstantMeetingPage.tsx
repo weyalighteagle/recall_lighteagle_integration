@@ -4,9 +4,22 @@ import { Loader2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "../utils/cn";
 import { Card, CardContent } from "../components/ui/Card";
-import { useProjects } from "../hooks/use-projects";
 
 type BotMode = "transcriptor" | "voice_agent";
+
+interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  document_count: number;
+}
+
+interface SharedProject {
+  id: string;
+  name: string;
+  description: string | null;
+  owner_email: string;
+}
 
 const BOT_MODES: { value: BotMode; label: string }[] = [
   { value: "transcriptor", label: "Transcriptor" },
@@ -16,16 +29,35 @@ const BOT_MODES: { value: BotMode; label: string }[] = [
 export default function InstantMeetingPage() {
   const [botMode, setBotMode] = useState<BotMode>("transcriptor");
   const { getToken } = useAuth();
-  const { ownedProjects, sharedProjects, isLoading: projectsLoading } = useProjects();
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [sharedProjects, setSharedProjects] = useState<SharedProject[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const [projectsLoading, setProjectsLoading] = useState(true);
   const [meetingUrl, setMeetingUrl] = useState("");
   const [isJoining, setIsJoining] = useState(false);
 
   useEffect(() => {
-    fetch("/api/bot-settings")
-      .then((r) => r.json())
-      .then((settings: { bot_mode: BotMode }) => setBotMode(settings.bot_mode))
-      .catch(console.error);
+    Promise.all([
+      fetch("/api/bot-settings").then((r) => r.json()) as Promise<{ bot_mode: BotMode }>,
+      getToken().then((token) =>
+        fetch("/api/projects", {
+          headers: { Authorization: `Bearer ${token}` },
+        }).then((r) => r.json())
+      ) as Promise<{ projects: Project[] }>,
+      getToken().then((token) =>
+        fetch("/api/projects/shared", {
+          headers: { Authorization: `Bearer ${token}` },
+        }).then((r) => r.json())
+      ) as Promise<SharedProject[]>,
+    ])
+      .then(([settings, projectData, sharedData]) => {
+        setBotMode(settings.bot_mode);
+        setProjects(projectData.projects ?? []);
+        // /api/projects/shared returns a bare array, not { projects: [...] }
+        setSharedProjects(Array.isArray(sharedData) ? sharedData : []);
+      })
+      .catch(console.error)
+      .finally(() => setProjectsLoading(false));
   }, []);
 
   const handleModeChange = (mode: BotMode) => {
@@ -123,9 +155,9 @@ export default function InstantMeetingPage() {
                 >
                   <option value="">No project — searches all active documents</option>
                   <optgroup label="My Projects">
-                    {ownedProjects.map((project) => (
+                    {projects.map((project) => (
                       <option key={project.id} value={project.id}>
-                        {project.name}{project.documentCount ? ` (${project.documentCount} docs)` : ""}
+                        {project.name}{project.document_count > 0 ? ` (${project.document_count} docs)` : ""}
                       </option>
                     ))}
                   </optgroup>
