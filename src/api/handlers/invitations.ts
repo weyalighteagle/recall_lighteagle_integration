@@ -16,8 +16,16 @@ export async function createInvite(args: {
     userId: string;
     userEmail: string;
     invitedEmail?: string;
+    role?: string;
 }): Promise<{ invite_token: string; invite_url: string }> {
-    const { projectId, userId, userEmail, invitedEmail } = args;
+    const { projectId, userId, userEmail, invitedEmail, role: rawRole } = args;
+
+    const inviteRole = rawRole ?? "member";
+    if (inviteRole !== "admin" && inviteRole !== "member") {
+        const e = new Error("role must be 'admin' or 'member'");
+        (e as any).statusCode = 400; // eslint-disable-line @typescript-eslint/no-explicit-any
+        throw e;
+    }
 
     const { data: project, error: projectErr } = await supabase
         .from("kb_projects")
@@ -78,6 +86,7 @@ export async function createInvite(args: {
             invited_email: invitedEmail ?? null,
             invited_by: userEmail,
             status: "pending",
+            role: inviteRole,
         })
         .select("invite_token")
         .single();
@@ -100,6 +109,7 @@ export async function getInvitation(args: {
     invited_email: string | null;
     status: string;
     expires_at: string;
+    role: string;
 }> {
     const { token } = args;
 
@@ -130,6 +140,7 @@ export async function getInvitation(args: {
         invited_email: r.invited_email as string | null,
         status: r.status as string,
         expires_at: r.expires_at as string,
+        role: (r.role ?? "member") as string,
     };
 }
 
@@ -192,12 +203,14 @@ export async function acceptInvitation(args: {
         };
     }
 
+    const grantedRole: string = r.role ?? "member";
+
     const { error: insertErr } = await supabase
         .from("project_members")
         .insert({
             project_id: r.project_id,
             user_email: userEmail,
-            role: "member",
+            role: grantedRole,
             invited_by: r.invited_by,
             clerk_user_id: userId,
         });
@@ -211,10 +224,10 @@ export async function acceptInvitation(args: {
 
     if (updateErr) throw new Error(updateErr.message);
 
-    console.log(`[invitations] ${userEmail} accepted invite ${token} for project ${r.project_id}`);
+    console.log(`[invitations] ${userEmail} accepted invite ${token} for project ${r.project_id} as ${grantedRole}`);
     return {
         project_id: r.project_id as string,
         project_name: r.kb_projects.name as string,
-        role: "member",
+        role: grantedRole,
     };
 }

@@ -19,7 +19,7 @@ export async function getSharedProjects(args: {
         .from("project_members")
         .select("role, joined_at, kb_projects(id, name, description)")
         .eq("user_email", userEmail)
-        .eq("role", "member");
+        .in("role", ["admin", "member"]);
 
     if (error) throw new Error(error.message);
 
@@ -107,17 +107,17 @@ export async function removeMember(args: {
 }): Promise<{ removed: true }> {
     const { projectId, userId, userEmail, targetEmail } = args;
 
-    await assertProjectAccess({ projectId, userId, userEmail, requiredRole: "owner" });
+    await assertProjectAccess({ projectId, userId, userEmail, requiredRole: "admin" });
 
     if (targetEmail === userEmail) {
-        const e = new Error("Cannot remove yourself as owner. Transfer ownership first.");
+        const e = new Error("Cannot remove yourself. Transfer ownership first.");
         (e as any).statusCode = 400; // eslint-disable-line @typescript-eslint/no-explicit-any
         throw e;
     }
 
     const { data: target, error: fetchErr } = await supabase
         .from("project_members")
-        .select("id")
+        .select("id, role")
         .eq("project_id", projectId)
         .eq("user_email", targetEmail)
         .maybeSingle();
@@ -126,6 +126,12 @@ export async function removeMember(args: {
     if (!target) {
         const e = new Error("Member not found");
         (e as any).statusCode = 404; // eslint-disable-line @typescript-eslint/no-explicit-any
+        throw e;
+    }
+
+    if ((target as any).role === "owner") { // eslint-disable-line @typescript-eslint/no-explicit-any
+        const e = new Error("The project owner cannot be removed");
+        (e as any).statusCode = 403; // eslint-disable-line @typescript-eslint/no-explicit-any
         throw e;
     }
 
@@ -139,6 +145,60 @@ export async function removeMember(args: {
 
     console.log(`[projectMembers] Owner ${userEmail} removed ${targetEmail} from project ${projectId}`);
     return { removed: true };
+}
+
+/** PATCH /api/projects/:id/members/:email — admin changes a member's role */
+export async function changeMemberRole(args: {
+    projectId: string;
+    targetEmail: string;
+    newRole: string;
+}): Promise<{ user_email: string; role: string; invited_by: string; joined_at: string }> {
+    const { projectId, targetEmail, newRole } = args;
+
+    if (newRole !== "admin" && newRole !== "member") {
+        const e = new Error("role must be 'admin' or 'member'");
+        (e as any).statusCode = 400; // eslint-disable-line @typescript-eslint/no-explicit-any
+        throw e;
+    }
+
+    const { data: target, error: fetchErr } = await supabase
+        .from("project_members")
+        .select("user_email, role, invited_by, joined_at")
+        .eq("project_id", projectId)
+        .eq("user_email", targetEmail)
+        .maybeSingle();
+
+    if (fetchErr) throw new Error(fetchErr.message);
+    if (!target) {
+        const e = new Error("Member not found");
+        (e as any).statusCode = 404; // eslint-disable-line @typescript-eslint/no-explicit-any
+        throw e;
+    }
+
+    const t = target as { user_email: string; role: string; invited_by: string; joined_at: string }; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+    if (t.role === "owner") {
+        const e = new Error("The project owner's role cannot be changed");
+        (e as any).statusCode = 403; // eslint-disable-line @typescript-eslint/no-explicit-any
+        throw e;
+    }
+
+    if (t.role === newRole) {
+        return t;
+    }
+
+    const { data: updated, error: updateErr } = await supabase
+        .from("project_members")
+        .update({ role: newRole })
+        .eq("project_id", projectId)
+        .eq("user_email", targetEmail)
+        .select("user_email, role, invited_by, joined_at")
+        .single();
+
+    if (updateErr) throw new Error(updateErr.message);
+
+    console.log(`[projectMembers] ${targetEmail} role changed to ${newRole} in project ${projectId}`);
+    return updated as { user_email: string; role: string; invited_by: string; joined_at: string };
 }
 
 /** POST /api/projects/:id/leave — non-owner member leaves a project */
