@@ -1,11 +1,15 @@
 import { supabase } from "../config/supabase";
 
+export type ProjectRole = "owner" | "admin" | "member";
+
+const ROLE_RANK: Record<ProjectRole, number> = { owner: 3, admin: 2, member: 1 };
+
 export async function assertProjectAccess(args: {
     projectId: string;
     userId: string;
     userEmail: string;
-    requiredRole?: "owner";
-}): Promise<{ role: "owner" | "member" }> {
+    requiredRole?: "owner" | "admin";
+}): Promise<{ role: ProjectRole }> {
     const { projectId, userId, userEmail, requiredRole } = args;
 
     const { data: membership, error: memberErr } = await supabase
@@ -18,9 +22,9 @@ export async function assertProjectAccess(args: {
     if (memberErr) throw new Error(memberErr.message);
 
     if (membership) {
-        const role = membership.role as "owner" | "member";
-        if (requiredRole === "owner" && role !== "owner") {
-            const e = new Error("Only the project owner can perform this action");
+        const role = membership.role as ProjectRole;
+        if (requiredRole && ROLE_RANK[role] < ROLE_RANK[requiredRole]) {
+            const e = new Error("You do not have permission to perform this action");
             (e as any).statusCode = 403; // eslint-disable-line @typescript-eslint/no-explicit-any
             throw e;
         }
