@@ -14,6 +14,13 @@ interface Project {
   document_count: number;
 }
 
+interface SharedProject {
+  id: string;
+  name: string;
+  description: string | null;
+  owner_email: string;
+}
+
 const BOT_MODES: { value: BotMode; label: string }[] = [
   { value: "transcriptor", label: "Transcriptor" },
   { value: "voice_agent", label: "Voice Agent" },
@@ -23,6 +30,7 @@ export default function InstantMeetingPage() {
   const [botMode, setBotMode] = useState<BotMode>("transcriptor");
   const { getToken } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [sharedProjects, setSharedProjects] = useState<SharedProject[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [meetingUrl, setMeetingUrl] = useState("");
@@ -36,10 +44,17 @@ export default function InstantMeetingPage() {
           headers: { Authorization: `Bearer ${token}` },
         }).then((r) => r.json())
       ) as Promise<{ projects: Project[] }>,
+      getToken().then((token) =>
+        fetch("/api/projects/shared", {
+          headers: { Authorization: `Bearer ${token}` },
+        }).then((r) => r.json())
+      ) as Promise<SharedProject[]>,
     ])
-      .then(([settings, projectData]) => {
+      .then(([settings, projectData, sharedData]) => {
         setBotMode(settings.bot_mode);
         setProjects(projectData.projects ?? []);
+        // /api/projects/shared returns a bare array, not { projects: [...] }
+        setSharedProjects(Array.isArray(sharedData) ? sharedData : []);
       })
       .catch(console.error)
       .finally(() => setProjectsLoading(false));
@@ -139,11 +154,22 @@ export default function InstantMeetingPage() {
                   className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                 >
                   <option value="">No project — searches all active documents</option>
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name}{project.document_count > 0 ? ` (${project.document_count} docs)` : ""}
-                    </option>
-                  ))}
+                  <optgroup label="My Projects">
+                    {projects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}{project.document_count > 0 ? ` (${project.document_count} docs)` : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                  {sharedProjects.length > 0 && (
+                    <optgroup label="Shared with me">
+                      {sharedProjects.map((project) => (
+                        <option key={project.id} value={project.id}>
+                          {project.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               )}
             </div>

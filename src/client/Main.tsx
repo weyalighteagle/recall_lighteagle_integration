@@ -12,6 +12,7 @@ import SettingsPage from "./pages/SettingsPage";
 import InstantMeetingPage from "./pages/InstantMeetingPage";
 import VoiceAgentSettingsPage from "./pages/VoiceAgentSettingsPage";
 import SignInPage from "./pages/SignInPage";
+import InviteAcceptPage from "./pages/InviteAcceptPage";
 import "./index.css";
 import DashboardWrapper from "./components/modules/DashboardWrapper";
 import { Toaster } from "./components/ui/Sonner";
@@ -31,6 +32,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <BrowserRouter>
         <Routes>
           <Route path="/sign-in" element={<SignInPage />} />
+          <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="/dashboard/*" element={<ProtectedRoute><DashboardRoutes /></ProtectedRoute>} />
           <Route
             path="*"

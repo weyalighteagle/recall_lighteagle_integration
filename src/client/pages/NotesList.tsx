@@ -38,6 +38,16 @@ interface Project {
     document_count: number;
 }
 
+interface SharedProject {
+    id: string;
+    name: string;
+    description: string | null;
+    owner_email: string;
+    member_count: number;
+    role: string;
+    joined_at: string;
+}
+
 interface KBTranscriptDoc {
     id: string;
     metadata: Record<string, unknown>;
@@ -383,6 +393,19 @@ function NotesList() {
         },
     });
 
+    // GET /api/projects/shared returns a bare array, not { projects: [...] }
+    const { data: sharedProjectsData } = useQuery<SharedProject[]>({
+        queryKey: ["shared_projects"],
+        queryFn: async () => {
+            const token = await getToken();
+            const res = await fetch("/api/projects/shared", {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        },
+    });
+
     const { data: transcriptsData } = useQuery<{ documents: KBTranscriptDoc[] }>({
         queryKey: ["kb_transcripts"],
         queryFn: async () => {
@@ -396,9 +419,16 @@ function NotesList() {
     });
 
     const projects = projectsData?.projects ?? [];
+    const sharedProjects: Project[] = (sharedProjectsData ?? []).map((p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        document_count: 0,
+    }));
+    const allProjects = useMemo(() => [...projects, ...sharedProjects], [projects, sharedProjects]);
 
     const projectDetailQueries = useQueries({
-        queries: projects.map((p) => ({
+        queries: allProjects.map((p) => ({
             queryKey: ["kb_project_detail", p.id] as const,
             queryFn: async () => {
                 const token = await getToken();
@@ -409,7 +439,7 @@ function NotesList() {
                 return res.json() as Promise<{ id: string; documents: Array<{ id: string }> }>;
             },
             staleTime: 60_000,
-            enabled: projects.length > 0,
+            enabled: allProjects.length > 0,
         })),
     });
 
@@ -417,7 +447,7 @@ function NotesList() {
         const map = new Map<string, Project[]>();
         projectDetailQueries.forEach((query, i) => {
             const detail = query.data;
-            const project = projects[i];
+            const project = allProjects[i];
             if (detail && project) {
                 for (const doc of detail.documents) {
                     if (!map.has(doc.id)) map.set(doc.id, []);
@@ -426,7 +456,7 @@ function NotesList() {
             }
         });
         return map;
-    }, [projectDetailQueries, projects]);
+    }, [projectDetailQueries, allProjects]);
 
     // Map botId → kb_document id using metadata.botId stored during transcript ingest
     const kbDocByBotId = new Map<string, string>(
@@ -658,7 +688,7 @@ function NotesList() {
                                         <MeetingProjectPicker
                                             botId={meeting.bot_id}
                                             kbDocumentId={kbDocByBotId.get(meeting.bot_id) ?? null}
-                                            projects={projects}
+                                            projects={allProjects}
                                             initialAssignedProjects={
                                                 (() => {
                                                     const docId = kbDocByBotId.get(meeting.bot_id);

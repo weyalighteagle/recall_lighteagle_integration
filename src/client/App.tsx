@@ -130,6 +130,11 @@ type KbProject = {
     name: string;
 };
 
+type SharedKbProject = {
+    id: string;
+    name: string;
+};
+
 function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     const { user } = useUser();
     const { getToken } = useAuth();
@@ -138,6 +143,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     // ── Category tags — used by the per-meeting category selector on event cards ──
     const [tags, setTags] = useState<KbTag[]>([]);
     const [projects, setProjects] = useState<KbProject[]>([]);
+    const [sharedProjects, setSharedProjects] = useState<SharedKbProject[]>([]);
     const [autoJoinEnabled, setAutoJoinEnabled] = useState<boolean>(true);
     const [isAutoJoinSyncing, setIsAutoJoinSyncing] = useState(false);
 
@@ -154,11 +160,18 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                     headers: { Authorization: `Bearer ${token}` },
                 }).then((r) => r.json())
             ) as Promise<{ projects: KbProject[] }>,
+            getToken().then((token) =>
+                fetch("/api/projects/shared", {
+                    headers: { Authorization: `Bearer ${token}` },
+                }).then((r) => r.json())
+            ) as Promise<SharedKbProject[]>,
         ])
-            .then(([settings, tagData, projectData]) => {
+            .then(([settings, tagData, projectData, sharedData]) => {
                 setAutoJoinEnabled(settings.auto_join_enabled ?? true);
                 setTags(tagData.tags ?? []);
                 setProjects(Array.isArray(projectData?.projects) ? projectData.projects : []);
+                // /api/projects/shared returns a bare array, not { projects: [...] }
+                setSharedProjects(Array.isArray(sharedData) ? sharedData : []);
             })
             .catch(console.error);
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -302,6 +315,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                                     calendar={calendar}
                                     tags={tags}
                                     projects={projects}
+                                    sharedProjects={sharedProjects}
                                 />
                             ))}
                         </div>
@@ -312,7 +326,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
     );
 }
 
-function CalendarDetails({ calendar, tags, projects }: { calendar: CalendarType; tags: KbTag[]; projects: KbProject[] }) {
+function CalendarDetails({ calendar, tags, projects, sharedProjects }: { calendar: CalendarType; tags: KbTag[]; projects: KbProject[]; sharedProjects: SharedKbProject[] }) {
     const { user } = useUser();
     const [searchParams, setSearchParams] = useSearchParams();
     const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -511,6 +525,7 @@ function CalendarDetails({ calendar, tags, projects }: { calendar: CalendarType;
                     startTimeLte={selectedEndDate}
                     tags={tags}
                     projects={projects}
+                    sharedProjects={sharedProjects}
                 />
             </div>
         </div>
@@ -523,12 +538,14 @@ function CalendarEventsList({
     startTimeLte,
     tags,
     projects,
+    sharedProjects,
 }: {
     calendar: CalendarType;
     startTimeGte: string;
     startTimeLte: string;
     tags: KbTag[];
     projects: KbProject[];
+    sharedProjects: SharedKbProject[];
 }) {
     const latestStatus = calendar.status_changes.at(0)?.status;
     const isConnecting = latestStatus === "connecting";
@@ -610,6 +627,7 @@ function CalendarEventsList({
                                         getEventTitle={getEventTitle}
                                         tags={tags}
                                         projects={projects}
+                                        sharedProjects={sharedProjects}
                                     />
                                 ))}
                         </div>
@@ -627,6 +645,7 @@ function CalendarEventCard({
     getEventTitle,
     tags,
     projects,
+    sharedProjects,
 }: {
     event: CalendarEventType;
     calendarId: string;
@@ -634,6 +653,7 @@ function CalendarEventCard({
     getEventTitle: (event: CalendarEventType) => string;
     tags: KbTag[];
     projects: KbProject[];
+    sharedProjects: SharedKbProject[];
 }) {
     // Recording bot toggle hook
     const {
@@ -919,7 +939,7 @@ function CalendarEventCard({
                         <span className="truncate">{event.meeting_url}</span>
                     </a>
                 )}
-                {canToggle && projects.length > 0 && (
+                {canToggle && (projects.length > 0 || sharedProjects.length > 0) && (
                     <div className="flex items-center gap-1.5">
                         <span className="text-gray-500">Proje:</span>
                         <select
@@ -929,9 +949,18 @@ function CalendarEventCard({
                             className="text-xs border rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[160px]"
                         >
                             <option value="">— Proje seçilmedi —</option>
-                            {projects.map((p) => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                            ))}
+                            <optgroup label="My Projects">
+                                {projects.map((p) => (
+                                    <option key={p.id} value={p.id}>{p.name}</option>
+                                ))}
+                            </optgroup>
+                            {sharedProjects.length > 0 && (
+                                <optgroup label="Shared with me">
+                                    {sharedProjects.map((p) => (
+                                        <option key={p.id} value={p.id}>{p.name}</option>
+                                    ))}
+                                </optgroup>
+                            )}
                         </select>
                     </div>
                 )}
