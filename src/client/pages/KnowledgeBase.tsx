@@ -1536,11 +1536,10 @@ function KnowledgeBase() {
                                                     </span>
                                                 </div>
                                                 {canManage && member.role !== "owner" && (
-                                                    <div className="flex items-center gap-0.5 shrink-0">
+                                                    <div className="flex items-center gap-1 shrink-0">
                                                         <Button
                                                             variant="ghost"
-                                                            size="icon-sm"
-                                                            title={member.role === "admin" ? "Demote to Member" : "Promote to Project Admin"}
+                                                            size="sm"
                                                             disabled={changeMemberRoleMutation.isPending}
                                                             onClick={() => {
                                                                 const message = member.role === "admin"
@@ -1554,9 +1553,10 @@ function KnowledgeBase() {
                                                                     });
                                                                 }
                                                             }}
-                                                            className="text-gray-400 hover:text-yellow-600 shrink-0"
+                                                            className="flex items-center gap-1 text-gray-400 hover:text-yellow-600 shrink-0"
                                                         >
-                                                            <Shield className="size-4" />
+                                                            <Shield className="size-3.5" />
+                                                            {member.role === "admin" ? "Demote" : "Promote"}
                                                         </Button>
                                                         <Button
                                                             variant="ghost"
