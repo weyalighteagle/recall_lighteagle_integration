@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { z } from "zod";
 import { CalendarSchema } from "../../schemas/CalendarArtifactSchema";
+import { parseApiError } from "../lib/parseApiError";
 
 export function useCalendar() {
     const { getToken } = useAuth();
@@ -17,7 +18,10 @@ export function useCalendar() {
                 const res = await fetch(url.toString(), {
                     headers: { Authorization: `Bearer ${token}` },
                 });
-                if (!res.ok) throw new Error(await res.text());
+                if (!res.ok) {
+                    const errText = await res.text();
+                    throw new Error(parseApiError(errText));
+                }
 
                 const data = z
                     .object({ calendars: CalendarSchema.array() })
@@ -27,7 +31,7 @@ export function useCalendar() {
                 return data;
             } catch (error) {
                 console.error("Error fetching calendars:", error);
-                toast.error("Failed to fetch calendars. See console for details.");
+                toast.error(error instanceof Error ? error.message : "Something went wrong. Please try again.");
             }
         },
         enabled: true,

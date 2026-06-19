@@ -40,6 +40,7 @@ import { useCalendarEvents } from "./hooks/use-calendar-events";
 import { useDeleteCalendar } from "./hooks/use-delete-calendar";
 import { useToggleRecording } from "./hooks/use-toggle-recording";
 import { toast } from "sonner";
+import { parseApiError } from "./lib/parseApiError";
 
 function App() {
     const { isLoaded } = useAuth();
@@ -727,7 +728,10 @@ function CalendarEventCard({
         setIsExporting(true);
         try {
             const res = await fetch(`/api/transcripts/${botId}`);
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             const data: { utterances: { participant: string; words: { text: string }[]; timestamp: string }[]; done: boolean } = await res.json();
             const lines = data.utterances.map((u) => {
                 const time = new Date(u.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });

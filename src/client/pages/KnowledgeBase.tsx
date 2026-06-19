@@ -2,6 +2,7 @@ import { useAuth } from "@clerk/react";
 import { useQuery, useMutation, useQueryClient, useQueries } from "@tanstack/react-query";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { toast } from "sonner";
+import { parseApiError } from "../lib/parseApiError";
 import {
     Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye, Star, X, Mic,
     FolderOpen, Layers, Share2, Copy, Check, Users, LogOut,
@@ -257,7 +258,10 @@ function KnowledgeBase() {
             const res = await fetch("/api/kb", {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json();
         },
     });
@@ -269,7 +273,10 @@ function KnowledgeBase() {
             const res = await fetch("/api/kb/transcripts", {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json();
         },
     });
@@ -278,7 +285,10 @@ function KnowledgeBase() {
         queryKey: ["kb_document", selectedDocId],
         queryFn: async () => {
             const res = await fetch(`/api/kb/${selectedDocId}`);
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json();
         },
         enabled: !!selectedDocId,
@@ -288,7 +298,10 @@ function KnowledgeBase() {
         queryKey: ["bot_settings"],
         queryFn: async () => {
             const res = await fetch("/api/bot-settings");
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json();
         },
     });
@@ -300,7 +313,10 @@ function KnowledgeBase() {
             const res = await fetch("/api/projects", {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json();
         },
     });
@@ -312,7 +328,10 @@ function KnowledgeBase() {
             const res = await fetch(`/api/projects/${selectedProjectId}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json();
         },
         enabled: !!selectedProjectId,
@@ -325,7 +344,10 @@ function KnowledgeBase() {
             const res = await fetch("/api/projects/shared", {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json();
         },
     });
@@ -337,7 +359,10 @@ function KnowledgeBase() {
             const res = await fetch(`/api/projects/${selectedProjectId}/members`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json();
         },
         enabled: !!selectedProjectId,
@@ -401,7 +426,10 @@ function KnowledgeBase() {
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ name: newProjectName.trim(), description: newProjectDescription.trim() || undefined }),
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json() as Promise<Project>;
         },
         onSuccess: (p) => {
@@ -423,7 +451,10 @@ function KnowledgeBase() {
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ name: editProjectName.trim(), description: editProjectDescription.trim() || null }),
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json() as Promise<Project>;
         },
         onSuccess: (p) => {
@@ -441,7 +472,10 @@ function KnowledgeBase() {
                 method: "DELETE",
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
         },
         onSuccess: () => {
             toast.success("Project deleted");
@@ -460,7 +494,10 @@ function KnowledgeBase() {
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ document_id: documentId }),
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
         },
         onSuccess: (_data, { projectId }) => {
             toast.success("Document added to project");
@@ -478,7 +515,10 @@ function KnowledgeBase() {
                 method: "DELETE",
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
         },
         onSuccess: (_data, { projectId }) => {
             toast.success("Document removed from project");
@@ -494,7 +534,10 @@ function KnowledgeBase() {
                 method: "DELETE",
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
         },
         onSuccess: () => {
             toast.success("Member removed");
@@ -510,7 +553,10 @@ function KnowledgeBase() {
                 method: "POST",
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
         },
         onSuccess: () => {
             toast.success("Left project");
@@ -529,7 +575,10 @@ function KnowledgeBase() {
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
                 body: JSON.stringify({}),
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json() as Promise<{ invite_url: string; expires_at: string }>;
         },
         onSuccess: (data) => {
@@ -545,7 +594,10 @@ function KnowledgeBase() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ title, category, content, tag_ids: [] }),
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json() as Promise<{ document_id: string; chunks: number }>;
         },
         onSuccess: (resData) => {
@@ -566,7 +618,10 @@ function KnowledgeBase() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ title: editTitle, category: editCategory, content: editContent }),
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json() as Promise<{ document_id: string; chunks: number }>;
         },
         onSuccess: (resData) => {
@@ -581,7 +636,10 @@ function KnowledgeBase() {
     const deleteMutation = useMutation({
         mutationFn: async (id: string) => {
             const res = await fetch(`/api/kb?id=${id}`, { method: "DELETE" });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
         },
         onSuccess: () => { toast.success("Document deleted"); invalidateBoth(); },
         onError: (err: Error) => toast.error(err.message),
@@ -594,7 +652,10 @@ function KnowledgeBase() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ is_active }),
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
         },
         onSuccess: () => {
             void queryClient.invalidateQueries({ queryKey: ["kb_documents"] });
@@ -610,7 +671,10 @@ function KnowledgeBase() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ active_kb_id: id }),
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
         },
         onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["bot_settings"] }); toast.success("Default KB updated"); },
         onError: (err: Error) => toast.error(err.message),

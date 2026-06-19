@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Loader2, AlertCircle, Clock, CheckCircle2, UserPlus } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/Card";
+import { parseApiError } from "../lib/parseApiError";
 
 interface InviteDetails {
     id: string;
@@ -54,7 +55,10 @@ export default function InviteAcceptPage() {
                 method: "POST",
                 headers: { Authorization: `Bearer ${authToken}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json() as Promise<{ project_name: string }>;
         },
         onSuccess: (data) => {
