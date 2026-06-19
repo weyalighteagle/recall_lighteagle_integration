@@ -13,16 +13,21 @@ const FRIENDLY_ERRORS: [string, string][] = [
 const FALLBACK_MESSAGE = "Something went wrong. Please try again.";
 
 export function parseApiError(raw: string): string {
-    let message = raw;
+    const trimmed = raw?.trim();
+    if (!trimmed) return FALLBACK_MESSAGE;
+
+    let message: string;
     try {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed.error === "string") {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed.error === "string" && parsed.error.trim()) {
             message = parsed.error;
+        } else {
+            return FALLBACK_MESSAGE;
         }
     } catch {
-        // not JSON, fall back to the raw string
+        message = trimmed;
     }
 
     const match = FRIENDLY_ERRORS.find(([pattern]) => message.includes(pattern));
-    return match ? match[1] : FALLBACK_MESSAGE;
+    return match ? match[1] : message;
 }
