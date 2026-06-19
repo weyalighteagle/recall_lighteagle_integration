@@ -1553,10 +1553,10 @@ function KnowledgeBase() {
                                                                     });
                                                                 }
                                                             }}
-                                                            className="flex items-center gap-1 text-gray-400 hover:text-yellow-600 shrink-0"
+                                                            className="flex items-center gap-1 text-gray-400 hover:text-yellow-600 shrink-0 whitespace-nowrap"
                                                         >
                                                             <Shield className="size-3.5" />
-                                                            {member.role === "admin" ? "Demote" : "Promote"}
+                                                            {member.role === "admin" ? "Demote to Member" : "Promote to Project Admin"}
                                                         </Button>
                                                         <Button
                                                             variant="ghost"
