@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { z } from "zod";
 import { CalendarEventSchema } from "../../schemas/CalendarEventArtifactSchema";
+import { parseApiError } from "../lib/parseApiError";
 
 export function useCalendarEvents(props: {
     calendarId: string | null,
@@ -52,7 +53,10 @@ export function useCalendarEvents(props: {
                 const res = await fetch(url.toString(), {
                     headers: { Authorization: `Bearer ${token}` },
                 });
-                if (!res.ok) throw new Error(await res.text());
+                if (!res.ok) {
+                    const errText = await res.text();
+                    throw new Error(parseApiError(errText));
+                }
 
                 const data = z
                     .object({
@@ -66,7 +70,7 @@ export function useCalendarEvents(props: {
                 };
             } catch (error) {
                 console.error("Error fetching calendar events:", error);
-                toast.error("Failed to fetch calendar events. See console for details.");
+                toast.error(error instanceof Error ? error.message : "Something went wrong. Please try again.");
                 return { calendar_events: [], next: null };
             }
         },

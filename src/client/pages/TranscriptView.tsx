@@ -10,6 +10,7 @@ import {
     CardTitle,
 } from "../components/ui/Card";
 import { ScrollArea } from "../components/ui/ScrollArea";
+import { parseApiError } from "../lib/parseApiError";
 
 interface Utterance {
     participant: string;
@@ -37,7 +38,10 @@ function TranscriptView() {
             const res = await fetch(`/api/notes/${botId}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json();
         },
         enabled: !!botId,
