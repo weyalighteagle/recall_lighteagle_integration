@@ -1542,11 +1542,18 @@ function KnowledgeBase() {
                                                             size="icon-sm"
                                                             title={member.role === "admin" ? "Demote to Member" : "Promote to Project Admin"}
                                                             disabled={changeMemberRoleMutation.isPending}
-                                                            onClick={() => changeMemberRoleMutation.mutate({
-                                                                projectId: projectDetail.id,
-                                                                email: member.user_email,
-                                                                role: member.role === "admin" ? "member" : "admin",
-                                                            })}
+                                                            onClick={() => {
+                                                                const message = member.role === "admin"
+                                                                    ? `Demote ${member.user_email} to Member? They will lose the ability to invite and manage members.`
+                                                                    : `Promote ${member.user_email} to Project Admin? They will be able to invite and remove members, change roles, and manage this project.`;
+                                                                if (confirm(message)) {
+                                                                    changeMemberRoleMutation.mutate({
+                                                                        projectId: projectDetail.id,
+                                                                        email: member.user_email,
+                                                                        role: member.role === "admin" ? "member" : "admin",
+                                                                    });
+                                                                }
+                                                            }}
                                                             className="text-gray-400 hover:text-yellow-600 shrink-0"
                                                         >
                                                             <Shield className="size-4" />
