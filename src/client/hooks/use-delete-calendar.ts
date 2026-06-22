@@ -2,6 +2,7 @@ import { useAuth } from "@clerk/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { z } from "zod";
+import { parseApiError } from "../lib/parseApiError";
 
 export function useDeleteCalendar(props: { calendarId: string | null }) {
     const { calendarId } = z.object({ calendarId: z.string().nullable() }).parse(props);
@@ -21,7 +22,10 @@ export function useDeleteCalendar(props: { calendarId: string | null }) {
                     Authorization: `Bearer ${token}`,
                 },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
 
             return { isDeleted: true };
         },
@@ -31,7 +35,7 @@ export function useDeleteCalendar(props: { calendarId: string | null }) {
         },
         onError: (error) => {
             console.error("Error deleting calendar:", error);
-            toast.error("Failed to disconnect calendar. See console for details.");
+            toast.error(error.message);
         },
     });
 

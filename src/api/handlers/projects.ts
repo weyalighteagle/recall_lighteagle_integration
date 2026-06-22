@@ -135,7 +135,7 @@ export async function project_update(
     userEmail: string,
 ): Promise<ProjectRow> {
     const validId = z.string().uuid().parse(projectId);
-    await assertProjectAccess({ projectId: validId, userId, userEmail, requiredRole: "owner" });
+    await assertProjectAccess({ projectId: validId, userId, userEmail, requiredRole: "admin" });
 
     const { name, description } = z.object({
         name: z.string().min(1).optional(),
@@ -171,7 +171,7 @@ export async function project_update(
 /** DELETE /api/projects/:id — delete a project (cascade removes kb_document_projects and meeting_projects; documents are NOT deleted) */
 export async function project_delete(projectId: string, userId: string, userEmail: string): Promise<void> {
     const validId = z.string().uuid().parse(projectId);
-    await assertProjectAccess({ projectId: validId, userId, userEmail, requiredRole: "owner" });
+    await assertProjectAccess({ projectId: validId, userId, userEmail, requiredRole: "admin" });
 
     const { error } = await supabase
         .from("kb_projects")
@@ -227,7 +227,7 @@ export async function project_document_remove(
 ): Promise<{ message: string }> {
     const validProjectId = z.string().uuid().parse(projectId);
     const validDocId = z.string().uuid().parse(docId);
-    await assertProjectAccess({ projectId: validProjectId, userId, userEmail, requiredRole: "owner" });
+    await assertProjectAccess({ projectId: validProjectId, userId, userEmail, requiredRole: "admin" });
 
     const { error } = await supabase
         .from("kb_document_projects")

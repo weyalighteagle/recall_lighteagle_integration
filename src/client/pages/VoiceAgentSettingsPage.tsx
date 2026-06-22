@@ -8,6 +8,7 @@ import {
     CardHeader,
     CardTitle,
 } from "../components/ui/Card";
+import { parseApiError } from "../lib/parseApiError";
 
 const VOICES = [
     { value: "marin", label: "Marin — Best (GA exclusive · most natural)" },
@@ -69,7 +70,10 @@ export default function VoiceAgentSettingsPage() {
                     wake_word: config.wake_word?.trim() || null,
                 }),
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             toast.success("Voice agent configuration saved");
         } catch (err) {
             console.error(err);
@@ -115,7 +119,10 @@ export default function VoiceAgentSettingsPage() {
                 }),
             });
 
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             const data = await res.json();
             setPhotoUrl(data.photo_url);
             toast.success("Photo uploaded!");
@@ -131,7 +138,10 @@ export default function VoiceAgentSettingsPage() {
     const handlePhotoDelete = async () => {
         try {
             const res = await fetch("/api/voice-agent-config/photo", { method: "DELETE" });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             setPhotoUrl(null);
             toast.success("Photo removed.");
         } catch (err) {

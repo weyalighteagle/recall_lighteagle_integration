@@ -2,6 +2,7 @@ import { useAuth } from "@clerk/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { z } from "zod";
+import { parseApiError } from "../lib/parseApiError";
 
 export function useToggleRecording(props: {
     calendarId: string;
@@ -33,7 +34,10 @@ export function useToggleRecording(props: {
                     Authorization: `Bearer ${token}`,
                 },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return { isScheduled: true };
         },
         onSuccess: () => {
@@ -42,7 +46,7 @@ export function useToggleRecording(props: {
         },
         onError: (error) => {
             console.error(`Error scheduling ${label}:`, error);
-            toast.error(`Failed to schedule ${label}. See console for details.`);
+            toast.error(error.message);
         },
     });
 
@@ -60,7 +64,10 @@ export function useToggleRecording(props: {
                     Authorization: `Bearer ${token}`,
                 },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return { isUnscheduled: true };
         },
         onSuccess: () => {
@@ -69,7 +76,7 @@ export function useToggleRecording(props: {
         },
         onError: (error) => {
             console.error(`Error cancelling ${label}:`, error);
-            toast.error(`Failed to cancel ${label}. See console for details.`);
+            toast.error(error.message);
         },
     });
 

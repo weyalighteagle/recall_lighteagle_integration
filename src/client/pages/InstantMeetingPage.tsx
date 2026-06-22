@@ -4,6 +4,7 @@ import { Loader2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "../utils/cn";
 import { Card, CardContent } from "../components/ui/Card";
+import { parseApiError } from "../lib/parseApiError";
 
 type BotMode = "transcriptor" | "voice_agent";
 
@@ -83,7 +84,10 @@ export default function InstantMeetingPage() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(parseApiError(errText));
+      }
       const data = await res.json();
       toast.success(`Bot sent! ID: ${data.bot_id}`);
       setMeetingUrl("");

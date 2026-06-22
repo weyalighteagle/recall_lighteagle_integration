@@ -51,6 +51,9 @@ export async function bot_join(args: {
         if (args.project_id) {
             wssUrl.searchParams.set("project", args.project_id);
         }
+        if (args.user_email) {
+            wssUrl.searchParams.set("userEmail", args.user_email);
+        }
         const output_media_url = `${env.VOICE_AGENT_PAGE_URL}?wss=${encodeURIComponent(wssUrl.toString())}`;
         console.log(`[bot_join] output_media_url: ${output_media_url}`);
 

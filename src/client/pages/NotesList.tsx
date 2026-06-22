@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
+import { parseApiError } from "../lib/parseApiError";
 
 const ITEMS_PER_PAGE = 10;
 
@@ -71,7 +72,10 @@ function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
             const res = await fetch(`/api/meetings/${botId}/tags`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json();
         },
         staleTime: 30_000,
@@ -86,7 +90,10 @@ function MeetingTagPicker({ botId, getToken }: MeetingTagPickerProps) {
             const res = await fetch("/api/kb/tags", {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json();
         },
     });
@@ -235,7 +242,10 @@ function MeetingProjectPicker({ botId, kbDocumentId, projects, initialAssignedPr
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ document_id: kbDocumentId }),
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
         },
         onSuccess: (_data, projectId) => {
             void queryClient.invalidateQueries({ queryKey: ["kb_projects"] });
@@ -255,7 +265,10 @@ function MeetingProjectPicker({ botId, kbDocumentId, projects, initialAssignedPr
                 `/api/projects/${projectId}/documents/${kbDocumentId}?bot_id=${encodeURIComponent(botId)}`,
                 { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
             );
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
         },
         onSuccess: (_data, projectId) => {
             void queryClient.invalidateQueries({ queryKey: ["kb_projects"] });
@@ -376,7 +389,10 @@ function NotesList() {
             const res = await fetch("/api/notes", {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json();
         },
     });
@@ -388,7 +404,10 @@ function NotesList() {
             const res = await fetch("/api/projects", {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json();
         },
     });
@@ -401,7 +420,10 @@ function NotesList() {
             const res = await fetch("/api/projects/shared", {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json();
         },
     });
@@ -413,7 +435,10 @@ function NotesList() {
             const res = await fetch("/api/kb/transcripts", {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             return res.json();
         },
     });
@@ -482,7 +507,10 @@ function NotesList() {
             const res = await fetch(`/api/notes/${botId}`, {
                 headers: { Authorization: `Bearer ${token}` },
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             const data: { utterances: { participant: string; words: { text: string }[]; timestamp: string }[]; done: boolean } = await res.json();
 
             const lines = data.utterances.map((u) => {
@@ -558,7 +586,10 @@ function NotesList() {
                 },
                 body: JSON.stringify({ title: trimmed }),
             });
-            if (!res.ok) throw new Error(await res.text());
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
             const { title: savedTitle }: { title: string } = await res.json();
 
             // Reconcile with server-returned title
