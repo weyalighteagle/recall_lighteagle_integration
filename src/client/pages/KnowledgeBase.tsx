@@ -1,11 +1,11 @@
-import { useAuth } from "@clerk/react";
+import { useAuth, useUser } from "@clerk/react";
 import { useQuery, useMutation, useQueryClient, useQueries } from "@tanstack/react-query";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { parseApiError } from "../lib/parseApiError";
 import {
     Loader2, Plus, Trash2, BookOpen, Power, Pencil, Eye, Star, X, Mic,
-    FolderOpen, Layers, Share2, Copy, Check, Users, LogOut,
+    FolderOpen, Layers, Share2, Copy, Check, Users, LogOut, Shield,
 } from "lucide-react";
 import { Button } from "../components/ui/Button";
 import {
@@ -116,7 +116,7 @@ interface SharedProject {
 
 interface Member {
     user_email: string;
-    role: "owner" | "member";
+    role: "owner" | "admin" | "member";
     joined_at: string;
 }
 
@@ -215,6 +215,8 @@ function AddToProjectDropdown({
 function KnowledgeBase() {
     const queryClient = useQueryClient();
     const { getToken } = useAuth();
+    const { user } = useUser();
+    const currentUserEmail = user?.primaryEmailAddress?.emailAddress;
 
     // ── Create form state ─────────────────────────────────────────────
     const [showForm, setShowForm] = useState(false);
@@ -249,6 +251,7 @@ function KnowledgeBase() {
     const [shareProject, setShareProject] = useState<Project | null>(null);
     const [inviteUrl, setInviteUrl] = useState<string | null>(null);
     const [isCopied, setIsCopied] = useState(false);
+    const [inviteRole, setInviteRole] = useState<"member" | "admin">("member");
 
     // ── Queries ───────────────────────────────────────────────────────
     const { data, isPending } = useQuery<{ documents: KBDocument[] }>({
@@ -405,6 +408,12 @@ function KnowledgeBase() {
     const documents = data?.documents ?? [];
     const transcriptDocuments = transcriptsData?.documents ?? [];
     const activeKbId = botSettings?.active_kb_id ?? null;
+
+    const viewerRole = useMemo(
+        () => membersData?.find((m) => m.user_email === currentUserEmail)?.role ?? selectedProjectRole,
+        [membersData, currentUserEmail, selectedProjectRole]
+    );
+    const canManage = !isMembersLoading && (viewerRole === "owner" || viewerRole === "admin");
 
     // ── Mutations ─────────────────────────────────────────────────────
 
@@ -568,12 +577,12 @@ function KnowledgeBase() {
     });
 
     const generateInviteMutation = useMutation({
-        mutationFn: async (projectId: string) => {
+        mutationFn: async ({ projectId, role }: { projectId: string; role: "member" | "admin" }) => {
             const token = await getToken();
             const res = await fetch(`/api/projects/${projectId}/invite`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                body: JSON.stringify({}),
+                body: JSON.stringify({ role }),
             });
             if (!res.ok) {
                 const errText = await res.text();
@@ -583,6 +592,27 @@ function KnowledgeBase() {
         },
         onSuccess: (data) => {
             setInviteUrl(data.invite_url);
+        },
+        onError: (err: Error) => toast.error(err.message),
+    });
+
+    const changeMemberRoleMutation = useMutation({
+        mutationFn: async ({ projectId, email, role }: { projectId: string; email: string; role: "admin" | "member" }) => {
+            const token = await getToken();
+            const res = await fetch(`/api/projects/${projectId}/members/${encodeURIComponent(email)}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ role }),
+            });
+            if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(parseApiError(errText));
+            }
+            return res.json();
+        },
+        onSuccess: () => {
+            toast.success("Role updated");
+            void queryClient.invalidateQueries({ queryKey: ["project_members", selectedProjectId] });
         },
         onError: (err: Error) => toast.error(err.message),
     });
@@ -1285,6 +1315,7 @@ function KnowledgeBase() {
                         setShareProject(null);
                         setInviteUrl(null);
                         setIsCopied(false);
+                        setInviteRole("member");
                         generateInviteMutation.reset();
                     }
                 }}
@@ -1332,9 +1363,27 @@ function KnowledgeBase() {
                             <p className="text-xs text-gray-400">Expires in 7 days</p>
                         </div>
                     ) : (
-                        <p className="text-sm text-gray-500">
-                            Anyone with the link can join this project. The link expires in 7 days.
-                        </p>
+                        <div className="flex flex-col gap-3">
+                            <div className="flex gap-1 p-1 bg-gray-100 rounded-md">
+                                <button
+                                    type="button"
+                                    onClick={() => setInviteRole("member")}
+                                    className={`flex-1 text-xs px-3 py-1.5 rounded transition-colors ${inviteRole === "member" ? "bg-white shadow-sm font-medium text-gray-800" : "text-gray-500 hover:text-gray-700"}`}
+                                >
+                                    Member
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setInviteRole("admin")}
+                                    className={`flex-1 text-xs px-3 py-1.5 rounded transition-colors ${inviteRole === "admin" ? "bg-white shadow-sm font-medium text-gray-800" : "text-gray-500 hover:text-gray-700"}`}
+                                >
+                                    Project Admin
+                                </button>
+                            </div>
+                            <p className="text-sm text-gray-500">
+                                Anyone with the link joins as a <span className="font-medium">{inviteRole === "admin" ? "Project Admin" : "Member"}</span>. The link expires in 7 days.
+                            </p>
+                        </div>
                     )}
 
                     <DialogFooter>
@@ -1345,7 +1394,7 @@ function KnowledgeBase() {
                             <Button
                                 size="sm"
                                 disabled={generateInviteMutation.isPending}
-                                onClick={() => shareProject && generateInviteMutation.mutate(shareProject.id)}
+                                onClick={() => shareProject && generateInviteMutation.mutate({ projectId: shareProject.id, role: inviteRole })}
                                 className="flex items-center gap-2"
                             >
                                 {generateInviteMutation.isPending ? (
@@ -1480,28 +1529,51 @@ function KnowledgeBase() {
                                                 <div className="flex items-center gap-2 min-w-0">
                                                     <span className="text-sm text-gray-700 truncate">{member.user_email}</span>
                                                     <span className={`text-xs shrink-0 px-1.5 py-0.5 rounded-full font-medium ${
-                                                        member.role === "owner"
+                                                        member.role === "owner" || member.role === "admin"
                                                             ? "bg-yellow-50 text-yellow-700"
                                                             : "bg-gray-100 text-gray-600"
                                                     }`}>
-                                                        {member.role === "owner" ? "Owner" : "Member"}
+                                                        {member.role === "owner" || member.role === "admin" ? "Project Admin" : "Member"}
                                                     </span>
                                                 </div>
-                                                {selectedProjectRole === "owner" && member.role === "member" && (
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon-sm"
-                                                        title="Remove member"
-                                                        disabled={removeMemberMutation.isPending}
-                                                        onClick={() => {
-                                                            if (confirm(`Remove ${member.user_email} from this project?`)) {
-                                                                removeMemberMutation.mutate({ projectId: projectDetail.id, email: member.user_email });
-                                                            }
-                                                        }}
-                                                        className="text-red-400 hover:text-red-600 shrink-0"
-                                                    >
-                                                        <X className="size-4" />
-                                                    </Button>
+                                                {canManage && member.role !== "owner" && (
+                                                    <div className="flex items-center gap-1 shrink-0">
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            disabled={changeMemberRoleMutation.isPending}
+                                                            onClick={() => {
+                                                                const message = member.role === "admin"
+                                                                    ? `Demote ${member.user_email} to Member? They will lose the ability to invite and manage members.`
+                                                                    : `Promote ${member.user_email} to Project Admin? They will be able to invite and remove members, change roles, and manage this project.`;
+                                                                if (confirm(message)) {
+                                                                    changeMemberRoleMutation.mutate({
+                                                                        projectId: projectDetail.id,
+                                                                        email: member.user_email,
+                                                                        role: member.role === "admin" ? "member" : "admin",
+                                                                    });
+                                                                }
+                                                            }}
+                                                            className="flex items-center gap-1 text-gray-400 hover:text-yellow-600 shrink-0 whitespace-nowrap"
+                                                        >
+                                                            <Shield className="size-3.5" />
+                                                            {member.role === "admin" ? "Demote to Member" : "Promote to Project Admin"}
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon-sm"
+                                                            title="Remove member"
+                                                            disabled={removeMemberMutation.isPending}
+                                                            onClick={() => {
+                                                                if (confirm(`Remove ${member.user_email} from this project?`)) {
+                                                                    removeMemberMutation.mutate({ projectId: projectDetail.id, email: member.user_email });
+                                                                }
+                                                            }}
+                                                            className="text-red-400 hover:text-red-600 shrink-0"
+                                                        >
+                                                            <X className="size-4" />
+                                                        </Button>
+                                                    </div>
                                                 )}
                                             </div>
                                         ))}
@@ -1514,7 +1586,29 @@ function KnowledgeBase() {
                                 <Button variant="outline" size="sm" onClick={() => setSelectedProjectId(null)}>
                                     Close
                                 </Button>
-                                {selectedProjectRole === "member" && (
+                                {canManage && projectDetail && (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="flex items-center gap-1"
+                                        onClick={() => {
+                                            setShareProject({
+                                                id: projectDetail.id,
+                                                name: projectDetail.name,
+                                                description: projectDetail.description,
+                                                document_count: projectDetail.documents.length,
+                                                created_at: projectDetail.created_at,
+                                            });
+                                            setInviteUrl(null);
+                                            setIsCopied(false);
+                                            setInviteRole("member");
+                                        }}
+                                    >
+                                        <Share2 className="size-4" />
+                                        Invite
+                                    </Button>
+                                )}
+                                {viewerRole !== "owner" && viewerRole != null && (
                                     <Button
                                         variant="destructive"
                                         size="sm"
