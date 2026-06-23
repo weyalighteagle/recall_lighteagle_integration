@@ -7,16 +7,27 @@ work together on this codebase. Read it once, keep it open when you're unsure.
 
 ## Table of contents
 
-1. [Branch strategy](#branch-strategy)
-2. [Starting a new task](#starting-a-new-task)
-3. [Commit messages](#commit-messages)
-4. [Opening a pull request](#opening-a-pull-request)
-5. [Code review rules](#code-review-rules)
-6. [Merging](#merging)
-7. [Releasing to production](#releasing-to-production)
-8. [Environment variables](#environment-variables)
-9. [CI pipeline](#ci-pipeline)
-10. [Knowledge graph (graphify)](#knowledge-graph-graphify)
+1. [Issue tracking](#issue-tracking)
+2. [Branch strategy](#branch-strategy)
+3. [Starting a new task](#starting-a-new-task)
+4. [Commit messages](#commit-messages)
+5. [Opening a pull request](#opening-a-pull-request)
+6. [Code review rules](#code-review-rules)
+7. [Merging](#merging)
+8. [Releasing to production](#releasing-to-production)
+9. [Environment variables](#environment-variables)
+10. [CI pipeline](#ci-pipeline)
+11. [Knowledge graph (graphify)](#knowledge-graph-graphify)
+
+---
+
+## Issue tracking
+
+We track all work in **[Linear](https://linear.app)** (the Light Eagle workspace).
+Every change starts from a Linear issue with an ID like `LIG-123` — that ID ties the
+branch, the PR, and the commit history back to the task and its context.
+
+If something needs doing and there's no issue for it yet, create one in Linear first.
 
 ---
 
@@ -28,37 +39,49 @@ We use a three-tier model. No one ever pushes directly to `main` or `develop`.
 |---|---|---|
 | `main` | Production — always stable, always deployable | Nobody directly. Only via PR from `develop` |
 | `develop` | Integration — reflects everything approved so far | Nobody directly. Only via PR from feature branches |
-| `feature/*` | Your individual work | You, on your own branch |
+| feature branches | Your individual work, one per Linear issue | You, on your own branch |
 
 ---
 
 ## Starting a new task
 
-Every task gets its own branch. Always branch off `develop`, never off `main`.
+Every task gets its own branch, and every branch maps to a Linear issue. Always
+branch off `develop`, never off `main`.
+
+Linear generates the branch name for you — open the issue and use **"Copy git branch
+name"** (or copy it from the issue's right-hand sidebar). It looks like
+`heval/lig-123-short-description`.
 
 ```bash
 # 1. Make sure your local develop is up to date
 git checkout develop
 git pull origin develop
 
-# 2. Create your branch — name it after the task
-git checkout -b feature/calendar-oauth-refresh
+# 2. Create your branch using the name Linear gave you
+git checkout -b heval/lig-123-calendar-oauth-refresh
 ```
+
+Moving the Linear issue to **In Progress** when you start (and letting the PR close it
+on merge) keeps the board accurate — Linear links the branch and PR automatically once
+the names match.
 
 ### Branch naming convention
 
-| Type | Pattern | Example |
-|---|---|---|
-| New feature | `feature/<short-description>` | `feature/calendar-oauth-refresh` |
-| Bug fix | `fix/<short-description>` | `fix/webhook-duplicate-key` |
-| Urgent production fix | `hotfix/<short-description>` | `hotfix/recall-api-timeout` |
-| Documentation only | `docs/<short-description>` | `docs/update-readme-setup` |
-| CI / tooling | `ci/<short-description>` | `ci/add-lint-step` |
+Use the name Linear provides. The shape is:
+
+```
+<your-name>/lig-<issue-number>-<short-description>
+```
+
+| Example | From |
+|---|---|
+| `heval/lig-75-project-admin-role-ui` | LIG-75 |
+| `gulfem/lig-79-kb-project-detail-scroll-fix` | LIG-79 |
 
 Rules:
 - Lowercase only, words separated by hyphens
-- Keep it short — 3 to 5 words max
-- No ticket numbers in the branch name (use the PR description for that)
+- Always include the Linear issue ID (`lig-<number>`) — this is what links the branch to the issue
+- Keep the description short — 3 to 5 words
 
 ---
 
@@ -132,9 +155,10 @@ Before requesting review, confirm:
 
 - [ ] The branch is targeting `develop`, not `main`
 - [ ] CI is passing (green checkmark on the PR)
-- [ ] You've tested the feature on your Vercel preview URL
+- [ ] The PR is linked to its Linear issue (use `LIG-123` in the title or description, or the auto-magic Linear link)
+- [ ] You've tested the change on the Railway staging deploy
 - [ ] The PR description explains **what** changed and **why**
-- [ ] No `.env` values or secrets are committed
+- [ ] No secrets are committed (config lives in Railway, never in the repo)
 
 ### PR description template
 
@@ -143,14 +167,17 @@ Before requesting review, confirm:
 [One or two sentences describing the change]
 
 ## Why
-[Context — what problem does this solve, or what task does it close?]
+[Context — what problem does this solve? Reference the Linear issue, e.g. LIG-123]
 
 ## How to test
 [Steps a reviewer can follow to verify the change works]
 
-## Preview URL
-[Your Vercel preview link — e.g. recall-lighteagle-git-feature-xyz.vercel.app]
+## Staging
+[How to verify on Railway staging once develop deploys]
 ```
+
+Including the `LIG-123` ID lets Linear link the PR to the issue and move it through
+the workflow automatically as the PR opens and merges.
 
 ---
 
@@ -164,7 +191,7 @@ Before requesting review, confirm:
 
 **For the reviewer:**
 - Review within 24 hours of being assigned
-- Test the Vercel preview URL — don't just read the diff
+- Pull the branch (or check the Railway staging deploy once merged to develop) — don't just read the diff
 - Be specific and constructive — "this could break X because Y" not just "I don't like this"
 - Approve only when you're genuinely happy with the change
 
@@ -190,15 +217,17 @@ Never use "Rebase and merge" — it rewrites history and makes `git blame` confu
 Production (`main`) only gets updated through a deliberate release PR.
 
 ```
-develop  →  PR  →  main  →  Vercel auto-deploys  +  Railway auto-deploys
+develop  →  Railway staging      (auto-deploys on every merge to develop)
+   │
+   └─ PR  →  main  →  Railway production   (auto-deploys on merge to main)
 ```
 
 Steps:
-1. Make sure `develop` is stable and all merged features have been tested on the develop preview URL
+1. Make sure `develop` is stable and all merged features have been tested on Railway staging
 2. Open a PR from `develop` → `main` titled `release: vX.Y.Z — <short summary>`
 3. The whole team reviews
 4. One approval + green CI → merge
-5. Vercel and Railway deploy automatically within ~1 minute
+5. Railway deploys `production` automatically within ~1 minute
 
 We don't do hotfixes directly to `main` unless it's a genuine production emergency.
 For emergencies: branch off `main` as `hotfix/description`, fix, PR directly to `main`,
@@ -208,15 +237,26 @@ then immediately merge `main` back into `develop` so the fix is not lost.
 
 ## Environment variables
 
-**Never commit `.env` to the repo.** It is in `.gitignore` and must stay there.
+**We don't use `.env` files anymore.** All configuration and secrets live in
+**Railway**, scoped per environment (`staging` and `production`). Nothing sensitive
+ever goes in the repo.
 
-- Copy `.env.sample` to `.env` when setting up locally
-- Fill in **staging** credentials for local development (never production keys locally)
-- Production secrets live in Vercel's environment variable settings (scoped to Production)
+- For local development, pull the staging values from Railway instead of keeping a
+  local `.env`:
+  ```bash
+  railway login
+  railway link                  # select the project, then the `staging` environment
+  railway run npm run dev       # runs with Railway-injected staging variables
+  ```
+- **Never** put production keys on your machine — `railway run` against `staging`
+  gives you everything you need locally.
 - If you need to add a new env variable:
-  1. Add it to `.env.sample` with a placeholder value and a comment explaining it
-  2. Add it to Vercel's environment variables (ask Heval if you don't have access)
-  3. Update the `src/api/config/env.ts` validation if the app validates env vars on startup
+  1. Add it in the Railway dashboard to **both** the `staging` and `production` services (ask Heval if you don't have access)
+  2. Add it to the Zod schema in `src/schemas/EnvSchema.ts` so startup validation stays in sync (`src/api/config/env.ts` parses against it on boot)
+  3. Document it in the README's environment-variables table
+
+See the README's [Deployment & Configuration](README.md#deployment--configuration)
+section for the full variable list.
 
 ---
 
