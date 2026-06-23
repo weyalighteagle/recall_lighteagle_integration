@@ -1408,7 +1408,7 @@ function KnowledgeBase() {
 
             {/* ── Project Detail Dialog ─────────────────────────────────────── */}
             <Dialog open={!!selectedProjectId} onOpenChange={(open) => { if (!open) { setSelectedProjectId(null); setSelectedProjectRole(null); setShowAddDocDialog(false); } }}>
-                <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+                <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
                     {isProjectDetailPending ? (
                         <div className="flex flex-col items-center justify-center py-12">
                             <Loader2 className="size-8 text-blue-500 mb-3 animate-spin" />
@@ -1428,6 +1428,7 @@ function KnowledgeBase() {
                                 )}
                             </DialogHeader>
 
+                            <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-4 -mx-1 px-1">
                             {/* Document list */}
                             <div className="flex flex-col gap-2">
                                 <div className="flex items-center justify-between">
@@ -1578,6 +1579,7 @@ function KnowledgeBase() {
                                         ))}
                                     </div>
                                 )}
+                            </div>
                             </div>
 
                             <DialogFooter>
