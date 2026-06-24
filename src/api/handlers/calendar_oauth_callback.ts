@@ -1,8 +1,22 @@
+import { timingSafeEqual } from "crypto";
 import { z } from "zod";
 import { CalendarSchema, type CalendarType } from "../../schemas/CalendarArtifactSchema";
 import { OAuthStateSchema } from "../../schemas/OAuthStateSchema";
 import { env } from "../config/env";
 import { calendars_list } from "./calendars_list";
+
+/**
+ * Constant-time comparison of the cookie nonce against the state nonce.
+ * Returns false for any missing value or length mismatch (length guarded before
+ * timingSafeEqual, which throws on unequal-length buffers).
+ */
+function nonces_match(cookie_nonce: string | undefined, state_nonce: string | undefined): boolean {
+    if (!cookie_nonce || !state_nonce) return false;
+    const a = Buffer.from(cookie_nonce);
+    const b = Buffer.from(state_nonce);
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
+}
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
 const CalendarConfigSchema = CalendarSchema.pick({
@@ -22,17 +36,27 @@ type CalendarConfigType = z.infer<typeof CalendarConfigSchema>;
 export async function calendar_oauth_callback(args: {
     code: string,
     state: string,
-}): Promise<{ calendar: CalendarType }> {
+    cookie_nonce?: string,
+}): Promise<{ ok: true, calendar: CalendarType } | { ok: false, reason: "csrf" }> {
     const {
         code: authorization_code,
         state: raw_state,
-    } = z.object({ code: z.string(), state: z.string() }).parse(args);
+        cookie_nonce,
+    } = z.object({ code: z.string(), state: z.string(), cookie_nonce: z.string().optional() }).parse(args);
 
-    const { platform } = OAuthStateSchema.parse(
+    const { platform, nonce: state_nonce } = OAuthStateSchema.parse(
         JSON.parse(
             Buffer.from(raw_state, "base64").toString("utf8"),
         ),
     );
+
+    // CSRF check: the nonce in `state` must match the one we bound to the browser
+    // via the httpOnly `oauth_state` cookie at authorize time (LIG-80). Missing cookie,
+    // missing/expired nonce, or any mismatch aborts before token exchange.
+    if (!nonces_match(cookie_nonce, state_nonce)) {
+        console.warn("OAuth callback CSRF check failed: cookie nonce does not match state nonce");
+        return { ok: false, reason: "csrf" };
+    }
 
     console.log(`Received authorization code: ${authorization_code} and state: ${raw_state}`);
 
@@ -85,7 +109,7 @@ export async function calendar_oauth_callback(args: {
         case undefined: {
             const result = await create_calendar(calendar_config);
             console.log(`Successfully created ${platform} Calendar: ${JSON.stringify(result)}`);
-            return { calendar: result };
+            return { ok: true, calendar: result };
         }
         // If the calendar is disconnected, reconnect it.
         case "disconnected": {
@@ -94,12 +118,13 @@ export async function calendar_oauth_callback(args: {
                 calendar_config,
             });
             console.log(`Successfully reconnected ${platform} Calendar: ${JSON.stringify(result)}`);
-            return { calendar: result };
+            return { ok: true, calendar: result };
         }
         // If the calendar is connecting or connected, return the calendar.
         default: {
             console.log(`${platform} Calendar already exists and is ${latest_status}`);
             return {
+                ok: true,
                 calendar: {
                     ...calendar!,
                     platform_email: calendar!.platform_email || calendar_config.platform_email,
