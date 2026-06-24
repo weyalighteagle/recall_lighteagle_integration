@@ -11,7 +11,7 @@ export async function calendars_delete(args: { calendar_id: string }): Promise<v
     const response = await fetch(url.toString(), {
         method: "DELETE",
         headers: { 
-            "Authorization": `${env.RECALL_API_KEY}`,
+            "Authorization": `Token ${env.RECALL_API_KEY}`,
             "Content-Type": "application/json",
         },
     });

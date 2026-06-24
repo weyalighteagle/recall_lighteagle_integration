@@ -130,7 +130,7 @@ export async function handleTranscriptWebhook(
       // Fetch the transcript object to determine the provider (recallai_streaming vs assembly_ai_async)
       const transcriptRes = await fetch(
         `https://${recallRegion}.recall.ai/api/v1/transcript/${transcriptId}/`,
-        { headers: { Authorization: `${recallApiKey}`, "Content-Type": "application/json" } },
+        { headers: { Authorization: `Token ${recallApiKey}`, "Content-Type": "application/json" } },
       );
 
       if (!transcriptRes.ok) {

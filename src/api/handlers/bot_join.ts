@@ -119,7 +119,7 @@ export async function bot_join(args: {
         {
             method: "POST",
             headers: {
-                "Authorization": `${env.RECALL_API_KEY}`,
+                "Authorization": `Token ${env.RECALL_API_KEY}`,
                 "Content-Type": "application/json",
             },
             body: JSON.stringify(payload),
