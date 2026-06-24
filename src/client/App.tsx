@@ -42,6 +42,15 @@ import { useToggleRecording } from "./hooks/use-toggle-recording";
 import { toast } from "sonner";
 import { parseApiError } from "./lib/parseApiError";
 
+// The calendar OAuth flow must start directly on the Railway backend domain (not the
+// relative /api proxy through Vercel), so the httpOnly CSRF nonce cookie set at authorize
+// is readable on the Railway callback (LIG-80). Host comes from a build-time Vite var.
+const RAILWAY_API_URL = import.meta.env.VITE_RAILWAY_API_URL;
+function calendarOauthUrl(platform: "google_calendar" | "microsoft_outlook"): string {
+    if (!RAILWAY_API_URL) throw new Error("Missing VITE_RAILWAY_API_URL");
+    return `${RAILWAY_API_URL}/api/calendar/oauth?platform=${platform}`;
+}
+
 function App() {
     const { isLoaded } = useAuth();
     const { user } = useUser();
@@ -99,8 +108,7 @@ function ConnectCalendar() {
                     className="flex-1"
                     variant="outline"
                     onClick={() => {
-                        window.location.href =
-                            "/api/calendar/oauth?platform=google_calendar";
+                        window.location.href = calendarOauthUrl("google_calendar");
                     }}
                 >
                     Connect Google
@@ -109,8 +117,7 @@ function ConnectCalendar() {
                     className="flex-1"
                     variant="outline"
                     onClick={() => {
-                        window.location.href =
-                            "/api/calendar/oauth?platform=microsoft_outlook";
+                        window.location.href = calendarOauthUrl("microsoft_outlook");
                     }}
                 >
                     Connect Outlook
@@ -278,8 +285,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                             <Button
                                 variant="outline"
                                 onClick={() => {
-                                    window.location.href =
-                                        "/api/calendar/oauth?platform=google_calendar";
+                                    window.location.href = calendarOauthUrl("google_calendar");
                                 }}
                             >
                                 Connect Google Calendar
@@ -287,8 +293,7 @@ function CalendarList({ calendars }: { calendars: CalendarType[] }) {
                             <Button
                                 variant="outline"
                                 onClick={() => {
-                                    window.location.href =
-                                        "/api/calendar/oauth?platform=microsoft_outlook";
+                                    window.location.href = calendarOauthUrl("microsoft_outlook");
                                 }}
                             >
                                 Connect Microsoft Outlook
