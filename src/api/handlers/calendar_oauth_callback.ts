@@ -230,7 +230,7 @@ async function create_calendar(args: CalendarConfigType) {
     const response = await fetch(`https://${env.RECALL_REGION}.recall.ai/api/v2/calendars`, {
         method: "POST",
         headers: {
-            "Authorization": `${env.RECALL_API_KEY}`,
+            "Authorization": `Token ${env.RECALL_API_KEY}`,
             "Content-Type": "application/json",
         },
         body: JSON.stringify(calendar_config),
@@ -256,7 +256,7 @@ async function reconnect_calendar(args: {
     const response = await fetch(`https://${env.RECALL_REGION}.recall.ai/api/v2/calendars/${calendar_id}`, {
         method: "PATCH",
         headers: {
-            "Authorization": `${env.RECALL_API_KEY}`,
+            "Authorization": `Token ${env.RECALL_API_KEY}`,
             "Content-Type": "application/json",
         },
         body: JSON.stringify(calendar_config),
