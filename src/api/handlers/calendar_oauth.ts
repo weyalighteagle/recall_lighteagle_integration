@@ -1,17 +1,25 @@
+import { randomBytes } from "crypto";
 import { z } from "zod";
 import { OAuthStateSchema, type OAuthStateType } from "../../schemas/OAuthStateSchema";
 import { env } from "../config/env";
 
 /**
  * Generate an OAuth URL for the user to authorize their calendar.
+ *
+ * Also returns the random CSRF nonce embedded in the state. The router binds this
+ * nonce to the browser by setting an httpOnly `oauth_state` cookie alongside the 302,
+ * and the callback verifies the cookie matches the nonce decoded from `state` (LIG-80).
  */
 export async function calendar_oauth(args: {
     platform: OAuthStateType["platform"],
-}): Promise<{ oauth_url: URL }> {
+}): Promise<{ oauth_url: URL, state_nonce: string }> {
     const { platform } = z.object({ platform: OAuthStateSchema.shape.platform }).parse(args);
 
+    // Fresh, unguessable nonce per authorize request.
+    const nonce = randomBytes(32).toString("base64url");
     const state = OAuthStateSchema.parse({
         platform,
+        nonce,
     } satisfies OAuthStateType);
 
     switch (platform) {
@@ -19,13 +27,13 @@ export async function calendar_oauth(args: {
             console.log("Generating Google Calendar OAuth URL");
             const oauth_url = generate_google_calendar_oauth_url({ state });
             console.log(`Successfully generated Google Calendar OAuth URL: ${oauth_url}`);
-            return { oauth_url };
+            return { oauth_url, state_nonce: nonce };
         }
         case "microsoft_outlook": {
             console.log("Generating Outlook Calendar OAuth URL");
             const oauth_url = generate_outlook_calendar_oauth_url({ state });
             console.log(`Successfully generated Outlook Calendar OAuth URL: ${oauth_url}`);
-            return { oauth_url };
+            return { oauth_url, state_nonce: nonce };
         }
         default: {
             throw new Error("No calendar platform provided");

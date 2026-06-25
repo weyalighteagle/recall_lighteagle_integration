@@ -340,7 +340,7 @@ async function handleBotDone(body: any): Promise<void> {
       {
         method: "GET",
         headers: {
-          Authorization: `${env.RECALL_API_KEY}`,
+          Authorization: `Token ${env.RECALL_API_KEY}`,
           "Content-Type": "application/json",
         },
       },
@@ -929,7 +929,7 @@ async function handleMeetingMetadataDone(body: any): Promise<void> {
       `https://${env.RECALL_REGION}.recall.ai/api/v1/meeting_metadata/${metadataId}/`,
       {
         headers: {
-          Authorization: `${env.RECALL_API_KEY}`,
+          Authorization: `Token ${env.RECALL_API_KEY}`,
           "Content-Type": "application/json",
         },
       },
@@ -1018,7 +1018,7 @@ async function handleRecordingDone(body: any): Promise<void> {
       {
         method: "POST",
         headers: {
-          Authorization: `${env.RECALL_API_KEY}`,
+          Authorization: `Token ${env.RECALL_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -1358,7 +1358,7 @@ export async function schedule_bot_for_calendar_event(args: {
       {
         method: "POST",
         headers: {
-          Authorization: `${env.RECALL_API_KEY}`,
+          Authorization: `Token ${env.RECALL_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -1388,7 +1388,7 @@ export async function schedule_bot_for_calendar_event(args: {
       {
         method: "PATCH",
         headers: {
-          Authorization: `${env.RECALL_API_KEY}`,
+          Authorization: `Token ${env.RECALL_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

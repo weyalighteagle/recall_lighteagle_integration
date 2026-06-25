@@ -32,6 +32,25 @@ dotenv.config();
 const server = http.createServer();
 const client_domain = process.env.CLIENT_DOMAIN || "http://localhost:5173";
 
+// Cookie attributes for the OAuth CSRF nonce (LIG-80). SameSite=Lax (not Strict) so the
+// cookie survives Google's/Microsoft's top-level GET redirect back to the callback.
+const OAUTH_STATE_COOKIE = "oauth_state";
+const OAUTH_COOKIE_SET = (nonce: string) => `${OAUTH_STATE_COOKIE}=${nonce}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=600`;
+const OAUTH_COOKIE_CLEAR = `${OAUTH_STATE_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+
+/**
+ * Parse a single cookie value out of the raw Cookie header without adding a dependency.
+ */
+function parse_cookie(cookie_header: string | undefined, name: string): string | undefined {
+    if (!cookie_header) return undefined;
+    for (const part of cookie_header.split(";")) {
+        const eq = part.indexOf("=");
+        if (eq === -1) continue;
+        if (part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
+    }
+    return undefined;
+}
+
 /**
  * HTTP server for handling HTTP requests from Recall.ai
  */
@@ -80,18 +99,37 @@ body=${JSON.stringify(body)}
                 const calendar_oauth_url = await calendar_oauth(search_params);
                 console.log(`Created Calendar OAuth URL: ${calendar_oauth_url.oauth_url.toString()}`);
 
-                // redirect to the Calendar OAuth URL
-                res.writeHead(302, { Location: calendar_oauth_url.oauth_url.toString() });
+                // Redirect to the Calendar OAuth URL and bind the CSRF nonce to the browser
+                // via an httpOnly cookie, verified on the callback (LIG-80).
+                res.writeHead(302, {
+                    "Location": calendar_oauth_url.oauth_url.toString(),
+                    "Set-Cookie": OAUTH_COOKIE_SET(calendar_oauth_url.state_nonce),
+                });
                 res.end();
                 return;
             }
             case "/api/calendar/oauth/callback": {
                 if (req.method?.toUpperCase() !== "GET") throw new Error(`Method not allowed: ${req.method}`);
 
-                const { calendar } = await calendar_oauth_callback(search_params);
-                console.log(`Created Calendar: ${JSON.stringify(calendar)}`);
+                const cookie_nonce = parse_cookie(req.headers.cookie, OAUTH_STATE_COOKIE);
+                const result = await calendar_oauth_callback({ ...search_params, cookie_nonce });
 
-                res.writeHead(302, { Location: `${client_domain}/dashboard/calendar` });
+                // One-time use: clear the nonce cookie on both success and failure.
+                if (!result.ok) {
+                    console.warn(`Calendar OAuth callback rejected: ${result.reason}`);
+                    res.writeHead(302, {
+                        "Location": `${client_domain}/dashboard/calendar?error=oauth_state`,
+                        "Set-Cookie": OAUTH_COOKIE_CLEAR,
+                    });
+                    res.end();
+                    return;
+                }
+
+                console.log(`Created Calendar: ${JSON.stringify(result.calendar)}`);
+                res.writeHead(302, {
+                    "Location": `${client_domain}/dashboard/calendar`,
+                    "Set-Cookie": OAUTH_COOKIE_CLEAR,
+                });
                 res.end();
                 return;
             }
