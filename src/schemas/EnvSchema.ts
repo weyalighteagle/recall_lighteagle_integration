@@ -6,6 +6,19 @@ export const EnvSchema = z.object({
     RAILWAY_DOMAIN: z.string(),
     RECALL_API_KEY: z.string(),
 
+    // Recall webhook signature verification (LIG-81).
+    // All optional so a missing secret never crashes boot — monitor mode handles it.
+    // Workspace Verification Secret from Recall (Svix-style, starts with whsec_).
+    RECALL_WEBHOOK_SECRET: z.string().optional(),
+    // Reserved for the legacy Recall dashboard webhook endpoint; may be unset.
+    RECALL_SVIX_WEBHOOK_SECRET: z.string().optional(),
+    // Monitor mode by default. Only the literal "true" enables enforcement;
+    // anything else (including "false" and unset) stays in monitor mode.
+    RECALL_WEBHOOK_ENFORCE: z
+        .string()
+        .optional()
+        .transform((v) => v === "true"),
+
     GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
     GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
     GOOGLE_OAUTH_REDIRECT_URI: z.string().optional(),

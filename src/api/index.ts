@@ -26,6 +26,7 @@ import { getSharedProjects, getProjectMembers, removeMember, changeMemberRole, l
 import { assertProjectAccess } from "./helpers/projectAccess";
 import { supabase } from "./config/supabase";
 import { requireAuth } from "./middleware/auth";
+import { verifyRecallRequest } from "./lib/verifyRecallRequest";
 
 dotenv.config();
 
@@ -51,6 +52,19 @@ function parse_cookie(cookie_header: string | undefined, name: string): string |
     return undefined;
 }
 
+// Recall webhook verify-log throttle (LIG-81): transcript.data fires constantly, so a
+// "pass" log on every event would flood the logs. Log a pass at most once per
+// route+event key per window. Non-pass outcomes are always logged (never throttled).
+const RECALL_VERIFY_LOG_THROTTLE_MS = 30_000;
+const recall_verify_last_log = new Map<string, number>();
+function should_log_recall_verify_pass(key: string): boolean {
+    const now = Date.now();
+    const last = recall_verify_last_log.get(key) ?? 0;
+    if (now - last < RECALL_VERIFY_LOG_THROTTLE_MS) return false;
+    recall_verify_last_log.set(key, now);
+    return true;
+}
+
 /**
  * HTTP server for handling HTTP requests from Recall.ai
  */
@@ -61,13 +75,17 @@ server.on("request", async (req, res) => {
         const pathname = url.pathname.at(-1) === "/" ? url.pathname.slice(0, -1) : url.pathname;
         const search_params = Object.fromEntries(url.searchParams.entries()) as any;
         let body: any | null = null;
+        // raw_body is hoisted out of the try so webhook signature verification (LIG-81)
+        // can hash the EXACT received bytes. It is assigned before JSON.parse, so even a
+        // malformed body still yields the raw bytes for verification.
+        let raw_body = "";
         try {
             if (["POST", "PUT", "PATCH", "DELETE"].includes(req.method!)) {
                 const body_chunks: Buffer[] = [];
                 for await (const chunk of req) {
                     body_chunks.push(chunk);
                 }
-                const raw_body = Buffer.concat(body_chunks).toString("utf-8");
+                raw_body = Buffer.concat(body_chunks).toString("utf-8");
                 if (raw_body.trim()) body = JSON.parse(raw_body);
             }
         } catch (error) {
@@ -89,6 +107,71 @@ body=${JSON.stringify(body)}
             });
             res.end();
             return;
+        }
+
+        // ── Recall webhook signature verification (LIG-81) ────────────────────────
+        // Monitor mode by default: verify Recall's Svix-style signature on the two
+        // Recall routes and log the outcome, but ALWAYS continue to dispatch. Enabling
+        // RECALL_WEBHOOK_ENFORCE upgrades this to reject bad/unsigned requests with 401
+        // — an env change only, no code change. Non-Recall routes are never touched.
+        if (
+            req.method?.toUpperCase() === "POST" &&
+            (pathname === "/api/recall/webhook" || pathname === "/api/webhooks/transcript")
+        ) {
+            const secrets = [
+                { name: "RECALL_WEBHOOK_SECRET", value: env.RECALL_WEBHOOK_SECRET },
+                { name: "RECALL_SVIX_WEBHOOK_SECRET", value: env.RECALL_SVIX_WEBHOOK_SECRET },
+            ].filter(
+                (s): s is { name: string; value: string } =>
+                    !!s.value && s.value.trim() !== "",
+            );
+
+            const verify = verifyRecallRequest({ rawBody: raw_body, headers: req.headers, secrets });
+            const event: string = body?.event ?? "unknown";
+            const enforce = env.RECALL_WEBHOOK_ENFORCE;
+
+            if (verify.reason === "pass") {
+                // Throttle the high-volume transcript.data pass logs; log other events' passes normally.
+                if (event !== "transcript.data" || should_log_recall_verify_pass(`${pathname}:${event}`)) {
+                    console.log(JSON.stringify({
+                        tag: "recall_webhook_verify",
+                        route: pathname,
+                        event,
+                        reason: verify.reason,
+                        matched: verify.matched,
+                        enforce,
+                    }));
+                }
+            } else {
+                console.warn(JSON.stringify({
+                    tag: "recall_webhook_verify",
+                    route: pathname,
+                    event,
+                    reason: verify.reason,
+                    enforce,
+                }));
+            }
+
+            // Operator misconfiguration: enforcement requested but no secret configured.
+            // FAIL OPEN so a missing secret never blackholes production — just log loudly.
+            if (verify.reason === "no_secret" && enforce) {
+                console.error(JSON.stringify({
+                    tag: "recall_webhook_verify",
+                    route: pathname,
+                    event,
+                    reason: "no_secret",
+                    enforce,
+                    message: "RECALL_WEBHOOK_ENFORCE is on but no secret is configured — failing open",
+                }));
+            }
+
+            // Enforcement: reject only genuinely bad/unsigned requests, and only when a
+            // secret is actually configured (no_secret fails open above; pass continues).
+            if (enforce && (verify.reason === "invalid" || verify.reason === "missing_headers")) {
+                res.writeHead(401, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ error: "Invalid webhook signature" }));
+                return;
+            }
         }
 
         switch (pathname) {
