@@ -29,6 +29,7 @@ export const EnvSchema = z.object({
 
     SUPABASE_URL: z.string(),
     SUPABASE_SERVICE_KEY: z.string(),
+    SUPABASE_ANON_KEY: z.string(),
 
     // Voice Agent configuration
     VOICE_AGENT_PAGE_URL: z.string().optional(),

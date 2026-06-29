@@ -52,6 +52,7 @@ export async function requireAuth(
 
         (req as any).userEmail = user.emailAddresses[0]?.emailAddress;
         (req as any).userId = userId;
+        (req as any).userJwt = token;
 
         return true;
     } catch (error) {

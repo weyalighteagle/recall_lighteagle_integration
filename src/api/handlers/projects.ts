@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { supabase } from "../config/supabase";
+import { supabaseAdmin as supabase } from "../config/supabase";
 import { assertProjectAccess } from "../helpers/projectAccess";
 
 // ─── Types ───────────────────────────────────────────────────

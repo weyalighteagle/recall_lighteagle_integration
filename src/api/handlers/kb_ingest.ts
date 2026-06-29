@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { supabase } from "../config/supabase";
+import { supabaseAdmin as supabase } from "../config/supabase";
 import { chunkText, createEmbeddings } from "./knowledge_base";
 
 /**

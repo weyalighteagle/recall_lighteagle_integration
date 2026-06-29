@@ -1,5 +1,5 @@
 import { env } from "../config/env";
-import { supabase } from "../config/supabase";
+import { supabaseAdmin as supabase } from "../config/supabase";
 
 const SYSTEM_PROMPT = `You are a transcript cleaner for a multilingual software team.
 The team primarily speaks Turkish and English but meetings can be in any language.

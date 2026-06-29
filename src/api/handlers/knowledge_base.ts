@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { supabase } from "../config/supabase";
+import { supabaseAdmin as supabase } from "../config/supabase";
 import { env } from "../config/env";
 import { createHash } from "crypto";
 

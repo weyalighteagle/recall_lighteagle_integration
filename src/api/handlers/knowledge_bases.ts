@@ -1,4 +1,4 @@
-import { supabase } from "../config/supabase";
+import { supabaseAdmin as supabase } from "../config/supabase";
 
 export async function knowledge_bases_list() {
     const { data, error } = await supabase

@@ -24,7 +24,7 @@ import { project_list, project_create, project_get, project_update, project_dele
 import { createInvite, getInvitation, acceptInvitation } from "./handlers/invitations";
 import { getSharedProjects, getProjectMembers, removeMember, changeMemberRole, leaveProject } from "./handlers/projectMembers";
 import { assertProjectAccess } from "./helpers/projectAccess";
-import { supabase } from "./config/supabase";
+import { supabaseAdmin, supabaseForUser } from "./config/supabase";
 import { requireAuth } from "./middleware/auth";
 import { verifyRecallRequest } from "./lib/verifyRecallRequest";
 
@@ -514,7 +514,7 @@ body=${JSON.stringify(body)}
                         const calendar = await calendar_retrieve({ calendar_id: calendar_event.calendar_id });
                         if (!calendar) throw new Error("Calendar not found");
 
-                        const mpResult = await supabase
+                        const mpResult = await supabaseAdmin
                             .from("meeting_projects")
                             .select("project_id")
                             .eq("calendar_event_id", calendar_event.id)
@@ -570,7 +570,7 @@ body=${JSON.stringify(body)}
                         res.end(JSON.stringify({ error: "calendar_event_id required" }));
                         return;
                     }
-                    const { data } = await supabase
+                    const { data } = await supabaseForUser((req as any).userJwt)
                         .from("calendar_event_tags")
                         .select("tag_ids")
                         .eq("calendar_event_id", cal_event_id)
@@ -589,7 +589,7 @@ body=${JSON.stringify(body)}
                     return;
                 }
 
-                const { error: calTagErr } = await supabase
+                const { error: calTagErr } = await supabaseForUser((req as any).userJwt)
                     .from("calendar_event_tags")
                     .upsert({ calendar_event_id: cal_evt_id, tag_ids: cal_tag_ids ?? [] });
 
@@ -621,7 +621,7 @@ body=${JSON.stringify(body)}
                         res.end(JSON.stringify({ error: "token is required" }));
                         return;
                     }
-                    const { data: meeting } = await supabase
+                    const { data: meeting } = await supabaseAdmin
                         .from("meetings")
                         .select("bot_id")
                         .eq("meeting_token", token)
@@ -868,7 +868,7 @@ body=${JSON.stringify(body)}
 
                 // GET /api/transcripts — all meetings
                 if (pathname === "/api/transcripts" && req.method?.toUpperCase() === "GET") {
-                    const { data } = await supabase
+                    const { data } = await supabaseAdmin
                         .from("meetings")
                         .select("bot_id, bot_type, meeting_url, done, created_at")
                         .order("created_at", { ascending: false });

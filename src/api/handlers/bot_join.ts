@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { env } from "../config/env";
-import { supabase } from "../config/supabase";
+import { supabaseAdmin as supabase } from "../config/supabase";
 import { bot_settings_get } from "./bot_settings.js";
 import { meeting_tags_set } from "./knowledge_base.js";
 
