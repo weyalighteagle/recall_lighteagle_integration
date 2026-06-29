@@ -1,4 +1,4 @@
-import { supabase } from "../config/supabase";
+import { supabaseAdmin as supabase } from "../config/supabase";
 
 export type ProjectRole = "owner" | "admin" | "member";
 

@@ -32,7 +32,7 @@ if (!RECALL_API_KEY) throw new Error("RECALL_API_KEY is not set");
 if (!SUPABASE_URL) throw new Error("SUPABASE_URL is not set");
 if (!SUPABASE_SERVICE_KEY) throw new Error("SUPABASE_SERVICE_KEY is not set");
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 const BASE_URL = `https://${RECALL_REGION}.recall.ai/api/v2`;
 const HEADERS = { Authorization: RECALL_API_KEY, "Content-Type": "application/json" };
 
@@ -122,7 +122,7 @@ async function main() {
 
     // 3. Fetch all meeting rows that still have user_email = NULL
     console.log("Fetching meetings with user_email = NULL from Supabase...");
-    const { data: nullRows, error: fetchErr } = await supabase
+    const { data: nullRows, error: fetchErr } = await supabaseAdmin
         .from("meetings")
         .select("bot_id")
         .is("user_email", null);
@@ -155,7 +155,7 @@ async function main() {
             const CHUNK = 100;
             for (let i = 0; i < toUpdate.length; i += CHUNK) {
                 const chunk = toUpdate.slice(i, i + CHUNK);
-                const { error: updateErr } = await supabase
+                const { error: updateErr } = await supabaseAdmin
                     .from("meetings")
                     .update({ user_email: email })
                     .in("bot_id", chunk)
@@ -182,7 +182,7 @@ async function main() {
 
     // Identify bot_ids that appear in Recall events but have NO row in meetings table
     const allDbBotIds = new Set<string>();
-    const { data: allDbRows } = await supabase.from("meetings").select("bot_id");
+    const { data: allDbRows } = await supabaseAdmin.from("meetings").select("bot_id");
     for (const r of allDbRows ?? []) allDbBotIds.add((r as { bot_id: string }).bot_id);
 
     for (const botId of botOwner.keys()) {

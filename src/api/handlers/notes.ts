@@ -1,4 +1,4 @@
-import { supabase } from "../config/supabase";
+import { supabaseAdmin as supabase } from "../config/supabase";
 import { calendars_list } from "./calendars_list";
 import { calendar_events_list } from "./calendar_events_list";
 import { handleGetTranscript } from "./transcript_webhook";

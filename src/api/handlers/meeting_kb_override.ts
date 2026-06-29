@@ -1,4 +1,4 @@
-import { supabase } from "../config/supabase";
+import { supabaseAdmin as supabase } from "../config/supabase";
 
 /** GET /api/meeting-kb/:calendarEventId — returns override or null */
 export async function meeting_kb_get(calendar_event_id: string): Promise<{ kb_document_id: string | null }> {

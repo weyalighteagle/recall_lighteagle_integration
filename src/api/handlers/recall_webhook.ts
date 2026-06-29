@@ -12,7 +12,7 @@ import { CalendarSyncEventsEventSchema } from "../../schemas/CalendarSyncEventsE
 import { CalendarUpdateEventSchema } from "../../schemas/CalendarUpdateEventSchema";
 import { env } from "../config/env";
 import { fetch_with_retry } from "../fetch_with_retry";
-import { supabase } from "../config/supabase";
+import { supabaseAdmin as supabase } from "../config/supabase";
 import { handleTranscriptWebhook } from "./transcript_webhook";
 import { bot_settings_get } from "./bot_settings";
 import { cleanTranscript } from "../lib/cleanTranscript";

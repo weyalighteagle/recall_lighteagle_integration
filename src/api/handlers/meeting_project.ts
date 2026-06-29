@@ -1,4 +1,4 @@
-import { supabase } from "../config/supabase";
+import { supabaseAdmin as supabase } from "../config/supabase";
 import { assertProjectAccess } from "../helpers/projectAccess";
 
 /** PUT /api/meeting-project — assign a meeting to a project (upsert) */

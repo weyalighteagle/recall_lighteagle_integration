@@ -1,4 +1,4 @@
-import { supabase } from "../config/supabase";
+import { supabaseAdmin as supabase } from "../config/supabase";
 import { assertProjectAccess } from "../helpers/projectAccess";
 
 /** GET /api/projects/shared — projects where the caller is a member (not owner) */
