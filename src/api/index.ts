@@ -310,15 +310,19 @@ body=${JSON.stringify(body)}
                         return;
                     }
                     case "DELETE": {
+                        if (!await requireAuth(req, res)) return;
+                        const userEmail: string = (req as any).userEmail;
                         if (!search_params.id) throw new Error("id is required");
-                        await kb_delete({ id: search_params.id });
+                        await kb_delete({ id: search_params.id }, userEmail);
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify({ message: "Document deleted" }));
                         return;
                     }
                     case "PATCH": {
+                        if (!await requireAuth(req, res)) return;
+                        const userEmail: string = (req as any).userEmail;
                         if (!search_params.id) throw new Error("id is required");
-                        await kb_toggle({ id: search_params.id, is_active: body?.is_active ?? true });
+                        await kb_toggle({ id: search_params.id, is_active: body?.is_active ?? true }, userEmail);
                         res.writeHead(200, { "Content-Type": "application/json" });
                         res.end(JSON.stringify({ message: "Document updated" }));
                         return;
@@ -753,7 +757,9 @@ body=${JSON.stringify(body)}
 
                     switch (req.method?.toUpperCase()) {
                         case "GET": {
-                            const doc = await kb_get({ id: docId });
+                            if (!await requireAuth(req, res)) return;
+                            const userEmail: string = (req as any).userEmail;
+                            const doc = await kb_get({ id: docId }, userEmail);
                             res.writeHead(200, {
                                 "Content-Type": "application/json",
                                 "Access-Control-Allow-Origin": "*",
@@ -762,10 +768,12 @@ body=${JSON.stringify(body)}
                             return;
                         }
                         case "PUT": {
+                            if (!await requireAuth(req, res)) return;
+                            const userEmail: string = (req as any).userEmail;
                             if (!body?.title || !body?.content || !body?.category) {
                                 throw new Error("title, category, and content are required");
                             }
-                            const result = await kb_update({ id: docId, ...body });
+                            const result = await kb_update({ id: docId, ...body }, userEmail);
                             res.writeHead(200, {
                                 "Content-Type": "application/json",
                                 "Access-Control-Allow-Origin": "*",
