@@ -85,6 +85,27 @@ async function syncChunkTagIds(documentId: string): Promise<void> {
     if (error) throw new Error(`syncChunkTagIds: ${error.message}`);
 }
 
+// Ownership guard for single-document routes (kb_get/kb_delete/kb_toggle/kb_update).
+// Mirrors assertProjectAccess's shape (throw Error w/ statusCode, caught by the
+// generic handler in index.ts) but checks kb_documents.owner_user_id directly —
+// kb_documents has no project_id / kb_projects link, so assertProjectAccess
+// does not apply here. See kb_list's existing .eq("owner_user_id", userEmail) filter.
+async function assertKbDocumentOwner(id: string, userEmail: string): Promise<void> {
+    const { data, error } = await supabase
+        .from("kb_documents")
+        .select("id")
+        .eq("id", id)
+        .eq("owner_user_id", userEmail)
+        .maybeSingle();
+
+    if (error) throw new Error(error.message);
+    if (!data) {
+        const e = new Error("Document not found");
+        (e as any).statusCode = 404; // eslint-disable-line @typescript-eslint/no-explicit-any
+        throw e;
+    }
+}
+
 function slugify(name: string): string {
     return name
         .toLowerCase()
@@ -294,19 +315,21 @@ export async function kb_create(body: {
 }
 
 /** DELETE /api/kb?id=xxx — doküman sil */
-export async function kb_delete(args: { id: string }): Promise<void> {
+export async function kb_delete(args: { id: string }, userEmail: string): Promise<void> {
     const { id } = z.object({ id: z.string().uuid() }).parse(args);
+    await assertKbDocumentOwner(id, userEmail);
     const { error } = await supabase.from("kb_documents").delete().eq("id", id);
     if (error) throw new Error(error.message);
     console.log(`[kb] Deleted document ${id}`);
 }
 
 /** PATCH /api/kb?id=xxx — aktif/pasif toggle */
-export async function kb_toggle(args: { id: string; is_active: boolean }): Promise<void> {
+export async function kb_toggle(args: { id: string; is_active: boolean }, userEmail: string): Promise<void> {
     const { id, is_active } = z.object({
         id: z.string().uuid(),
         is_active: z.boolean(),
     }).parse(args);
+    await assertKbDocumentOwner(id, userEmail);
     const { error } = await supabase
         .from("kb_documents")
         .update({ is_active })
@@ -324,7 +347,7 @@ export async function kb_toggle(args: { id: string; is_active: boolean }): Promi
 }
 
 /** GET /api/kb/:id — single document with full content reconstructed from chunks */
-export async function kb_get(args: { id: string }): Promise<{
+export async function kb_get(args: { id: string }, userEmail: string): Promise<{
     id: string;
     title: string;
     category: string;
@@ -334,6 +357,8 @@ export async function kb_get(args: { id: string }): Promise<{
     created_at: string;
 }> {
     const { id } = z.object({ id: z.string().uuid() }).parse(args);
+
+    await assertKbDocumentOwner(id, userEmail);
 
     const { data: doc, error: docErr } = await supabase
         .from("kb_documents")
@@ -373,13 +398,15 @@ export async function kb_update(args: {
     title: string;
     category: string;
     content: string;
-}): Promise<{ document_id: string; chunks: number }> {
+}, userEmail: string): Promise<{ document_id: string; chunks: number }> {
     const { id, title, category, content } = z.object({
         id: z.string().uuid(),
         title: z.string().min(1),
         category: z.string().min(1),
         content: z.string().min(1),
     }).parse(args);
+
+    await assertKbDocumentOwner(id, userEmail);
 
     const { data: existingDoc, error: existErr } = await supabase
         .from("kb_documents")
