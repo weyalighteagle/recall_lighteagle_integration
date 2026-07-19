@@ -287,7 +287,10 @@ function KnowledgeBase() {
     const { data: fullDoc, isPending: isLoadingDoc } = useQuery<KBDocumentFull>({
         queryKey: ["kb_document", selectedDocId],
         queryFn: async () => {
-            const res = await fetch(`/api/kb/${selectedDocId}`);
+            const token = await getToken();
+            const res = await fetch(`/api/kb/${selectedDocId}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
             if (!res.ok) {
                 const errText = await res.text();
                 throw new Error(parseApiError(errText));
@@ -619,9 +622,13 @@ function KnowledgeBase() {
 
     const createMutation = useMutation({
         mutationFn: async () => {
+            const token = await getToken();
             const res = await fetch("/api/kb", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                },
                 body: JSON.stringify({ title, category, content, tag_ids: [] }),
             });
             if (!res.ok) {
@@ -643,9 +650,13 @@ function KnowledgeBase() {
     const updateMutation = useMutation({
         mutationFn: async () => {
             if (!selectedDocId) throw new Error("No document selected");
+            const token = await getToken();
             const res = await fetch(`/api/kb/${selectedDocId}`, {
                 method: "PUT",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                },
                 body: JSON.stringify({ title: editTitle, category: editCategory, content: editContent }),
             });
             if (!res.ok) {
@@ -665,7 +676,11 @@ function KnowledgeBase() {
 
     const deleteMutation = useMutation({
         mutationFn: async (id: string) => {
-            const res = await fetch(`/api/kb?id=${id}`, { method: "DELETE" });
+            const token = await getToken();
+            const res = await fetch(`/api/kb?id=${id}`, {
+                method: "DELETE",
+                headers: { Authorization: `Bearer ${token}` },
+            });
             if (!res.ok) {
                 const errText = await res.text();
                 throw new Error(parseApiError(errText));
@@ -677,9 +692,13 @@ function KnowledgeBase() {
 
     const toggleMutation = useMutation({
         mutationFn: async ({ id, is_active }: { id: string; is_active: boolean }) => {
+            const token = await getToken();
             const res = await fetch(`/api/kb?id=${id}`, {
                 method: "PATCH",
-                headers: { "Content-Type": "application/json" },
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                },
                 body: JSON.stringify({ is_active }),
             });
             if (!res.ok) {
